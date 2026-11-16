@@ -178,6 +178,17 @@ export function guarded(label, fn, onError) {
   };
 }
 
+// A window (HUD or panel) made non-focusable again after the user typed into it; if it held the focus,
+// it gives it back (blur activates the window underneath). A window that is not focusable (it never
+// took the focus: the panel hidden after an Allow, Deny or ✕) is left alone: on Windows SetFocusable
+// ends with a deactivate that can hand the foreground to the next window in z-order (I1).
+export function releaseFocusOf(w) {
+  if (!w || w.isDestroyed() || !w.isFocusable()) return;
+  const had = w.isFocused();
+  w.setFocusable(false);
+  if (had) w.blur();
+}
+
 // True when the latest session list says the id is interactive. An id that isn't listed yet
 // (a session newer than the last poll) re-reads the session files once; still unknown -> false.
 export function createInteractiveCheck({ current, reread }) {

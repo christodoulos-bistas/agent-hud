@@ -14,7 +14,7 @@ import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor, resolveCodeCmd, canOpen } from './focus.js';
-import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli, guarded } from './wiring.js';
+import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli, guarded, releaseFocusOf } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
@@ -211,14 +211,6 @@ function toggleWindow() {
 let rendererAlive = false;
 const canHold = () => !!win && !win.isDestroyed() && win.isVisible() && rendererAlive && !win.webContents.isCrashed();
 
-// Non-focusable again, and if the window held the focus give it back (blur activates the window
-// underneath); a window that never had the focus is not blurred, so nothing else gets activated.
-function releaseFocusOf(w) {
-  if (!w || w.isDestroyed()) return;
-  const had = w.isFocused();
-  w.setFocusable(false);
-  if (had) w.blur();
-}
 // Focusable and focused only while the user types into a text box (a card's "Something else…" or
 // reply); both windows are created non-focusable and are shown with showInactive.
 function setInteractiveOf(w, on) {
@@ -299,6 +291,9 @@ function panelWindow() {
   wc.on('console-message', consoleLog('panel:'));
   wc.on('render-process-gone', (_e, details) => {
     log('panel renderer gone', details?.reason);
+    // A renderer that crashed mid-typing can't send setInteractive(false), and the reloaded one starts
+    // out not typing: the panel goes back to non-focusable here and gives the focus back (M3).
+    releaseFocusOf(pw);
     if (quitting) return;
     setTimeout(() => {
       if (quitting || pw.isDestroyed()) return;

@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli, guarded } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli, guarded, releaseFocusOf } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
 
@@ -369,4 +369,33 @@ test('I4: guarded runs the function, and a throw is logged with its label instea
   assert.deepEqual(logged[0], ['stage tick', 'bad view']);
   const worse = guarded('push', () => { throw new Error('x'); }, () => { throw new Error('log broke'); });
   assert.doesNotThrow(() => worse(), 'a throwing logger never escapes either');
+});
+
+// A fake BrowserWindow for releaseFocusOf: records the calls that can move the foreground.
+const fakeWin = ({ focusable = false, focused = false, destroyed = false } = {}) => {
+  const calls = [];
+  return {
+    calls,
+    isDestroyed: () => destroyed,
+    isFocusable: () => focusable,
+    isFocused: () => focused,
+    setFocusable: (on) => { calls.push(['setFocusable', on]); focusable = !!on; },
+    blur: () => { calls.push(['blur']); focused = false; },
+  };
+};
+
+test('v1.2 I1: releaseFocusOf leaves a window that never became focusable alone (no SetFocusable deactivate)', () => {
+  const never = fakeWin();
+  releaseFocusOf(never);
+  assert.deepEqual(never.calls, [], 'the panel hidden after Allow/Deny/✕ never had the focus: nothing to give back');
+  const typed = fakeWin({ focusable: true, focused: true });
+  releaseFocusOf(typed);
+  assert.deepEqual(typed.calls, [['setFocusable', false], ['blur']], 'typing then sending: non-focusable again, focus given back');
+  const clickedAway = fakeWin({ focusable: true, focused: false });
+  releaseFocusOf(clickedAway);
+  assert.deepEqual(clickedAway.calls, [['setFocusable', false]], 'focusable but no longer focused: no blur');
+  const gone = fakeWin({ focusable: true, focused: true, destroyed: true });
+  releaseFocusOf(gone);
+  assert.deepEqual(gone.calls, []);
+  assert.doesNotThrow(() => releaseFocusOf(null));
 });
