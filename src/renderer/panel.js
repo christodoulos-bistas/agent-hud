@@ -31,14 +31,20 @@ function stuckLine(d, nowMs) {
   if (!s) return '';
   const head = STUCK[s.reason] || 'Stuck:';
   let text = esc(s.detail);
-  if (s.reason === 'long') {
-    const from = d.current?.startedAt ?? d.currentStepStartedAt;
-    if (finite(from)) {
-      const mins = Math.floor(Math.max(0, Number(nowMs) - Number(from)) / 60000);
-      text = `${esc(d.current?.label ?? 'The step')} has been running for ${mins} min`;
-    }
+  // The flagged step itself (stuck.label, stuck.startedAt), never d.current: another step may be newer.
+  if (s.reason === 'long' && finite(s.startedAt)) {
+    const mins = Math.floor(Math.max(0, Number(nowMs) - Number(s.startedAt)) / 60000);
+    text = `${esc(s.label || 'The step')} has been running for ${mins} min`;
   }
   return `<div class="warn"><b>${head}</b> ${text}</div>`;
+}
+
+// Where the answer is waiting (M3): a card in the HUD; handed back to its window (the footer's
+// "open window ↗" opens it); or a native prompt the HUD never held.
+function needsNote(d) {
+  if (d.hasCard) return 'Waiting for your answer in the HUD';
+  if (d.handedBack) return 'Waiting in its window — open ↗';
+  return 'Waiting for you in its window';
 }
 
 function markOf(s) {
@@ -51,8 +57,10 @@ function markOf(s) {
 function nowBlock(d, nowMs) {
   const cur = d.current;
   if (cur) {
+    // A shell step shows its whole command (up to 300 chars, wrapped), not the HUD's 40-char line.
+    const what = typeof cur.command === 'string' && cur.command ? `running ${cur.command}` : cur.doing;
     return '<div class="now">' +
-      `${timeSpan(cur.startedAt, nowMs, { cls: 'el' })}<b>Now:</b> ${esc(cur.doing)}` +
+      `${timeSpan(cur.startedAt, nowMs, { cls: 'el' })}<b>Now:</b> ${esc(what)}` +
       (cur.why ? `<br><span class="why">${esc(cur.why)}</span>` : '') +
     '</div>';
   }
@@ -81,6 +89,10 @@ export function renderPanel(detail, nowMs = Date.now()) {
       helpers.map((h) => `<li><b>${esc(h.agentType)}</b> · ${esc(h.doing)}</li>`).join('') + '</ul>'
     : '';
   const count = Number.isFinite(Number(d.stepCount)) ? Math.trunc(Number(d.stepCount)) : 0;
+  // No known start (M9): just the step count, no "started … ago".
+  const foot = finite(d.startedAt)
+    ? timeSpan(d.startedAt, nowMs, { pre: 'started ', post: ` ago · ${count} steps` })
+    : `<span>${count} steps</span>`;
   return '<div class="fly">' +
     '<div class="fly-top">' +
       `<span class="spr">${spriteSvg(d.cls, 1.5)}</span>` +
@@ -90,11 +102,11 @@ export function renderPanel(detail, nowMs = Date.now()) {
     '</div>' +
     '<div class="det">' +
       stuckLine(d, nowMs) +
-      (d.stage === 'needs' ? '<div class="needs-note">Waiting for your answer in the HUD</div>' : '') +
+      (d.stage === 'needs' ? `<div class="needs-note">${needsNote(d)}</div>` : '') +
       '<p class="lbl">Task</p>' + task +
       nowBlock(d, nowMs) +
       list + help +
-      `<div class="foot">${timeSpan(d.startedAt, nowMs, { pre: 'started ', post: ` ago · ${count} steps` })}` +
+      `<div class="foot">${foot}` +
       '<button type="button" class="open" data-act="open">open window ↗</button></div>' +
     '</div>' +
   '</div>';

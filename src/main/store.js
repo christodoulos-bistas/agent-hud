@@ -1,5 +1,5 @@
 import { moodOf } from './classes.js';
-import { displayName, baseOf } from './sessions.js';
+import { displayName, baseOf, knownTime } from './sessions.js';
 import { activityLine, createStepLog } from './steps.js';
 import { stageOf, stuckOf, currentOf } from './stages.js';
 
@@ -10,11 +10,11 @@ export { activityLine } from './steps.js';
 
 const ASKS = { permission: 'asks permission', choice: 'asks a question', reply: 'wants a reply' };
 
-export function createStore({ engine, queue, now = Date.now, holdMs = 60000, replyMs = 540000 }) {
+export function createStore({ engine, queue, now = Date.now, holdMs = 60000, replyMs = 540000, stepLog, onError = (e) => console.error(e) }) {
   let sessions = [];
   const state = new Map();
   const optIn = new Map();
-  const steps = createStepLog({});
+  const steps = stepLog ?? createStepLog({});
   const stages = new Map(); // id -> { stage, since }
   const st = (id) => {
     let s = state.get(id);
@@ -24,7 +24,6 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
 
   function onEvent(ev) {
     engine.push(ev);
-    steps.push(ev);
     const s = st(ev.sessionId);
     if (ev.cwd) s.cwd = ev.cwd;
     const e = ev.event;
@@ -52,6 +51,8 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
       s.notif = { type: (ev.raw || {}).notification_type, at: ev.at };
     }
     if (e !== 'Notification') queue.clearHandedBack(ev.sessionId, agentId);
+    // The v1.1 step log goes last, on its own: a throw there can't skip the bookkeeping above (M6).
+    try { steps.push(ev); } catch (err) { try { onError(err); } catch { /* never break onEvent */ } }
   }
 
   // A session file can be caught half-written, so a session is forgotten only after it is missing from
@@ -150,8 +151,10 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     return {
       id, display: a.display, cls: a.cls, stage: a.stage, stuck: a.stuck,
       stageSince: a.stageSince, currentStepStartedAt: a.currentStepStartedAt, lastActivityAt: a.lastActivityAt,
-      task: view.task ?? null, startedAt: view.taskAt ?? sess.startedAt ?? null,
+      task: view.task ?? null, startedAt: view.taskAt ?? knownTime(sess.startedAt),
       stepCount: view.stepCount, current: currentOf(view, sess.status), steps: view.steps, helpers: view.helpers,
+      // Where a "needs you" is waiting, for the panel's line (M3): a card in the HUD, or its own window.
+      handedBack: a.handedBack, hasCard: queue.list().some((it) => it.sessionId === id),
     };
   }
 

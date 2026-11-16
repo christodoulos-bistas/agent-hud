@@ -37,7 +37,7 @@ test('full detail renders task, Now with why, 5 steps with ✓/✗/– marks, he
 test('stuck renders the amber reason line', () => {
   const h = renderPanel(detail({ stuck: { reason: 'repeating', detail: 'the same command failed 3 times in a row.' } }), NOW);
   assert.match(h, /class="warn"><b>Repeating:<\/b> the same command failed 3 times/);
-  const l = renderPanel(detail({ stuck: { reason: 'long', detail: 'frozen' } }), NOW);
+  const l = renderPanel(detail({ stuck: { reason: 'long', detail: 'frozen', label: 'npm test', startedAt: NOW - 100000 } }), NOW);
   assert.match(l, /<b>Long step:<\/b> npm test has been running for 1 min/);
   assert.doesNotMatch(l, /frozen/);
   assert.match(renderPanel(detail({ stuck: { reason: 'silent', detail: 'quiet' } }), NOW), /<b>Silent:<\/b> quiet/);
@@ -54,8 +54,8 @@ test('task null → "Started before the HUD" (Review Focus 1)', () => {
   assert.match(renderPanel(detail({ task: null }), NOW), /Started before the HUD/);
 });
 
-test('needs → "Waiting for your answer in the HUD"', () => {
-  assert.match(renderPanel(detail({ stage: 'needs' }), NOW), /Waiting for your answer in the HUD/);
+test('needs with a card in the HUD → "Waiting for your answer in the HUD"', () => {
+  assert.match(renderPanel(detail({ stage: 'needs', hasCard: true }), NOW), /Waiting for your answer in the HUD/);
   assert.doesNotMatch(renderPanel(detail(), NOW), /Waiting for your answer/);
 });
 
@@ -99,4 +99,36 @@ test('arrowOf: the arrow sits on the edge facing the HUD, its 16 px triangle cen
 
 test('importing panel.js in Node does not throw', async () => {
   await assert.doesNotReject(import('../src/renderer/panel.js?again'));
+});
+
+test('M2: the long-step line names the flagged step from stuck, not the current one', () => {
+  const h = renderPanel(detail({
+    current: step({ label: 'Read a.js', endedAt: null, ok: null, startedAt: NOW - 2000 }),
+    stuck: { reason: 'long', detail: 'npm run build has been running for 7 min', label: 'npm run build', startedAt: NOW - 7 * 60000 },
+  }), NOW);
+  assert.match(h, /<b>Long step:<\/b> npm run build has been running for 7 min/);
+  assert.match(renderPanel(detail({ current: null, stuck: { reason: 'long', detail: 'x has been running for 6 min' } }), NOW), /<b>Long step:<\/b> x has been running for 6 min/, 'no startedAt: the store\'s detail text');
+  assert.doesNotMatch(renderPanel(detail({ stuck: { reason: 'long', detail: 'd', label: XSS, startedAt: NOW - 400000 } }), NOW), /<img/);
+});
+
+test('M3: the needs line says where the answer is waiting', () => {
+  const at = (o) => renderPanel(detail({ stage: 'needs', ...o }), NOW);
+  assert.match(at({ hasCard: true, handedBack: true }), /class="needs-note">Waiting for your answer in the HUD</);
+  assert.match(at({ hasCard: false, handedBack: true }), /class="needs-note">Waiting in its window — open ↗</);
+  assert.match(at({ hasCard: false, handedBack: false }), /class="needs-note">Waiting for you in its window</);
+  assert.doesNotMatch(renderPanel(detail({ hasCard: true }), NOW), /needs-note/, 'only while it needs you');
+});
+
+test('M5: "Now:" shows the whole Bash/PowerShell command, not the 40-char activity line', () => {
+  const cmd = 'npm run test -- --run test/forge-room.test.ts --reporter verbose';
+  const h = renderPanel(detail({ current: step({ endedAt: null, ok: null, doing: `running ${cmd.slice(0, 40)}`, command: cmd }) }), NOW);
+  assert.ok(h.includes(`<b>Now:</b> running ${cmd}`), h);
+  assert.match(renderPanel(detail({ current: step({ tool: 'Read', label: 'Read a.js', doing: 'reading a.js', command: null, endedAt: null, ok: null }) }), NOW), /<b>Now:<\/b> reading a\.js/);
+  assert.doesNotMatch(renderPanel(detail({ current: step({ command: XSS, endedAt: null, ok: null }) }), NOW), /<img/);
+});
+
+test('M9: with no known start the footer omits "started … ago"', () => {
+  const h = renderPanel(detail({ startedAt: null, stepCount: 4 }), NOW);
+  assert.match(h, /class="foot"><span>4 steps<\/span>/);
+  assert.doesNotMatch(h, /started/);
 });

@@ -24,6 +24,8 @@ export function stageOf({ mood, view, status }) {
 }
 
 const isDelegating = (s) => s.tool === 'Agent' || s.tool === 'Task';
+// Tools that wait on the user, not on work: never "long".
+const USER_WAITS = new Set(['AskUserQuestion', 'ExitPlanMode']);
 
 export function stuckOf({ stage, view, status, now }, { repeatN = 3, longMs = 300000, silentMs = 180000 } = {}) {
   if (stage !== 'thinking' && stage !== 'working') return null;
@@ -37,8 +39,10 @@ export function stuckOf({ stage, view, status, now }, { repeatN = 3, longMs = 30
 
   for (const s of open) {
     if (isDelegating(s) && helpers.length > 0) continue;
+    if (USER_WAITS.has(s.tool)) continue;
     const age = now - s.startedAt;
-    if (age > longMs) return { reason: 'long', detail: `${s.label} has been running for ${Math.floor(age / 60000)} min` };
+    // label and startedAt name the flagged step, so the panel's line can't pick another one (M2).
+    if (age > longMs) return { reason: 'long', detail: `${s.label} has been running for ${Math.floor(age / 60000)} min`, label: s.label, startedAt: s.startedAt };
   }
 
   // Silent is busy-only: after the thinking fix, thinking implies recent activity or busy, so no extra arm.

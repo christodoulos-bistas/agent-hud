@@ -6,11 +6,14 @@ export function baseOf(p) {
   return path.win32.basename(s);
 }
 
+// A start time that is missing, zero, negative or not a number is unknown (null), never "56 years ago".
+export const knownTime = (t) => (typeof t === 'number' && Number.isFinite(t) && t > 0 ? t : null);
+
 function toSession(o) {
   if (!o || typeof o !== 'object' || !o.sessionId || !Number.isInteger(o.pid)) return null;
   return {
     sessionId: o.sessionId, pid: o.pid, cwd: o.cwd || '', kind: o.kind, entrypoint: o.entrypoint,
-    name: o.name || '', nameSource: o.nameSource, status: o.status, startedAt: o.startedAt ?? 0,
+    name: o.name || '', nameSource: o.nameSource, status: o.status, startedAt: knownTime(o.startedAt),
   };
 }
 

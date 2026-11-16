@@ -378,3 +378,45 @@ test('I3a: permissionDenied closes the denied main-thread step; a helper\'s deni
   set(1000 + 400000);
   assert.notEqual(store.snapshot().agents[0].stuck?.reason, 'long', 'no false "Stuck? long" on a denied call');
 });
+
+test('M3: detail carries hasCard (a queued card for this session) and handedBack', () => {
+  let t = 0; const timers = [];
+  const queue = createQueue({ now: () => t, setTimer: (fn) => { timers.push(fn); return timers.length; }, clearTimer: () => {} });
+  const store = createStore({ engine: createClassEngine(), queue, now: () => t });
+  store.setSessions([S('s1'), S('s2')]);
+  let d = store.detail('s1');
+  assert.equal(d.hasCard, false); assert.equal(d.handedBack, false);
+  queue.add({ id: 'a', sessionId: 's1', kind: 'permission', payload: {} });
+  queue.add({ id: 'b', sessionId: 's2', kind: 'choice', payload: {} });
+  assert.equal(store.detail('s1').hasCard, true);
+  assert.equal(store.detail('s2').hasCard, true, 'queued behind another card still counts');
+  timers[0]();
+  d = store.detail('s1');
+  assert.equal(d.hasCard, false); assert.equal(d.handedBack, true); assert.equal(d.stage, 'needs');
+});
+
+test('M6: a throwing step log never skips the hand-back clear or the v1 state updates', () => {
+  let t = 0; const timers = []; const errors = [];
+  const queue = createQueue({ now: () => t, setTimer: (fn) => { timers.push(fn); return timers.length; }, clearTimer: () => {} });
+  const empty = { task: null, taskAt: null, stepCount: 0, current: null, steps: [], open: [], helpers: [], lastEventAt: null };
+  const stepLog = { push() { throw new Error('step log broke'); }, view: () => empty, forget() {}, closeDenied() { return false; } };
+  const store = createStore({ engine: createClassEngine(), queue, now: () => t, stepLog, onError: (e) => errors.push(e.message) });
+  store.setSessions([S('s1')]);
+  queue.add({ id: 'a', sessionId: 's1', kind: 'permission', payload: {} });
+  timers[0]();
+  assert.equal(store.snapshot().agents[0].handedBack, true);
+  assert.doesNotThrow(() => store.onEvent(ev('s1', 'PreToolUse', 1, { toolName: 'Read', toolInput: { file_path: 'a.js' } })));
+  const a = store.snapshot().agents[0];
+  assert.equal(a.handedBack, false);
+  assert.equal(a.activity, 'reading a.js');
+  assert.deepEqual(errors, ['step log broke']);
+});
+
+test('M9: a session start of 0 is unknown: detail.startedAt null until a task is seen', () => {
+  const { store } = setup(1000);
+  store.setSessions([S('s1', { startedAt: 0 }), S('s2', { startedAt: null })]);
+  assert.equal(store.detail('s1').startedAt, null);
+  assert.equal(store.detail('s2').startedAt, null);
+  store.onEvent(ev('s1', 'UserPromptSubmit', 1000, { raw: { prompt: 'go' } }));
+  assert.equal(store.detail('s1').startedAt, 1000);
+});

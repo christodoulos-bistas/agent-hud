@@ -64,7 +64,7 @@ let sentPlace; // JSON of the last place sent
 
 const queue = createQueue({ holdMs: HOLD_MS, replyMs: REPLY_MS, onError: log });
 const engine = createClassEngine();
-const store = createStore({ engine, queue, holdMs: HOLD_MS, replyMs: REPLY_MS });
+const store = createStore({ engine, queue, holdMs: HOLD_MS, replyMs: REPLY_MS, onError: (err) => log('step log', err) });
 
 // ---------------------------------------------------------------- snapshot
 
@@ -307,7 +307,8 @@ const placePanel = guarded('place panel', (snap) => {
   pw.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
   place = { side: b.side, arrowY: b.arrowY };
   sendPlace();
-  if (!pw.isVisible()) pw.showInactive();
+  // A minimized panel (system menu → Minimize) is restored without taking the focus (M4).
+  if (!pw.isVisible() || pw.isMinimized()) pw.showInactive();
 }, log);
 
 // A new selection (or none): the HUD highlights the row, the panel moves and gets the agent's detail.

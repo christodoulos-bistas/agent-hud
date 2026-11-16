@@ -105,3 +105,19 @@ test('I2: currentOf is the most recently started live open step; none on an idle
   assert.equal(currentOf(V(), 'busy'), null);
   assert.equal(currentOf(V({ open: [step({ startedAt: 5, endedAt: null, ok: null, agentId: 'h1' })] }), 'busy'), null, 'main-thread steps only');
 });
+
+test('M2: "long" names the flagged step: stuck carries its label and startedAt', () => {
+  const now = 1000000;
+  const old = step({ id: 'o', label: 'npm run build', startedAt: now - 400000, endedAt: null, ok: null });
+  const fresh = step({ id: 'f', label: 'Read a.js', tool: 'Read', startedAt: now - 1000, endedAt: null, ok: null });
+  const r = stuckOf({ stage: 'working', view: V({ open: [old, fresh], lastEventAt: now }), status: 'busy', now });
+  assert.deepEqual(r, { reason: 'long', detail: 'npm run build has been running for 6 min', label: 'npm run build', startedAt: now - 400000 });
+});
+
+test('M7: AskUserQuestion and ExitPlanMode wait on the user: never "long"', () => {
+  const now = 1000000;
+  for (const tool of ['AskUserQuestion', 'ExitPlanMode']) {
+    const open = [step({ tool, label: tool, startedAt: 0, endedAt: null, ok: null })];
+    assert.equal(stuckOf({ stage: 'working', view: V({ open, lastEventAt: now }), status: 'busy', now }), null, tool);
+  }
+});

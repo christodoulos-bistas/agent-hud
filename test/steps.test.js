@@ -202,3 +202,42 @@ test('I3b: a new main-thread PreToolUse supersedes open non-Agent steps started 
   assert.deepEqual(v.steps.map((s) => s.id), ['g1', 'r1', 'b1']);
   assert.ok(v.steps.slice(0, 2).every((s) => s.interrupted && s.ok === null));
 });
+
+test('M1: a main-thread Stop with background_tasks keeps only the helpers still running there', () => {
+  const l = createStepLog();
+  for (const id of ['h1', 'h2', 'h3']) l.push(ev('SubagentStart', 1, { raw: { agent_id: id, agent_type: 'Explore' } }));
+  l.push(ev('Stop', 2));
+  assert.equal(l.view('s1').helpers.length, 3, 'no background_tasks array: helpers untouched');
+  l.push(ev('Stop', 3, { raw: { agent_id: 'h1', background_tasks: [] } }));
+  assert.equal(l.view('s1').helpers.length, 3, 'a helper\'s Stop reconciles nothing');
+  l.push(ev('Stop', 4, { raw: { background_tasks: [
+    { id: 'h1', type: 'subagent', status: 'running' }, { id: 'h2', type: 'subagent', status: 'completed' },
+    { id: 'h3', type: 'shell', status: 'running' }, null,
+  ] } }));
+  assert.deepEqual(l.view('s1').helpers.map((h) => h.agentId), ['h1']);
+  l.push(ev('Stop', 5, { raw: { background_tasks: [] } }));
+  assert.deepEqual(l.view('s1').helpers, []);
+});
+
+test('M5: a Bash/PowerShell step keeps its command (whitespace collapsed, capped at 300); other tools have none', () => {
+  const l = createStepLog();
+  const long = 'npm   run build\n  -- ' + 'x'.repeat(400);
+  l.push(ev('PreToolUse', 1, { tool: 'Bash', input: { command: long } }));
+  l.push(ev('PreToolUse', 2, { tool: 'PowerShell', input: { command: 'Get-ChildItem -Force' } }));
+  l.push(ev('PreToolUse', 3, { tool: 'Read', input: { file_path: 'a.js' } }));
+  const [bash, ps, read] = l.view('s1').open;
+  assert.equal(bash.command.length, 300);
+  assert.ok(bash.command.startsWith('npm run build -- xxx'));
+  assert.equal(ps.command, 'Get-ChildItem -Force');
+  assert.equal(read.command, null);
+});
+
+test('M8: why is whitespace-collapsed and capped at 300 chars', () => {
+  const l = createStepLog();
+  l.push(ev('PreToolUse', 1, { tool: 'Bash', input: { command: 'x', description: '  Run   the\n tests ' + 'w'.repeat(400) } }));
+  l.push(ev('PreToolUse', 2, { tool: 'Bash', input: { command: 'y', description: '   ' } }));
+  const [a, b] = l.view('s1').open;
+  assert.equal(a.why.length, 300);
+  assert.ok(a.why.startsWith('Run the tests www'));
+  assert.equal(b.why, null);
+});

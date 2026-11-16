@@ -18,8 +18,7 @@ body[data-arrow]::after { content: ''; position: fixed; top: var(--arrow-top, 32
 body[data-arrow="right"]::after { right: 0; border-left-color: rgba(224, 180, 92, .42); border-right: 0; }
 body[data-arrow="left"]::after { left: 0; border-right-color: rgba(224, 180, 92, .42); border-left: 0; }
 .fly { background: rgba(24, 34, 31, .97); border: 1px solid rgba(224, 180, 92, .42); border-radius: 12px; padding: 10px 12px; overflow-wrap: anywhere; }
-.fly-top { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; -webkit-app-region: drag; }
-.fly-top button { -webkit-app-region: no-drag; }
+.fly-top { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
 .spr { line-height: 0; flex: none; }
 .spr .px { display: block; overflow: visible; }
 .who { min-width: 0; flex: 1; }

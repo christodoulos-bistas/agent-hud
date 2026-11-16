@@ -19,6 +19,8 @@ export function activityLine(ev) {
 
 const collapse = (s) => String(s).replace(/\s+/g, ' ').trim();
 const base = (p) => path.win32.basename(String(p || ''));
+// Plain text for the panel: whitespace collapsed, at most 300 chars; empty -> null.
+const capped = (s) => collapse(s).slice(0, 300) || null;
 
 export function stepLabel(toolName, toolInput) {
   const i = toolInput || {};
@@ -114,6 +116,13 @@ export function createStepLog({ cap = 20, supersedeMs = 10000 } = {}) {
       closeInterrupted(s, ev.at);
     } else if (e === 'Stop' || e === 'SessionEnd') {
       closeInterrupted(s, ev.at);
+      // A helper can end without a SubagentStop reaching us: the main thread's Stop lists the helpers
+      // still running (same rule as the class engine, classes.js).
+      const bg = raw.background_tasks;
+      if (e === 'Stop' && Array.isArray(bg)) {
+        const running = new Set(bg.filter((t) => t && t.type === 'subagent' && t.status === 'running' && t.id).map((t) => t.id));
+        for (const id of [...s.helpers.keys()]) if (!running.has(id)) s.helpers.delete(id);
+      }
     } else if (e === 'PreToolUse') {
       const input = ev.toolInput || raw.tool_input || {};
       const tool = ev.toolName ?? raw.tool_name ?? null;
@@ -121,9 +130,11 @@ export function createStepLog({ cap = 20, supersedeMs = 10000 } = {}) {
       // ms of each other), so a step still open >10 s before a new one will get no Post (denied, say).
       interrupt(s, s.open.filter((x) => !DELEGATES.has(x.tool) && ev.at - x.startedAt > supersedeMs), ev.at);
       s.stepCount += 1;
+      const shell = tool === 'Bash' || tool === 'PowerShell';
       s.open.push({
         id: raw.tool_use_id ?? null, tool, label: stepLabel(tool, input), doing: activityLine(ev),
-        why: typeof input.description === 'string' ? input.description : null,
+        command: shell && input.command != null ? capped(input.command) : null, // the panel's "Now:" (activityLine cuts at 40)
+        why: typeof input.description === 'string' ? capped(input.description) : null,
         startedAt: ev.at, endedAt: null, ok: null, interrupted: false, error: null,
         agentId: null, agentType: null,
       });
