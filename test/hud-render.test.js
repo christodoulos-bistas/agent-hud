@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { esc, renderChip, renderRow, renderCard, renderParty, picksFrom, replyLeftMs, actionsArmed, clickAllowed } from '../src/renderer/hud.js';
+import { esc, newlyNeeding, renderChip, renderRow, renderCard, renderParty, picksFrom, replyLeftMs, actionsArmed, clickAllowed } from '../src/renderer/hud.js';
 import { GR, CLASSES, MOODS_BADGE, MOODS_ZEE, spriteSvg } from '../src/renderer/sprites.js';
 import { CLASS_IDS } from '../src/main/classes.js';
 
@@ -185,9 +185,21 @@ test('renderRow escapes HTML in activity and display (chip included)', () => {
   assert.ok(html.includes('&lt;img'));
 });
 
+test('newlyNeeding: only agents that were not already waiting get the arrival pulse', () => {
+  const agents = [agent({ id: 'a', mood: 'needs' }), agent({ id: 'b', mood: 'needs' }), agent({ id: 'c' })];
+  const first = newlyNeeding(agents, new Set());
+  assert.deepEqual([...first.fresh], ['a', 'b']);
+  const next = newlyNeeding(agents, first.needs);
+  assert.equal(next.fresh.size, 0);
+  assert.deepEqual([...newlyNeeding([agent({ id: 'b', mood: 'needs' }), agent({ id: 'd', mood: 'needs' })], first.needs).fresh], ['d']);
+  assert.equal(newlyNeeding(null).needs.size, 0);
+});
+
 test('selected row gets class "selected"; others do not', () => {
   assert.ok(renderRow(agent(), { selected: true }).startsWith('<div class="row working selected"'));
   assert.ok(!renderRow(agent()).includes('selected'));
+  assert.match(renderRow(agent(), { selected: true }), /class="who-n"[^>]*aria-pressed="true"/);
+  assert.match(renderRow(agent()), /class="who-n"[^>]*aria-pressed="false"/);
   const snap = { agents: [agent({ id: 'a' }), agent({ id: 'b' })], card: null, next: null, selected: 'b', counts: { total: 2, needs: 0 } };
   const html = renderParty(snap, {});
   assert.equal(count(html, ' selected"'), 1);

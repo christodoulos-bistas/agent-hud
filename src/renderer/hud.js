@@ -85,6 +85,12 @@ export function renderChip(agent, nowMs = Date.now()) {
   }
 }
 
+// Which agents need you now, and which of those did not before (they get the arrival pulse).
+export function newlyNeeding(agents, prev = new Set()) {
+  const needs = new Set((Array.isArray(agents) ? agents : []).filter((a) => a?.mood === 'needs').map((a) => String(a.id)));
+  return { needs, fresh: new Set([...needs].filter((id) => !prev.has(id))) };
+}
+
 export function renderRow(agent, { ask, selected = false, nowMs = Date.now() } = {}) {
   const a = agent || {};
   const mood = moodOf(a);
@@ -99,7 +105,7 @@ export function renderRow(agent, { ask, selected = false, nowMs = Date.now() } =
   return `<div class="row ${mood}${handed ? ' handed' : ''}${selected ? ' selected' : ''}" data-key="row:${id}" style="--d:${bobDelay(a.id)}">` +
     `<div class="sprite-box" data-act="select" data-session="${id}">${sprite(a.cls)}${fam}</div>` +
     '<div class="who">' +
-      `<button type="button" class="who-n" data-act="select" data-session="${id}" title="Show details">${esc(a.display)}</button>` +
+      `<button type="button" class="who-n" data-act="select" data-session="${id}" aria-pressed="${selected ? 'true' : 'false'}" title="Show details">${esc(a.display)}</button>` +
       `<div class="who-d${handed ? ' handed' : ''}">${line}</div>` +
       `<button type="button" class="wait" data-act="wait" data-session="${id}" aria-pressed="${a.replyOptIn ? 'true' : 'false'}"><i></i>wait for my reply</button>` +
     '</div>' +
@@ -367,11 +373,10 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     if (arming) armLater();
 
     // The needs chip pulses three times when an agent starts waiting, then glows steady.
-    const needs = new Set((snap.agents || []).filter((a) => a?.mood === 'needs').map((a) => String(a.id)));
-    for (const chip of root.querySelectorAll('.row .st.needs')) {
-      const key = chip.closest('[data-key]')?.dataset.key || '';
-      const id = key.slice(key.indexOf(':') + 1);
-      if (needs.has(id) && !st.needs.has(id)) chip.classList.add('call');
+    const { needs, fresh } = newlyNeeding(snap.agents, st.needs);
+    for (const el of root.querySelectorAll('.face .seal, .row .st.needs')) {
+      const key = el.closest('[data-key]')?.dataset.key || '';
+      if (fresh.has(key.slice(key.indexOf(':') + 1))) el.classList.add('call');
     }
     st.needs = needs;
     syncRowOffset(snap);

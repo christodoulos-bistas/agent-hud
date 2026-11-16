@@ -70,8 +70,7 @@ button.who-n:hover { text-decoration: underline dotted rgba(240, 233, 218, .5); 
 .seal .px { position: relative; z-index: 1; display: block; }
 .seal::before { content: ''; position: absolute; inset: 8%; border-radius: 50%; box-shadow: 0 0 0 2px rgba(237, 203, 133, .45), 0 0 10px 3px rgba(224, 180, 92, .5); }
 .sprite-box[data-act="select"] { cursor: pointer; }
-.row.selected { background: linear-gradient(90deg, rgba(224, 180, 92, .10), rgba(224, 180, 92, 0) 70%); }
-.row.selected::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 0 3px 3px 0; background: var(--gold); }
+.row.selected { background: rgba(224, 180, 92, .08); box-shadow: inset 0 0 0 1px rgba(237, 203, 133, .35); }
 
 /* stage chips (mockup option B) */
 .st { display: inline-flex; align-items: center; gap: 5px; font-size: .68rem; font-weight: 700; letter-spacing: .04em; border-radius: 999px; padding: 2px 8px; white-space: nowrap; border: 1px solid transparent; line-height: 1.3; }
