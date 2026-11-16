@@ -13,7 +13,7 @@ import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor } from './focus.js';
-import { encodeAnswer, dockBounds, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli } from './wiring.js';
+import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, isAnchor, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
@@ -83,11 +83,37 @@ function sessionById(id) {
 
 // ---------------------------------------------------------------- window
 
+// The HUD sits where the user dragged it (cfg.position, an anchor saved on 'moved'), or bottom-right
+// of the primary display until they do. Every size change re-docks against that anchor.
+function workArea() {
+  const a = cfg?.position;
+  return isAnchor(a) ? screen.getDisplayNearestPoint(anchorPoint(a)).workArea : screen.getPrimaryDisplay().workArea;
+}
+
+let docking = false;
 function dock() {
   if (!win || win.isDestroyed()) return;
-  const b = dockBounds(screen.getPrimaryDisplay().workArea, collapsed ? COLLAPSED_WIDTH : WIDTH, contentHeight);
-  win.setBounds(b);
+  const b = placeBounds(workArea(), collapsed ? COLLAPSED_WIDTH : WIDTH, contentHeight, cfg?.position);
+  docking = true;
+  try { win.setBounds(b); } finally { docking = false; }
   debug('dock', JSON.stringify(b));
+}
+
+// 'moved' fires once when the user lets go of a drag (by the header bar, -webkit-app-region: drag).
+function rememberPosition() {
+  if (docking || !win || win.isDestroyed()) return;
+  const b = win.getBounds();
+  cfg.position = anchorFrom(b, screen.getDisplayMatching(b).workArea);
+  try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
+  dock(); // pulls it back inside the work area if it was dropped partly off-screen
+  refreshMenu();
+}
+
+function resetPosition() {
+  delete cfg.position;
+  try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
+  dock();
+  refreshMenu();
 }
 
 function showWindow() {
@@ -161,6 +187,7 @@ function createWindow() {
     }, RELOAD_MS);
   });
   win.once('ready-to-show', showWindow);
+  win.on('moved', rememberPosition);
   win.on('close', (e) => { if (!quitting) { e.preventDefault(); hideWindow(); } });
   dock();
   win.loadFile(INDEX);
@@ -298,6 +325,7 @@ function refreshMenu() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: visible ? 'Hide' : 'Show', click: toggleWindow },
     { label: 'Collapse', type: 'checkbox', checked: collapsed, click: (mi) => setCollapsed(mi.checked) },
+    { label: 'Move back to the corner', enabled: isAnchor(cfg?.position), click: resetPosition },
     { type: 'separator' },
     { label: 'Install hooks', click: installFromTray },
     { label: 'Remove hooks', click: doUninstall },

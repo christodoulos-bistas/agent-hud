@@ -21,7 +21,9 @@ button { font: inherit; color: inherit; }
 
 /* ---------- A: party frames ---------- */
 .party { width: 100%; background: rgba(24, 34, 31, .95); border: 1px solid rgba(224, 180, 92, .38); border-radius: 12px; overflow: hidden; }
-.party-top { display: flex; align-items: center; gap: 8px; padding: 7px 10px 6px 12px; border-bottom: 1px solid rgba(224, 180, 92, .16); }
+/* the header bar is the handle you drag the HUD by; its button stays clickable */
+.party-top { display: flex; align-items: center; gap: 8px; padding: 7px 10px 6px 12px; border-bottom: 1px solid rgba(224, 180, 92, .16); -webkit-app-region: drag; user-select: none; }
+.party-top button { -webkit-app-region: no-drag; }
 .party-top .t { font-family: 'IM Fell English', Georgia, serif; font-size: .95rem; color: var(--gold-l); }
 .party-top .n { font-size: .72rem; color: var(--sage); margin-left: auto; }
 .party-top .n b { color: var(--gold); font-weight: 700; }

@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
 
@@ -62,6 +62,40 @@ function fakeClock() {
     },
   };
 }
+test('move: anchorFrom keeps the edges nearest the window centre', () => {
+  const wa = { x: 0, y: 0, width: 1920, height: 1040 };
+  assert.deepEqual(anchorFrom({ x: 1500, y: 700, width: 272, height: 300 }, wa), { h: 'right', v: 'bottom', x: 1772, y: 1000 });
+  assert.deepEqual(anchorFrom({ x: 40, y: 30, width: 272, height: 300 }, wa), { h: 'left', v: 'top', x: 40, y: 30 });
+  assert.deepEqual(anchorFrom({ x: 1600, y: 20, width: 272, height: 200 }, wa), { h: 'right', v: 'top', x: 1872, y: 20 });
+});
+test('move: placeBounds without an anchor is the default bottom-right dock', () => {
+  const wa = { x: 0, y: 0, width: 1920, height: 1040 };
+  assert.deepEqual(placeBounds(wa, 272, 300, undefined), dockBounds(wa, 272, 300));
+  assert.deepEqual(placeBounds(wa, 272, 300, { h: 'sideways', v: 'top', x: 1, y: 1 }), dockBounds(wa, 272, 300));
+});
+test('move: a bottom-right anchor grows upward and collapses toward the right edge', () => {
+  const wa = { x: 0, y: 0, width: 1920, height: 1040 };
+  const a = { h: 'right', v: 'bottom', x: 1772, y: 1000 };
+  assert.deepEqual(placeBounds(wa, 272, 300, a), { x: 1500, y: 700, width: 272, height: 300 });
+  assert.deepEqual(placeBounds(wa, 272, 500, a), { x: 1500, y: 500, width: 272, height: 500 });
+  assert.deepEqual(placeBounds(wa, 72, 300, a), { x: 1700, y: 700, width: 72, height: 300 });
+});
+test('move: a top-left anchor grows downward; height still capped at 60% of the work area', () => {
+  const wa = { x: 0, y: 0, width: 1920, height: 1000 };
+  const a = { h: 'left', v: 'top', x: 40, y: 30 };
+  assert.deepEqual(placeBounds(wa, 272, 300, a), { x: 40, y: 30, width: 272, height: 300 });
+  assert.deepEqual(placeBounds(wa, 272, 5000, a), { x: 40, y: 30, width: 272, height: 600 });
+});
+test('move: the HUD is kept fully inside the work area (dragged off-screen or display shrank)', () => {
+  const wa = { x: 1920, y: 0, width: 1280, height: 1000 };
+  assert.deepEqual(placeBounds(wa, 272, 300, { h: 'left', v: 'top', x: 3300, y: -50 }), { x: 1920 + 1280 - 272, y: 0, width: 272, height: 300 });
+  assert.deepEqual(placeBounds(wa, 272, 300, { h: 'right', v: 'bottom', x: 100, y: 5000 }), { x: 1920, y: 700, width: 272, height: 300 });
+});
+test('move: anchorPoint lies just inside the anchored corner, so a shared monitor edge picks the right display', () => {
+  assert.deepEqual(anchorPoint({ h: 'right', v: 'bottom', x: 1920, y: 1040 }), { x: 1919, y: 1039 });
+  assert.deepEqual(anchorPoint({ h: 'left', v: 'top', x: 1920, y: 0 }), { x: 1920, y: 0 });
+});
+
 test('createThrottle: first call runs at once, a burst collapses into one trailing call', () => {
   const c = fakeClock(); let n = 0;
   const push = createThrottle(() => { n++; }, 100, c);

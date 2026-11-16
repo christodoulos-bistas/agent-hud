@@ -46,6 +46,40 @@ export function dockBounds(workArea, width, height, { margin = 16, maxFrac = 0.6
   };
 }
 
+const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), Math.max(lo, hi));
+const isAnchor = (a) => !!a && (a.h === 'left' || a.h === 'right') && (a.v === 'top' || a.v === 'bottom')
+  && Number.isFinite(a.x) && Number.isFinite(a.y);
+
+// Where the user dragged the HUD to. The edges nearest the window's centre stay put when the HUD
+// grows, shrinks or collapses: bottom half -> bottom edge (it grows upward), right half -> right edge.
+export function anchorFrom(bounds, workArea) {
+  const right = bounds.x + bounds.width / 2 > workArea.x + workArea.width / 2;
+  const bottom = bounds.y + bounds.height / 2 > workArea.y + workArea.height / 2;
+  return {
+    h: right ? 'right' : 'left', v: bottom ? 'bottom' : 'top',
+    x: Math.round(right ? bounds.x + bounds.width : bounds.x),
+    y: Math.round(bottom ? bounds.y + bounds.height : bounds.y),
+  };
+}
+
+// A point just inside the anchored corner, for finding the display the HUD belongs to (a right or
+// bottom edge sits on the first pixel of a neighbouring monitor).
+export function anchorPoint(a) {
+  return { x: Math.round(a.h === 'right' ? a.x - 1 : a.x), y: Math.round(a.v === 'bottom' ? a.y - 1 : a.y) };
+}
+
+// The HUD's bounds: docked bottom-right by default, or held at the user's anchor; always fully inside
+// the work area, height capped at `maxFrac` of it.
+export function placeBounds(workArea, width, height, anchor, { margin = 16, maxFrac = 0.6 } = {}) {
+  if (!isAnchor(anchor)) return dockBounds(workArea, width, height, { margin, maxFrac });
+  const cap = Math.floor(workArea.height * maxFrac);
+  const h = Math.max(1, Math.min(cap, Math.ceil(Number(height) || 0)));
+  const x = clamp(anchor.h === 'right' ? anchor.x - width : anchor.x, workArea.x, workArea.x + workArea.width - width);
+  const y = clamp(anchor.v === 'bottom' ? anchor.y - h : anchor.y, workArea.y, workArea.y + workArea.height - h);
+  return { x: Math.round(x), y: Math.round(y), width, height: h };
+}
+export { isAnchor };
+
 // At most one call per `ms`; a call inside the window schedules one trailing call, so the last
 // change is always delivered. Monotonic clock by default; the wait is clamped to `ms` anyway, so a
 // clock that steps backwards can never freeze the trailing call.
