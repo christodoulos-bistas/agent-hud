@@ -86,6 +86,16 @@ function cardSlot(card, nowMs, { leftMs, arming = false } = {}) {
   return `<div class="card-slot" data-key="card:${esc(card.id)}" data-sticky>${renderCard(card, { leftMs: left, arming })}</div>`;
 }
 
+// Claude's last message, while it is the user's turn (main sends lastMessage only then).
+function finishedBlock(d) {
+  const m = typeof d.lastMessage === 'string' ? d.lastMessage : '';
+  return d.stage === 'turn' && m ? `<p class="lbl">Finished</p><p class="finished">${esc(m)}</p>` : '';
+}
+
+// A question that was not on show before brings the panel back to the top, so it is in view even if the
+// previous agent's details were scrolled down.
+export const shouldScrollTop = (prevCardId, card) => !!card && card.id != null && String(card.id) !== String(prevCardId);
+
 export function renderPanel(detail, nowMs = Date.now(), cardOpts = {}) {
   const d = detail || {};
   const card = d.card && typeof d.card === 'object' ? d.card : null;
@@ -117,6 +127,7 @@ export function renderPanel(detail, nowMs = Date.now(), cardOpts = {}) {
     cardSlot(card, nowMs, cardOpts) +
     '<div class="det" data-key="det">' +
       stuckLine(d, nowMs) +
+      finishedBlock(d) +
       (d.stage === 'needs' && !card ? `<div class="needs-note">${needsNote(d)}</div>` : '') +
       '<p class="lbl">Task</p>' + task +
       nowBlock(d, nowMs) +
@@ -143,6 +154,7 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   const rendered = new WeakMap();
   let detail = null;
   let timer = null;
+  let lastCardId = null;
 
   // The panel takes the keyboard focus only while the user types into a card's text box, and gives it
   // back as soon as the answer is sent or released, or the card goes (main: panel:setInteractive).
@@ -172,12 +184,15 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   const render = () => {
     const now = Date.now();
     const { arming } = cards.show(detail?.card ?? null, now);
-    if (!detail) { root.innerHTML = ''; return; }
+    if (!detail) { root.innerHTML = ''; lastCardId = null; return; }
     const tpl = doc.createElement('template');
     tpl.innerHTML = renderPanel(detail, now, { leftMs: cards.leftMs(now), arming });
     patch(root, tpl.content, rendered);
     cards.refresh();
     cards.tick(now);
+    const c = detail.card ?? null;
+    if (shouldScrollTop(lastCardId, c)) { const sc = doc.getElementById('panel'); if (sc) sc.scrollTop = 0; }
+    lastCardId = c ? String(c.id) : null;
   };
   const swap = (el, html) => { if (el && html && el.outerHTML !== html) el.outerHTML = html; };
   const tick = () => {

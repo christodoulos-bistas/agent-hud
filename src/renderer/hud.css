@@ -77,6 +77,8 @@ button.who-n:hover { text-decoration: underline dotted rgba(240, 233, 218, .5); 
 .st.turn { color: var(--parch); background: rgba(240, 233, 218, .12); border-color: rgba(240, 233, 218, .3); }
 .st.idle { color: var(--sage); background: transparent; border-color: rgba(169, 179, 166, .3); }
 .st.stuck { color: #2a1606; background: #e8a33d; border-color: #b8761d; }
+.st .flag { display: inline-flex; line-height: 0; }
+.st .flag .px { display: block; overflow: visible; }
 .st.think::before, .st.work::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
 .queue { font-size: .72rem; color: var(--gold-l); padding: 6px 12px 8px; border-top: 1px solid rgba(224, 180, 92, .16); background: rgba(224, 180, 92, .05); }
@@ -93,6 +95,10 @@ button.who-n:hover { text-decoration: underline dotted rgba(240, 233, 218, .5); 
 .face.needs { background: radial-gradient(closest-side, rgba(224, 180, 92, .2), rgba(224, 180, 92, 0)); }
 .face .seal { position: absolute; right: -4px; top: -2px; z-index: 2; }
 
+/* a question waits: a steady glow (3 strong pulses and a slow breathe animate it below); a row that just
+   reached "Your turn" glows green-gold briefly (the class goes on animationend) */
+.row.glow-ask { box-shadow: inset 0 0 0 1px rgba(224, 180, 92, .55), inset 0 0 14px 1px rgba(224, 180, 92, .28); }
+.row.glow-done { box-shadow: inset 0 0 0 1px rgba(190, 200, 100, .5), inset 0 0 12px 1px rgba(190, 200, 100, .25); }
 
 /* ---------- motion: only when the user allows it; with reduced motion nothing animates ---------- */
 @media (prefers-reduced-motion: no-preference) {
@@ -105,6 +111,8 @@ button.who-n:hover { text-decoration: underline dotted rgba(240, 233, 218, .5); 
   .fam.f2 { animation-delay: -.8s; }
   .fam.f3 { animation-delay: -1.6s; }
   .seal.call, .st.needs.call { animation: call 1s cubic-bezier(.2, .8, .2, 1) 3; }
+  .row.glow-ask { animation: ask-pulse 1s ease-out 3, ask-breathe 2.4s ease-in-out 3s infinite; }
+  .row.glow-done { animation: done-pulse 1.2s ease-out 2; }
   .st.work::before { animation: blink 1.2s ease-in-out infinite; }
   .seal.call::before { animation: ring 1s ease-out 3; }
   .pennant .g-tw { animation: twinkle 1.4s steps(1, end) 3, gone 1ms 4.2s forwards; }
@@ -123,3 +131,15 @@ button.who-n:hover { text-decoration: underline dotted rgba(240, 233, 218, .5); 
 @keyframes gone { to { opacity: 0; } }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 @keyframes dots { from { width: 0; } to { width: 1em; } }
+@keyframes ask-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(224, 180, 92, .55), inset 0 0 14px 1px rgba(224, 180, 92, .28); }
+  40% { box-shadow: inset 0 0 0 2px rgba(224, 180, 92, 1), inset 0 0 26px 6px rgba(224, 180, 92, .6); }
+}
+@keyframes ask-breathe {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(224, 180, 92, .4), inset 0 0 10px 0 rgba(224, 180, 92, .18); }
+  50% { box-shadow: inset 0 0 0 1px rgba(224, 180, 92, .7), inset 0 0 20px 3px rgba(224, 180, 92, .4); }
+}
+@keyframes done-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(190, 200, 100, .2), inset 0 0 4px 0 rgba(190, 200, 100, .1); }
+  45% { box-shadow: inset 0 0 0 2px rgba(190, 210, 100, .95), inset 0 0 22px 5px rgba(190, 210, 100, .5); }
+}

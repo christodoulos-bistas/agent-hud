@@ -62,3 +62,6 @@ body[data-arrow="left"]::after { left: 0; border-right-color: rgba(224, 180, 92,
 /* The question (cards.css) sits under the agent header, above the task: the panel pops open on it. */
 .card-slot { margin: 0 0 9px; }
 .card-slot .ans { box-shadow: none; }
+
+/* Claude's last message, while it is the user's turn */
+.det .finished { margin: 0 0 8px; padding: 6px 8px; font-size: .78rem; line-height: 1.3; color: var(--parch); background: rgba(160, 192, 108, .1); border-left: 2px solid rgba(160, 192, 108, .6); border-radius: 0 6px 6px 0; }

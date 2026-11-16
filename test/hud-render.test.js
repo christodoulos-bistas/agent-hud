@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { esc, newlyNeeding, renderChip, chipOf, chipText, rowCentreY, renderRow, renderCard, renderParty, picksFrom, replyLeftMs, actionsArmed, clickAllowed, createRenderGate } from '../src/renderer/hud.js';
+import { esc, newlyIn, newlyNeeding, renderChip, chipOf, chipText, rowCentreY, renderRow, renderCard, renderParty, picksFrom, replyLeftMs, actionsArmed, clickAllowed, createRenderGate } from '../src/renderer/hud.js';
 import { GR, CLASSES, MOODS_BADGE, MOODS_ZEE, spriteSvg } from '../src/renderer/sprites.js';
 import { CLASS_IDS } from '../src/main/classes.js';
 
@@ -378,4 +378,26 @@ test('rows and cards hide "open" when the session cannot be focused', () => {
   assert.match(handedOk, /data-act="open"[^>]*>Waiting in its window — open ↗/);
   assert.doesNotMatch(renderCard({ ...permission(), canOpen: false }), /data-act="open-card"/);
   assert.match(renderCard({ ...permission(), canOpen: true }), /data-act="open-card"/);
+});
+
+test('newlyIn reports fresh ids once', () => {
+  const turn = (a) => a?.stage === 'turn';
+  const agents = [agent({ id: 'a', stage: 'turn' }), agent({ id: 'b', stage: 'working' })];
+  const first = newlyIn(agents, new Set(), turn);
+  assert.deepEqual([...first.now], ['a']);
+  assert.deepEqual([...first.fresh], ['a']);
+  assert.equal(newlyIn(agents, first.now, turn).fresh.size, 0);
+  const flip = newlyIn([agent({ id: 'a', stage: 'working' }), agent({ id: 'b', stage: 'turn' })], first.now, turn);
+  assert.deepEqual([...flip.fresh], ['b']);
+  assert.equal(newlyIn(null, undefined, turn).now.size, 0);
+  assert.deepEqual([...newlyNeeding(agents.map((x) => ({ ...x, mood: 'needs' }))).fresh], ['a', 'b']);
+});
+
+test('needs rows carry glow-ask; turn chip contains the pennant svg', () => {
+  const needs = renderRow(agent({ id: 'n', mood: 'needs', stage: 'needs' }));
+  assert.match(needs, /class="row needs[^"]*glow-ask/);
+  assert.ok(!renderRow(agent({ id: 'w', mood: 'working', stage: 'working' })).includes('glow-ask'));
+  const turn = renderRow(agent({ id: 't', mood: 'done', stage: 'turn' }));
+  assert.match(turn, /<span class="st turn"[^>]*><span class="flag"[^>]*><svg[\s\S]*?<\/svg><\/span>Your turn<\/span>/);
+  assert.ok(!turn.includes('glow-done'), 'glow-done is added by the DOM once, not rendered');
 });

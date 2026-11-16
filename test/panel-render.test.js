@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { renderPanel, timeText, arrowOf } from '../src/renderer/panel.js';
+import { renderPanel, timeText, arrowOf, shouldScrollTop } from '../src/renderer/panel.js';
 import { ARM_MS } from '../src/renderer/cards.js';
 
 const NOW = 1_000_000_000;
@@ -178,4 +178,20 @@ test('renderPanel without card unchanged', () => {
   assert.doesNotMatch(h, /class="ans|card-slot|data-sticky/);
   assert.ok(h.startsWith('<div class="fly"'), h.slice(0, 60));
   assert.match(h, /Make the updater keep 3 builds/);
+});
+
+test('renderPanel shows Finished with the escaped last message only for stage turn (Review Focus 5)', () => {
+  const on = renderPanel(detail({ stage: 'turn', current: null, lastMessage: XSS }), NOW);
+  assert.match(on, /<p class="lbl">Finished<\/p>/);
+  assert.ok(on.includes('&lt;img') && !on.includes('<img'));
+  assert.ok(!renderPanel(detail({ stage: 'turn', current: null, lastMessage: '' }), NOW).includes('Finished'));
+  assert.ok(!renderPanel(detail({ stage: 'turn', current: null, lastMessage: null }), NOW).includes('Finished'));
+  assert.ok(!renderPanel(detail({ stage: 'working', lastMessage: 'hello' }), NOW).includes('Finished'));
+});
+
+test('R5: a fresh card id scrolls the panel to the top, the same card does not', () => {
+  assert.equal(shouldScrollTop(null, { id: 'c1' }), true);
+  assert.equal(shouldScrollTop('c1', { id: 'c2' }), true);
+  assert.equal(shouldScrollTop('c1', { id: 'c1' }), false);
+  assert.equal(shouldScrollTop('c1', null), false);
 });
