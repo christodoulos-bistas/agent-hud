@@ -24,6 +24,13 @@ test('signals: Bash "npm test" -> alchemist, "git push origin main" -> herald, "
   assert.deepEqual(cls(ev('Bash', { command: 'ls' }, 0)), []);
 });
 
+test('M1: PowerShell commands signal exactly like Bash', () => {
+  assert.deepEqual(cls(ev('PowerShell', { command: 'npm test' }, 0)), ['alchemist']);
+  assert.deepEqual(cls(ev('PowerShell', { command: 'git push origin main' }, 0)), ['herald']);
+  assert.deepEqual(cls(ev('PowerShell', { command: 'psql -f m.sql' }, 0)), ['vaultkeeper']);
+  assert.deepEqual(cls(ev('PowerShell', { command: 'Get-ChildItem -Force' }, 0)), []);
+});
+
 test('signals: PostToolUseFailure -> hexbreaker; Agent subagent_type Explore -> pathfinder weight 3', () => {
   assert.deepEqual(signalsFromEvent(ev('Bash', { command: 'x' }, 0, 'PostToolUseFailure')), [{ cls: 'hexbreaker', weight: 1 }]);
   assert.deepEqual(signalsFromEvent(ev('Agent', { subagent_type: 'Explore' }, 0)), [{ cls: 'pathfinder', weight: 3 }]);

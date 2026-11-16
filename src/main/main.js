@@ -113,14 +113,23 @@ function toggleWindow() {
 let rendererAlive = false;
 const canHold = () => !!win && !win.isDestroyed() && win.isVisible() && rendererAlive && !win.webContents.isCrashed();
 
+// Non-focusable again, and if the HUD held the focus give it back (blur activates the window
+// underneath); a HUD that never had the focus is not blurred, so nothing else gets activated.
+function releaseFocus() {
+  if (!win || win.isDestroyed()) return;
+  const had = win.isFocused();
+  win.setFocusable(false);
+  if (had) win.blur();
+}
+
 function setInteractive(on) {
   if (!win || win.isDestroyed()) return;
-  if (on) { win.setFocusable(true); win.focus(); } else win.setFocusable(false);
+  if (on) { win.setFocusable(true); win.focus(); } else releaseFocus();
 }
 
 function setCollapsed(on) {
   collapsed = !!on;
-  if (win && !win.isDestroyed()) win.setFocusable(false);
+  releaseFocus();
   dock();
   push();
   refreshMenu();
@@ -199,7 +208,9 @@ fromHud('hud:answer', (id, response) => {
   const item = queue.list().find((i) => i.id === id);
   if (!item) return;
   // An answer that doesn't fit its card is handed back to the session's own window.
-  queue.answer(id, encodeAnswer(item, response) ?? RELEASE);
+  const encoded = encodeAnswer(item, response);
+  if (encoded && item.kind === 'reply') store.replySent(item.sessionId); // Claude carries on: not "finished"
+  queue.answer(id, encoded ?? RELEASE);
 });
 fromHud('hud:release', (id) => queue.answer(id, RELEASE));
 fromHud('hud:setReplyOptIn', (sessionId, on) => { store.setReplyOptIn(sessionId, !!on); push(); });

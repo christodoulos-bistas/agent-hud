@@ -17,6 +17,7 @@ test('activityLine for each tool in the table', () => {
   assert.equal(l('Edit', { file_path: '/a/b/y.ts' }), 'editing y.ts');
   assert.equal(l('Write', { file_path: 'z.md' }), 'editing z.md');
   assert.equal(l('Bash', { command: 'x'.repeat(60) }), 'running ' + 'x'.repeat(40));
+  assert.equal(l('PowerShell', { command: 'Get-ChildItem -Force' }), 'running Get-ChildItem -Force');
   assert.equal(l('Grep', {}), 'searching code');
   assert.equal(l('Glob', {}), 'searching code');
   assert.equal(l('WebSearch', {}), 'searching the web');
@@ -231,6 +232,32 @@ test('I8: a session missing from one poll (half-written file) keeps its row, dat
   store.setSessions([S('s2', { startedAt: 9 })]);
   assert.deepEqual(forgot, ['s1']);
   assert.deepEqual(store.snapshot().agents.map((x) => x.id), ['s2']);
+});
+
+test('M3: after a reply is sent the row reads working, not finished', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1')]);
+  store.onEvent(ev('s1', 'PreToolUse', 1000, { toolName: 'Read', toolInput: { file_path: 'a.js' } }));
+  set(1010);
+  store.onEvent(ev('s1', 'Stop', 1010));
+  set(30000);
+  assert.equal(store.snapshot().agents[0].mood, 'done');
+  store.replySent('s1');
+  const a = store.snapshot().agents[0];
+  assert.equal(a.mood, 'working');
+  assert.equal(a.activity, 'thinking');
+  set(30000 + 21000);
+  assert.equal(store.snapshot().agents[0].mood, 'idle', 'no longer "finished" even after the working window');
+});
+
+test('M3: replySent counts as main-thread activity (a needs Notification before it goes stale)', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1')]);
+  store.onEvent(ev('s1', 'Notification', 1000, { raw: { notification_type: 'agent_needs_input' } }));
+  assert.equal(store.snapshot().agents[0].mood, 'needs');
+  set(1005);
+  store.replySent('s1');
+  assert.equal(store.snapshot().agents[0].mood, 'working');
 });
 
 test('I2b: a needs-type Notification is cleared by Stop', () => {

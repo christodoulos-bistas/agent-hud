@@ -106,7 +106,7 @@ function cardOpen(card, kind, { parch = false, arming = false } = {}) {
 }
 
 const WANTS = {
-  Bash: 'wants to run a command', Edit: 'wants to edit a file', Write: 'wants to edit a file', MultiEdit: 'wants to edit a file',
+  Bash: 'wants to run a command', PowerShell: 'wants to run a command', Edit: 'wants to edit a file', Write: 'wants to edit a file', MultiEdit: 'wants to edit a file',
   NotebookEdit: 'wants to edit a notebook', Read: 'wants to read a file', WebFetch: 'wants to open a web page', WebSearch: 'wants to search the web',
 };
 
@@ -126,7 +126,7 @@ function permissionCard(card, arming) {
   // Only addRules suggestions are forwarded (wiring.js encodeAnswer), so only they earn the box.
   const canAlways = Array.isArray(p.permission_suggestions) && p.permission_suggestions.some((s) => s?.type === 'addRules');
   const always = canAlways
-    ? `<label class="chk"><input type="checkbox" data-always><i></i>${tool === 'Bash' ? 'Always allow this exact command here' : 'Always allow this here'}</label>`
+    ? `<label class="chk"><input type="checkbox" data-always><i></i>${tool === 'Bash' || tool === 'PowerShell' ? 'Always allow this exact command here' : 'Always allow this here'}</label>`
     : '';
   return cardOpen(card, 'permission', { arming }) +
     cardTop(card, '<span class="ans-seal" aria-hidden="true">!</span>') +

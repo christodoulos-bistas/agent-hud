@@ -66,6 +66,14 @@ test('permission card from a sub-agent names its helper; no suggestions means no
   assert.ok(renderCard(permission({ agent_type: XSS })).includes('via &lt;img'));
 });
 
+test('M1: a PowerShell permission reads like Bash (run a command, exact-command always copy)', () => {
+  const html = renderCard(permission({ tool_name: 'PowerShell', tool_input: { command: 'Get-ChildItem -Force' },
+    permission_suggestions: [{ type: 'addRules', rules: [{ toolName: 'PowerShell', ruleContent: 'Get-ChildItem -Force' }], behavior: 'allow', destination: 'localSettings' }] }));
+  assert.ok(html.includes('Hexbreaker wants to run a command'));
+  assert.ok(html.includes('Always allow this exact command here'));
+  assert.ok(html.includes('Get-ChildItem -Force'));
+});
+
 test('I6: the always box shows only when at least one addRules suggestion exists', () => {
   const MODE = { type: 'setMode', mode: 'acceptEdits', destination: 'session' };
   assert.ok(!renderCard(permission({ permission_suggestions: [MODE] })).includes('data-always'));

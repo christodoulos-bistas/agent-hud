@@ -21,7 +21,7 @@ function toolClass(name, input) {
   if (name === 'WebSearch' || name === 'WebFetch') return 'loremaster';
   if (name === 'ExitPlanMode') return 'star-reader';
   if (typeof name === 'string' && name.startsWith('mcp__azure-devops__')) return 'herald';
-  if (name === 'Bash') {
+  if (name === 'Bash' || name === 'PowerShell') {
     const c = String(input.command || '').replace(/"[^"]*"|'[^']*'/g, '');
     if (/\bgit (push|commit|merge|tag)\b|\bgh\b|\baz (repos|pipelines)\b/.test(c)) return 'herald';
     if (/\bpsql\b|\bmigrat/.test(c) || /\.sql\b/.test(c)) return 'vaultkeeper';

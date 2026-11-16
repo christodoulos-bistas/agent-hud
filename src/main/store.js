@@ -11,7 +11,7 @@ export function activityLine(ev) {
   switch (t) {
     case 'Read': return `reading ${path.win32.basename(String(i.file_path || ''))}`;
     case 'Edit': case 'Write': return `editing ${path.win32.basename(String(i.file_path || ''))}`;
-    case 'Bash': return `running ${String(i.command || '').slice(0, 40)}`;
+    case 'Bash': case 'PowerShell': return `running ${String(i.command || '').slice(0, 40)}`;
     case 'Grep': case 'Glob': return 'searching code';
     case 'WebSearch': return 'searching the web';
     case 'WebFetch': {
@@ -85,6 +85,16 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
 
   function setReplyOptIn(id, on) { optIn.set(id, !!on); }
 
+  // A reply sent from the HUD resumes the session; no hook announces it (SPIKES.md 3a), so mark it here.
+  function replySent(id) {
+    const s = st(id);
+    const t = now();
+    s.lastActivityAt = t;
+    s.lastMainActivityAt = t;
+    s.stoppedAt = null;
+    s.activity = 'thinking';
+  }
+
   const displayOf = (id) => {
     const sess = sessions.find((x) => x.sessionId === id);
     if (sess) return displayName(sess);
@@ -120,5 +130,5 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     return { agents, card, next, counts: { total: agents.length, needs: agents.filter((x) => x.mood === 'needs').length } };
   }
 
-  return { onEvent, setSessions, setReplyOptIn, snapshot };
+  return { onEvent, setSessions, setReplyOptIn, replySent, snapshot };
 }
