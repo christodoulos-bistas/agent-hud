@@ -9,11 +9,11 @@ const W = 340, H = 200, X = 200, Y = 200 // DIP
 const dir = mkdtempSync(join(tmpdir(), 'panel-focus-'))
 const preload = join(dir, 'preload.cjs')
 writeFileSync(preload, `const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('spike',{click:()=>ipcRenderer.send('clicked')})`)
-const html = `<body style="margin:0"><button id=b style="position:fixed;inset:0;font:24px sans-serif" onclick="spike.click()">Click</button></body>`
+const html = `<body style="margin:0;background:#1e1e2e"><button id=b style="position:fixed;inset:0;font:24px sans-serif" onclick="spike.click()">Click</button></body>`
 
 app.whenReady().then(() => {
   const win = new BrowserWindow({
-    width: W, height: H, x: X, y: Y, frame: false, alwaysOnTop: true, focusable: false, skipTaskbar: true, show: false,
+    width: W, height: H, x: X, y: Y, frame: false, transparent: true, resizable: false, alwaysOnTop: true, focusable: false, skipTaskbar: true, show: false,
     webPreferences: { sandbox: true, contextIsolation: true, preload }
   })
   ipcMain.on('clicked', () => console.log(`CLICKED ${Date.now()}`))

@@ -138,9 +138,9 @@ with Notepad given the foreground first.
 
 | Run | Foreground before | Foreground after | CLICKED | FOCUSED |
 | --- | --- | --- | --- | --- |
-| 1 | `New Text Document (3).txt - Notepad` (hwnd 8587932) | same | yes (first line within ~1 s of the click) | never |
-| 2 | `New Text Document (3).txt - Notepad` (hwnd 17435874) | same | yes | never |
-| 3 | `New Text Document (3).txt - Notepad` (hwnd 2952074) | same | yes | never |
+| 1 (A: no transparent/resizable) | `New Text Document (3).txt - Notepad` (hwnd 8587932) | same | yes (first line within ~1 s of the click) | never |
+| 2 (A) | `New Text Document (3).txt - Notepad` (hwnd 17435874) | same | yes | never |
+| 3 (A) | `New Text Document (3).txt - Notepad` (hwnd 2952074) | same | yes | never |
 
 Output excerpt (run 1): `READY scale=1 bounds={"x":200,"y":200,"width":340,"height":200} centerPhysical=370,300` then `CLICKED 1794828951145`.
 Extra later `CLICKED` lines in runs 1-2 (and a lone one in run 3 is the scripted click) came after the script's click while the cursor sat over the button for 20 s;
@@ -148,3 +148,17 @@ likely real user/other-process clicks - not attributable to the script, and none
 
 **Result: `PANEL_CLICK_MODE = 'plain'`** - plain `onclick` buttons work in a `focusable:false` window, no focus theft. Task 6 needs no pointerdown-focus workaround.
 Caveat: synthetic `mouse_event` clicks, one machine (Win 11, scale 1); not tested at >100% scaling or with a real editor (VS Code) foreground.
+
+### Spike 6, re-run B - real panel options (`transparent: true`, `resizable: false`, opaque dark body `#1e1e2e`)
+
+The runs in the table above (labelled A) used neither option. Re-run with them, driver `spikes/panel-focus-drive.ps1` (starts its own Notepad, records its PIDs, kills only those):
+
+| Run | Foreground before | Foreground after | CLICKED | FOCUSED |
+| --- | --- | --- | --- | --- |
+| 1 (B) | `New Text Document (3).txt - Notepad` | same | yes | never |
+| 2 (B) | same | same | yes | never |
+| 3 (B) | same | same | yes | never |
+
+Verdict unchanged: **`PANEL_CLICK_MODE = 'plain'`**. Same caveats (synthetic clicks, scale 1, Notepad not an editor).
+
+Evidence note: the `FOCUSED` poll is close to tautological - `BrowserWindow.getFocusedWindow()` never returns a `focusable:false` window, so its silence proves little. The only real evidence for "no focus theft" is the foreground-title check (`GetForegroundWindow` + `GetWindowText` before vs after); `CLICKED` is the evidence that the click registered.
