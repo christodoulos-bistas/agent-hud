@@ -13,7 +13,7 @@ import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor } from './focus.js';
-import { encodeAnswer, dockBounds, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget } from './wiring.js';
+import { encodeAnswer, dockBounds, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
@@ -358,8 +358,13 @@ async function start() {
 }
 
 // A second launch shows the running HUD; `--quit` asks it to quit the normal way (holds released).
+// `--remove-hooks` (run by the uninstaller, build/installer.nsh) takes the hooks out of the settings
+// file and exits 0: no window, no server, no single-instance handshake.
 const WANT_QUIT = process.argv.includes('--quit');
-if (!app.requestSingleInstanceLock({ quit: WANT_QUIT })) {
+if (process.argv.includes('--remove-hooks')) {
+  log('--remove-hooks:', removeHooksCli({ target: TARGET, uninstall: uninstallHooks }).message);
+  app.exit(0);
+} else if (!app.requestSingleInstanceLock({ quit: WANT_QUIT })) {
   app.quit();
 } else if (WANT_QUIT) {
   app.quit(); // nothing running to quit; don't start one

@@ -1,6 +1,7 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, createThrottle, createInteractiveCheck, loadConfig, settingsTarget } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli } from '../src/main/wiring.js';
+import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
 
 const SUGG = [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test' }], behavior: 'allow', destination: 'localSettings' }];
@@ -75,6 +76,27 @@ test('createThrottle: a call during the window is never lost', () => {
   const c = fakeClock(); let n = 0;
   const push = createThrottle(() => { n++; }, 100, c);
   push(); c.advance(99); push(); c.advance(1); assert.equal(n, 2);
+});
+
+test('I10: removeHooksCli removes the HUD hooks from the target file and never throws', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-rm-'));
+  try {
+    const file = path.join(dir, 'settings.json');
+    const user = { model: 'm', hooks: { Stop: [{ matcher: '', hooks: [{ type: 'command', command: 'echo hi' }] }] } };
+    fs.writeFileSync(file, JSON.stringify(user, null, 2) + '\n');
+    assert.equal(installHooks(file, { port: 47821, secret: 'k' }).ok, true);
+    const r = removeHooksCli({ target: { path: file, blocked: false }, uninstall: uninstallHooks });
+    assert.equal(r.ok, true);
+    assert.match(r.message, /removed/);
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), user);
+    const bad = removeHooksCli({ target: { path: file, blocked: false }, uninstall: () => { throw new Error('locked'); } });
+    assert.equal(bad.ok, false); assert.match(bad.message, /locked/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+test('I10: removeHooksCli on a blocked dev build touches nothing', () => {
+  let calls = 0;
+  const r = removeHooksCli({ target: { path: null, blocked: true }, uninstall: () => { calls++; return { ok: true }; } });
+  assert.equal(calls, 0); assert.equal(r.ok, false); assert.match(r.message, /AGENT_HUD_SETTINGS_PATH/);
 });
 
 test('I9b: createThrottle does not freeze when the clock steps backwards', () => {

@@ -83,6 +83,17 @@ export function settingsTarget({ isPackaged, envPath, home }) {
   return { path: path.join(home, '.claude', 'settings.json'), blocked: false };
 }
 
+// `--remove-hooks` (run by the uninstaller): take the HUD's hooks out of the target settings file.
+// Never throws; a blocked dev build touches nothing. Returns { ok, message } for the log.
+export function removeHooksCli({ target, uninstall }) {
+  if (!target || target.blocked || !target.path) return { ok: false, message: 'dev build without AGENT_HUD_SETTINGS_PATH: hooks not changed' };
+  let r;
+  try { r = uninstall(target.path); } catch (err) { r = { ok: false, error: err?.message ?? String(err) }; }
+  return r?.ok
+    ? { ok: true, message: `hooks removed from ${target.path}` }
+    : { ok: false, message: `could not remove hooks from ${target.path}: ${r?.error}` };
+}
+
 // config.json: { port, secret, ...flags }. Missing or broken values are repaired and written back.
 export function loadConfig(file) {
   let cfg = {};
