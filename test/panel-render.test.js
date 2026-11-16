@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { renderPanel, timeText } from '../src/renderer/panel.js';
+import { renderPanel, timeText, arrowOf } from '../src/renderer/panel.js';
 
 const NOW = 1_000_000_000;
 const XSS = '<img src=x onerror=alert(1)>';
@@ -86,6 +86,15 @@ test('time texts carry their start (data-since) so the 1 s tick can refresh them
 test('the header shows the class display name, not the raw class id (R5b)', () => {
   assert.match(renderPanel(detail({ cls: 'star-reader' }), NOW), /<span class="cls">Star-Reader<\/span>/);
   assert.match(renderPanel(detail({ cls: 'no-such-class' }), NOW), /<span class="cls">Pathfinder<\/span>/);
+});
+
+test('arrowOf: the arrow sits on the edge facing the HUD, its 16 px triangle centred on arrowY (R6)', () => {
+  assert.deepEqual(arrowOf({ side: 'left', arrowY: 40 }), { edge: 'right', top: 32 }, 'panel left of the HUD: arrow on its right edge');
+  assert.deepEqual(arrowOf({ side: 'right', arrowY: 100.4 }), { edge: 'left', top: 92 });
+  assert.deepEqual(arrowOf({ side: 'right', arrowY: 3 }), { edge: 'left', top: 0 }, 'never above the window');
+  assert.deepEqual(arrowOf({ side: 'up', arrowY: 40 }), { edge: null, top: null });
+  assert.deepEqual(arrowOf({ side: 'left', arrowY: 'x' }), { edge: null, top: null });
+  assert.deepEqual(arrowOf(null), { edge: null, top: null });
 });
 
 test('importing panel.js in Node does not throw', async () => {

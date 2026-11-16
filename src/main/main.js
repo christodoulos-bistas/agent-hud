@@ -54,6 +54,8 @@ let selected = null;
 let panelWin = null;
 let panelHeight = 200; // until the panel reports its content height
 let sentDetail; // JSON of the last detail sent, so an unchanged one doesn't re-render the panel
+let place = null; // { side, arrowY } of the last placement, for the panel's arrow
+let sentPlace; // JSON of the last place sent
 
 const queue = createQueue({ holdMs: HOLD_MS, replyMs: REPLY_MS, onError: log });
 const engine = createClassEngine();
@@ -84,6 +86,14 @@ function pushDetailNow() {
   try { panelWin.webContents.send('detail', d); sentDetail = json; } catch (err) { log('detail', err); }
 }
 const pushDetail = createThrottle(pushDetailNow, PUSH_MS);
+
+// Where the panel's arrow goes: sent on `place` whenever the side or the row's height changes.
+function sendPlace() {
+  if (!panelWin || panelWin.isDestroyed() || !place) return;
+  const json = JSON.stringify(place);
+  if (json === sentPlace) return;
+  try { panelWin.webContents.send('place', place); sentPlace = json; } catch (err) { log('place', err); }
+}
 
 // The 1 s stage tick: stages and stuck hints move on with the clock alone (thinking -> silent, a long
 // step), so push when any agent's stage or stuck flag changed. The renderers tick their own clocks.
@@ -247,6 +257,7 @@ function consoleLog(tag) {
 function panelWindow() {
   if (panelWin && !panelWin.isDestroyed()) return panelWin;
   sentDetail = undefined;
+  sentPlace = undefined;
   panelWin = new BrowserWindow({
     width: PANEL_WIDTH, height: panelHeight, frame: false, transparent: true, alwaysOnTop: true, skipTaskbar: true,
     focusable: false, resizable: false, movable: false, show: false,
@@ -256,7 +267,12 @@ function panelWindow() {
   const wc = pw.webContents;
   wc.setWindowOpenHandler(() => ({ action: 'deny' }));
   wc.on('will-navigate', (e) => e.preventDefault());
-  wc.on('did-finish-load', () => { sentDetail = undefined; pushDetailNow(); }); // anything sent while loading was lost
+  wc.on('did-finish-load', () => { // anything sent while loading was lost
+    sentDetail = undefined;
+    sentPlace = undefined;
+    pushDetailNow();
+    sendPlace();
+  });
   wc.on('console-message', consoleLog('panel:'));
   wc.on('render-process-gone', (_e, details) => {
     log('panel renderer gone', details?.reason);
@@ -282,6 +298,8 @@ function placePanel(snap) {
   const pw = panelWindow();
   const b = panelBounds(win.getBounds(), workArea(), { width: PANEL_WIDTH, height: panelHeight, rowY: selected.rowY });
   pw.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
+  place = { side: b.side, arrowY: b.arrowY };
+  sendPlace();
   if (!pw.isVisible()) pw.showInactive();
 }
 

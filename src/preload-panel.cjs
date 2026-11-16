@@ -8,6 +8,12 @@ contextBridge.exposeInMainWorld('panel', {
     ipcRenderer.on('detail', listener);
     return () => ipcRenderer.removeListener('detail', listener);
   },
+  onPlace(fn) {
+    if (typeof fn !== 'function') return undefined;
+    const listener = (_e, place) => fn(place);
+    ipcRenderer.on('place', listener);
+    return () => ipcRenderer.removeListener('place', listener);
+  },
   close: () => ipcRenderer.send('panel:close'),
   openWindow: () => ipcRenderer.send('panel:openWindow'),
   reportHeight: (px) => ipcRenderer.send('panel:reportHeight', Number(px)),

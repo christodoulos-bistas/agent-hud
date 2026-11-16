@@ -2,7 +2,7 @@
 // the tests; bootPanel wires it to the DOM and to window.panel from the preload. Every string that
 // comes from the detail goes through esc() before it reaches markup.
 import { spriteSvg } from './sprites.js';
-import { esc, renderChip, className } from './hud.js';
+import { esc, renderChip, chipOf, className } from './hud.js';
 import { fmtDuration } from './format.js';
 
 const MAX_STEPS = 5;
@@ -100,14 +100,24 @@ export function renderPanel(detail, nowMs = Date.now()) {
   '</div>';
 }
 
+// The arrow pointing at the clicked HUD row. Main places the panel (side: where it sits relative to the
+// HUD; arrowY: px from the panel's top); the arrow goes on the edge facing the HUD, its 16 px
+// triangle centred on arrowY. Anything malformed: no arrow.
+export function arrowOf(place) {
+  const side = place?.side;
+  const y = place?.arrowY;
+  if ((side !== 'left' && side !== 'right') || !finite(y)) return { edge: null, top: null };
+  return { edge: side === 'left' ? 'right' : 'left', top: Math.max(0, Math.round(Number(y)) - 8) };
+}
+
 export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   const root = doc.getElementById('panel-root');
   let detail = null;
   let timer = null;
 
   // A full render only when a new detail arrives; between details the 1 s tick rewrites the time
-  // texts in place (and swaps the chip and the stuck line, which hold no buttons), so a click that
-  // straddles a tick still lands and a focused button keeps its focus.
+  // texts and the chip's clock in place (and swaps the stuck line, which holds no buttons), so a
+  // click that straddles a tick still lands and a focused button keeps its focus.
   const render = () => { root.innerHTML = detail ? renderPanel(detail, Date.now()) : ''; };
   const swap = (el, html) => { if (el && html && el.outerHTML !== html) el.outerHTML = html; };
   const tick = () => {
@@ -117,9 +127,20 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
       const text = timeText(el.dataset, now);
       if (el.textContent !== text) el.textContent = text;
     }
-    swap(root.querySelector('.fly-top > .st'), renderChip(detail, now));
+    const chip = root.querySelector('.fly-top > .st');
+    const c = chipOf(detail, now);
+    if (chip && chip.classList.contains(c.cls)) { if (chip.textContent !== c.text) chip.textContent = c.text; } else swap(chip, renderChip(detail, now));
     swap(root.querySelector('.det > .warn'), stuckLine(detail, now));
   };
+
+  // The arrow lives on <body> (a CSS triangle in an 8 px gutter, panel.css), outside the scrolling list.
+  api.onPlace?.((place) => {
+    const { edge, top } = arrowOf(place);
+    if (edge) {
+      doc.body.dataset.arrow = edge;
+      doc.body.style.setProperty('--arrow-top', `${top}px`);
+    } else delete doc.body.dataset.arrow;
+  });
 
   root.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');

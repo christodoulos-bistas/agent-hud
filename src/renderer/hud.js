@@ -67,23 +67,34 @@ const STAGE_OF_MOOD = { needs: 'needs', done: 'turn', working: 'working', idle: 
 const finite = (v) => v != null && Number.isFinite(Number(v));
 const since = (from, nowMs) => fmtDuration(Number(nowMs) - Number(from));
 
-// The stage chip: a coloured pill with the agent's stage and how long it has been that way.
-export function renderChip(agent, nowMs = Date.now()) {
+// The stage chip's class and text. `timed` chips (Working, Idle with a time) show a clock, which the
+// renderers' 1 s ticks rewrite in place without re-rendering the row.
+export function chipOf(agent, nowMs = Date.now()) {
   const a = agent || {};
-  if (a.stuck) return '<span class="st stuck">⚠ Stuck?</span>';
+  if (a.stuck) return { cls: 'stuck', text: '⚠ Stuck?', timed: false };
   const stage = STAGES.has(a.stage) ? a.stage : STAGE_OF_MOOD[moodOf(a)];
   switch (stage) {
-    case 'needs': return '<span class="st needs">Needs you</span>';
-    case 'turn': return '<span class="st turn">Your turn</span>';
-    case 'thinking': return '<span class="st think">Thinking</span>';
+    case 'needs': return { cls: 'needs', text: 'Needs you', timed: false };
+    case 'turn': return { cls: 'turn', text: 'Your turn', timed: false };
+    case 'thinking': return { cls: 'think', text: 'Thinking', timed: false };
     case 'working': {
       const from = finite(a.currentStepStartedAt) ? a.currentStepStartedAt : a.stageSince;
-      return `<span class="st work">Working${finite(from) ? ` · ${since(from, nowMs)}` : ''}</span>`;
+      return { cls: 'work', text: `Working${finite(from) ? ` · ${since(from, nowMs)}` : ''}`, timed: finite(from) };
     }
     default:
-      return `<span class="st idle">Idle${finite(a.lastActivityAt) ? ` · ${since(a.lastActivityAt, nowMs)}` : ''}</span>`;
+      return { cls: 'idle', text: `Idle${finite(a.lastActivityAt) ? ` · ${since(a.lastActivityAt, nowMs)}` : ''}`, timed: finite(a.lastActivityAt) };
   }
 }
+
+// The stage chip: a coloured pill with the agent's stage and how long it has been that way.
+export function renderChip(agent, nowMs = Date.now()) {
+  const c = chipOf(agent, nowMs);
+  return `<span class="st ${c.cls}">${esc(c.text)}</span>`;
+}
+
+// A row's vertical centre in CSS px from the top of the HUD window (its bounding rect is viewport-
+// relative), so a scrolled list reports where the row is on screen: main adds it to the window's y.
+export const rowCentreY = (rect) => Math.round((rect.top + rect.height / 2) * 10) / 10;
 
 // Which agents need you now, and which of those did not before (they get the arrival pulse).
 export function newlyNeeding(agents, prev = new Set()) {
@@ -323,7 +334,21 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
   };
   const leftMs = () => replyLeftMs(st.card, Date.now(), st.cardSince);
 
+  const rowEl = (id) => root.querySelector(`[data-key="row:${String(id).replace(/["\\]/g, '\\$&')}"]`);
+
+  // Row clocks: a timed chip's text is rewritten in place, so the row (its bob and dots animations,
+  // its buttons) is never replaced just because a second went by.
+  function tickChips(now) {
+    for (const a of Array.isArray(st.snap?.agents) ? st.snap.agents : []) {
+      const c = chipOf(a, now);
+      if (!c.timed) continue;
+      const el = rowEl(a?.id)?.querySelector('.mark .st');
+      if (el && el.classList.contains(c.cls) && el.textContent !== c.text) el.textContent = c.text;
+    }
+  }
+
   function tick() {
+    if (!st.collapsed) tickChips(Date.now());
     const el = root.querySelector('[data-left]');
     const left = leftMs();
     if (!el || left === undefined) return;
@@ -343,18 +368,14 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     }, Math.max(0, st.cardSince + ARM_MS - Date.now()));
   }
 
-  // The row's vertical centre in CSS px from the top of #hud-root.
-  const rowCentre = (rowEl) => {
-    const r = rowEl.getBoundingClientRect();
-    return Math.round((r.top + r.height / 2 - root.getBoundingClientRect().top) * 10) / 10;
-  };
+  const rowCentre = (el) => rowCentreY(el.getBoundingClientRect());
   let lastOffset = null;
   function syncRowOffset(snap) {
     const id = snap?.selected != null ? String(snap.selected) : null;
     if (id == null) { lastOffset = null; return; }
-    const rowEl = root.querySelector(`[data-key="row:${id.replace(/["\\]/g, '\\$&')}"]`);
-    if (!rowEl) return;
-    const y = rowCentre(rowEl);
+    const el = rowEl(id);
+    if (!el) return;
+    const y = rowCentre(el);
     if (lastOffset == null || Math.abs(y - lastOffset) >= 1) { lastOffset = y; call('rowOffset', id, y); }
   }
 
@@ -428,8 +449,8 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
       case 'expand':
         st.collapsed = false; call('collapse', false); render(); break;
       case 'select': {
-        const rowEl = el.closest('.row');
-        if (rowEl) { lastOffset = rowCentre(rowEl); call('selectAgent', el.dataset.session, lastOffset); }
+        const row = el.closest('.row');
+        if (row) { lastOffset = rowCentre(row); call('selectAgent', el.dataset.session, lastOffset); }
         break;
       }
       case 'open':
@@ -503,6 +524,8 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     const h = Math.ceil(root.getBoundingClientRect().height);
     if (h !== lastHeight) { lastHeight = h; call('reportHeight', h); }
   }).observe(root);
+  // Scrolling the list moves the selected row on screen: the panel's arrow follows it.
+  doc.getElementById('hud')?.addEventListener('scroll', () => syncRowOffset(st.snap), { passive: true });
 
   setInterval(tick, 1000);
   render();

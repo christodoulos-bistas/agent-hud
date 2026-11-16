@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { esc, newlyNeeding, renderChip, renderRow, renderCard, renderParty, picksFrom, replyLeftMs, actionsArmed, clickAllowed } from '../src/renderer/hud.js';
+import { esc, newlyNeeding, renderChip, chipOf, rowCentreY, renderRow, renderCard, renderParty, picksFrom, replyLeftMs, actionsArmed, clickAllowed } from '../src/renderer/hud.js';
 import { GR, CLASSES, MOODS_BADGE, MOODS_ZEE, spriteSvg } from '../src/renderer/sprites.js';
 import { CLASS_IDS } from '../src/main/classes.js';
 
@@ -169,6 +169,26 @@ test('renderChip: one chip per stage, with live clocks', () => {
   assert.equal(renderChip(agent({ stage: 'idle', lastActivityAt: now - 25 * 60000 }), now), '<span class="st idle">Idle · 25m</span>');
   assert.equal(renderChip(agent({ stage: 'working', stuck: { reason: 'x', detail: 'y' } }), now), '<span class="st stuck">⚠ Stuck?</span>');
   assert.equal(renderChip(agent({ stage: 'thinking', stuck: { reason: 'x', detail: 'y' } }), now), '<span class="st stuck">⚠ Stuck?</span>');
+});
+
+test('chipOf: class and text of the chip; only Working and Idle with a time are timed (the 1 s tick rewrites those, R7a)', () => {
+  const now = 1_000_000_000;
+  const w = agent({ stage: 'working', currentStepStartedAt: now - 45000 });
+  assert.deepEqual(chipOf(w, now), { cls: 'work', text: 'Working · 45s', timed: true });
+  assert.deepEqual(chipOf(w, now + 1000), { cls: 'work', text: 'Working · 46s', timed: true }, 'a second later');
+  assert.deepEqual(chipOf(agent({ stage: 'idle', lastActivityAt: now - 25 * 60000 }), now), { cls: 'idle', text: 'Idle · 25m', timed: true });
+  assert.deepEqual(chipOf(agent({ stage: 'idle', lastActivityAt: null }), now), { cls: 'idle', text: 'Idle', timed: false });
+  assert.equal(chipOf(agent({ stage: 'needs' }), now).timed, false);
+  assert.equal(chipOf(agent({ stage: 'working', stuck: { reason: 'x', detail: 'y' } }), now).timed, false);
+  for (const a of [w, agent({ stage: 'turn' }), agent({ stage: 'working', stuck: { reason: 'x' } })]) {
+    const c = chipOf(a, now);
+    assert.equal(renderChip(a, now), `<span class="st ${c.cls}">${c.text}</span>`, 'renderChip wraps chipOf');
+  }
+});
+
+test('rowCentreY: the row centre from the window top (the visible position), not from the top of the scrolled list (R7b)', () => {
+  assert.equal(rowCentreY({ top: 100, height: 50 }), 125);
+  assert.equal(rowCentreY({ top: -30.04, height: 62 }), 1, 'scrolled partly out of view: still measured from the window top');
 });
 
 test('renderRow: name and sprite select; name no longer opens; handed-back link still opens', () => {
