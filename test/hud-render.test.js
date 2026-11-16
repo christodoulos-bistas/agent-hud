@@ -357,3 +357,13 @@ test('I1: the render gate holds renders while a pointer is down and applies only
   g.up(); fire(0);
   assert.deepEqual(applied, ['a', 'd', 'e', 'f']);
 });
+
+test('rows and cards hide "open" when the session cannot be focused', () => {
+  const handed = renderRow(agent({ mood: 'needs', stage: 'needs', handedBack: true, canOpen: false }));
+  assert.match(handed, /Waiting in its window/);
+  assert.doesNotMatch(handed, /data-act="open"/);
+  const handedOk = renderRow(agent({ mood: 'needs', stage: 'needs', handedBack: true, canOpen: true }));
+  assert.match(handedOk, /data-act="open"[^>]*>Waiting in its window — open ↗/);
+  assert.doesNotMatch(renderCard({ ...permission(), canOpen: false }), /data-act="open-card"/);
+  assert.match(renderCard({ ...permission(), canOpen: true }), /data-act="open-card"/);
+});

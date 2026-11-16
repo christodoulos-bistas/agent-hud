@@ -38,6 +38,8 @@ export async function listSessions({ dir, isAlive }) {
 export function displayName(s) {
   const base = baseOf(s.cwd) || 'unknown';
   const name = String(s.name || '');
-  const short = s.nameSource === 'derived' ? name.slice(name.lastIndexOf('-') + 1) : name;
+  // A chat with its own title shows just the title; a derived name ("arsenal-e0") keeps the folder.
+  if (name && s.nameSource !== 'derived') return name;
+  const short = name.slice(name.lastIndexOf('-') + 1);
   return short ? `${base} · ${short}` : base;
 }

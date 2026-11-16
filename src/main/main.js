@@ -1,6 +1,7 @@
 // Agent HUD main process: the hook server, the session poll and the store, wired to an
 // always-on-top window docked bottom-right and a tray menu.
-import { app, BrowserWindow, Tray, Menu, ipcMain, screen, dialog, shell, nativeImage } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, screen, dialog, nativeImage } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
@@ -12,7 +13,7 @@ import { installHooks, uninstallHooks } from './settings-hooks.js';
 import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createStore } from './store.js';
-import { openCommandFor } from './focus.js';
+import { openCommandFor, resolveCodeCmd, canOpen } from './focus.js';
 import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli, guarded } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -64,7 +65,12 @@ let sentPlace; // JSON of the last place sent
 
 const queue = createQueue({ holdMs: HOLD_MS, replyMs: REPLY_MS, onError: log });
 const engine = createClassEngine();
-const store = createStore({ engine, queue, holdMs: HOLD_MS, replyMs: REPLY_MS, onError: (err) => log('step log', err) });
+// Full path of VS Code's code.cmd (a bare "code" makes code.cmd look for Code.exe in the wrong place).
+const CODE_CMD = resolveCodeCmd({
+  pathEnv: process.env.PATH ?? process.env.Path, localAppData: process.env.LOCALAPPDATA,
+  exists: (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } },
+});
+const store = createStore({ engine, queue, holdMs: HOLD_MS, replyMs: REPLY_MS, onError: (err) => log('step log', err), canOpen: (s) => canOpen(s, { codeCmd: CODE_CMD }) });
 
 // ---------------------------------------------------------------- snapshot
 
@@ -321,30 +327,27 @@ function select(next) {
 
 // ---------------------------------------------------------------- opening a session's window
 
-function spawnQuiet(cmd, args, fallback) {
-  let fellBack = false;
-  const fall = (why) => { if (fellBack) return; fellBack = true; debug('open fallback', cmd, why); fallback?.(); };
+// Runs the focus command; a failure is only logged (no Explorer-folder fallback any more).
+function spawnQuiet(cmd, args) {
   let child;
   try {
-    if (process.platform === 'win32' && cmd === 'code') {
-      // `code` is a .cmd shim: run it through cmd.exe, every argument quoted.
+    if (process.platform === 'win32' && /\.cmd$/i.test(cmd)) {
+      // code.cmd is a batch shim: run it through cmd.exe by its full path, every argument quoted.
       const line = [cmd, ...args].map((a) => `"${String(a).replace(/"/g, '')}"`).join(' ');
       child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${line}"`], { windowsVerbatimArguments: true, windowsHide: true, stdio: 'ignore' });
     } else {
       child = spawn(cmd, args, { windowsHide: true, stdio: 'ignore' });
     }
-  } catch (err) { log('open', err); return fall('spawn threw'); }
-  child.on('error', (err) => { log('open', err.message); fall('error'); });
-  child.on('exit', (code) => { if (code) fall(`exit ${code}`); });
+  } catch (err) { log('open', err); return; }
+  child.on('error', (err) => log('open', err.message));
+  child.on('exit', (code) => { if (code) log('open', `${cmd} exited ${code}`); });
 }
 
 function openWindow(sessionId) {
   const s = sessionById(sessionId);
-  if (!s) return;
-  const c = openCommandFor(s);
-  const openFolder = () => { if (s.cwd) shell.openPath(s.cwd).then((err) => err && log('openPath', err)); };
-  if (c.openPath !== undefined) return openFolder();
-  spawnQuiet(c.cmd, c.args, openFolder);
+  const c = s && openCommandFor(s, { codeCmd: CODE_CMD });
+  if (!c) return; // the button is hidden for sessions we can't focus
+  spawnQuiet(c.cmd, c.args);
 }
 
 // ---------------------------------------------------------------- IPC from the renderer

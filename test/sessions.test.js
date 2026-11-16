@@ -7,7 +7,11 @@ const file = (pid, o = {}) => JSON.stringify({ pid, sessionId: `sid-${pid}`, cwd
 
 test('displayName: derived name uses the suffix after the last dash, custom title is kept', () => {
   assert.equal(displayName({ cwd: 'c:\\Consortis_projects\\arsenal', name: 'arsenal-e0', nameSource: 'derived' }), 'arsenal · e0');
-  assert.equal(displayName({ cwd: 'c:\\Consortis_projects\\arsenal\\', name: 'Agent HUD with fantasy characters', nameSource: 'user' }), 'arsenal · Agent HUD with fantasy characters');
+  // A chat with its own title shows the title alone: two chats in one folder would otherwise both
+  // read "Consortis_projects · …" once the row truncates them.
+  assert.equal(displayName({ cwd: 'c:\\Consortis_projects\\arsenal\\', name: 'Agent HUD with fantasy characters', nameSource: 'user' }), 'Agent HUD with fantasy characters');
+  assert.equal(displayName({ cwd: 'C:\\Consortis_projects', name: 'Consortis GIS site down', nameSource: '' }), 'Consortis GIS site down');
+  assert.equal(displayName({ cwd: 'C:\\Consortis_projects', name: '', nameSource: '' }), 'Consortis_projects');
 });
 
 test('readSessionFiles skips half-written JSON and non-.json files; does not filter liveness', () => {

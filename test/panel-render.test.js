@@ -132,3 +132,11 @@ test('M9: with no known start the footer omits "started … ago"', () => {
   assert.match(h, /class="foot"><span>4 steps<\/span>/);
   assert.doesNotMatch(h, /started/);
 });
+
+test('panel hides "open window" when the session cannot be focused', () => {
+  assert.doesNotMatch(renderPanel(detail({ canOpen: false }), NOW), /data-act="open"/);
+  assert.match(renderPanel(detail({ canOpen: true }), NOW), /data-act="open"/);
+  const handed = renderPanel(detail({ stage: 'needs', handedBack: true, canOpen: false }), NOW);
+  assert.match(handed, /Waiting in its window/);
+  assert.doesNotMatch(handed, /open ↗/);
+});

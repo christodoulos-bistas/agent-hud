@@ -43,7 +43,7 @@ function stuckLine(d, nowMs) {
 // "open window ↗" opens it); or a native prompt the HUD never held.
 function needsNote(d) {
   if (d.hasCard) return 'Waiting for your answer in the HUD';
-  if (d.handedBack) return 'Waiting in its window — open ↗';
+  if (d.handedBack) return d.canOpen === false ? 'Waiting in its window' : 'Waiting in its window — open ↗';
   return 'Waiting for you in its window';
 }
 
@@ -107,7 +107,7 @@ export function renderPanel(detail, nowMs = Date.now()) {
       nowBlock(d, nowMs) +
       list + help +
       `<div class="foot">${foot}` +
-      '<button type="button" class="open" data-act="open">open window ↗</button></div>' +
+      (d.canOpen === false ? '' : '<button type="button" class="open" data-act="open">open window ↗</button>') + '</div>' +
     '</div>' +
   '</div>';
 }

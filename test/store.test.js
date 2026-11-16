@@ -221,7 +221,7 @@ test('I8: a session missing from one poll (half-written file) keeps its row, dat
   store.setSessions([S('s2', { startedAt: 9 })]);
   const a = store.snapshot().agents;
   assert.deepEqual(a.map((x) => x.id), ['s1', 's2']);
-  assert.equal(a[0].display, 's1 · mine');
+  assert.equal(a[0].display, 'mine');
   assert.equal(a[0].activity, 'searching code');
   assert.equal(a[0].replyOptIn, true);
   assert.deepEqual(forgot, []);
@@ -419,4 +419,23 @@ test('M9: a session start of 0 is unknown: detail.startedAt null until a task is
   assert.equal(store.detail('s2').startedAt, null);
   store.onEvent(ev('s1', 'UserPromptSubmit', 1000, { raw: { prompt: 'go' } }));
   assert.equal(store.detail('s1').startedAt, 1000);
+});
+
+test('canOpen: agents, the card and detail say whether the session can be focused (no folder fallback)', () => {
+  let t = 1000; const engine = createClassEngine(); const queue = createQueue({ now: () => t, setTimer: () => 0, clearTimer: () => {} });
+  const store = createStore({ engine, queue, now: () => t, canOpen: (s) => s.entrypoint === 'claude-desktop' });
+  store.setSessions([S('a', { entrypoint: 'claude-desktop' }), S('b', { entrypoint: 'cli' })]);
+  queue.add({ id: 'q1', sessionId: 'b', kind: 'permission', payload: { tool_name: 'Bash', tool_input: {} } });
+  const snap = store.snapshot();
+  assert.equal(snap.agents.find((x) => x.id === 'a').canOpen, true);
+  assert.equal(snap.agents.find((x) => x.id === 'b').canOpen, false);
+  assert.equal(snap.card.canOpen, false);
+  assert.equal(store.detail('a').canOpen, true);
+  queue.releaseAll();
+});
+
+test('canOpen defaults to true when no predicate is given', () => {
+  const { store } = setup();
+  store.setSessions([S('a')]);
+  assert.equal(store.snapshot().agents[0].canOpen, true);
 });

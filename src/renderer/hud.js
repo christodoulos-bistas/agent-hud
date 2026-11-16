@@ -170,7 +170,9 @@ export function renderRow(agent, { ask, selected = false } = {}) {
   let fam = '';
   for (let i = 1; i <= fams; i++) fam += `<span class="fam f${i}">${famSvg()}</span>`;
   const line = handed
-    ? `<button type="button" class="link" data-act="open" data-session="${id}">Waiting in its window — open ↗</button>`
+    ? (a.canOpen === false
+      ? '<span class="link">Waiting in its window</span>'
+      : `<button type="button" class="link" data-act="open" data-session="${id}">Waiting in its window — open ↗</button>`)
     : `<span class="cls">${esc(className(a.cls))}</span> · ${esc(doing(a, mood, ask))}${mood === 'working' ? '<span class="dots"></span>' : ''}`;
   return `<div class="row ${mood}${handed ? ' handed' : ''}${selected ? ' selected' : ''}" data-key="row:${id}" style="--d:${bobDelay(a.id)}">` +
     `<div class="sprite-box" data-act="select" data-session="${id}">${sprite(a.cls)}${fam}</div>` +
@@ -185,7 +187,7 @@ export function renderRow(agent, { ask, selected = false } = {}) {
 
 function cardTop(card, mark) {
   return `<div class="ans-top">${mark}<span class="who-n">${esc(card.display)}</span>` +
-    '<button type="button" class="open" data-act="open-card">open window ↗</button></div>';
+    (card.canOpen === false ? '' : '<button type="button" class="open" data-act="open-card">open window ↗</button>') + '</div>';
 }
 
 // A click or Enter meant for the card that was just replaced must not answer the new one: answer

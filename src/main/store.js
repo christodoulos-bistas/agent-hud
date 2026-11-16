@@ -10,7 +10,9 @@ export { activityLine } from './steps.js';
 
 const ASKS = { permission: 'asks permission', choice: 'asks a question', reply: 'wants a reply' };
 
-export function createStore({ engine, queue, now = Date.now, holdMs = 60000, replyMs = 540000, stepLog, onError = (e) => console.error(e) }) {
+export function createStore({ engine, queue, now = Date.now, holdMs = 60000, replyMs = 540000, stepLog, onError = (e) => console.error(e), canOpen = () => true }) {
+  // Whether "open window" can focus this session (main knows where code.cmd is); unknown session → false.
+  const openable = (sess) => { try { return !!sess && !!canOpen(sess); } catch { return false; } };
   let sessions = [];
   const state = new Map();
   const optIn = new Map();
@@ -120,7 +122,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
         id, display: displayName(sess), cls: engine.classOf(id, t),
         mood: stage === 'thinking' || stage === 'working' ? 'working' : baseMood,
         activity: s.activity, familiars: Math.min(engine.activeSubagents(id), 3),
-        replyOptIn: !!optIn.get(id), entrypoint: sess.entrypoint, cwd: sess.cwd, handedBack,
+        replyOptIn: !!optIn.get(id), entrypoint: sess.entrypoint, cwd: sess.cwd, handedBack, canOpen: openable(sess),
         stage, stuck, stageSince: rec.since,
         currentStepStartedAt: currentOf(view, sess.status)?.startedAt ?? null,
         lastActivityAt: s.lastActivityAt,
@@ -137,6 +139,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     const card = a ? {
       id: a.id, kind: a.kind, sessionId: a.sessionId, display: displayOf(a.sessionId), cls: engine.classOf(a.sessionId, t), payload: a.payload,
       expiresAt: Number.isFinite(a.addedAt) ? a.addedAt + (a.kind === 'reply' ? replyMs : holdMs) : null,
+      canOpen: openable(sessions.find((x) => x.sessionId === a.sessionId)),
     } : null;
     const second = items[1];
     const next = second ? `Next: ${displayOf(second.sessionId)} ${ASKS[second.kind] ?? 'asks a question'}` : null;
@@ -154,7 +157,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
       task: view.task ?? null, startedAt: view.taskAt ?? knownTime(sess.startedAt),
       stepCount: view.stepCount, current: currentOf(view, sess.status), steps: view.steps, helpers: view.helpers,
       // Where a "needs you" is waiting, for the panel's line (M3): a card in the HUD, or its own window.
-      handedBack: a.handedBack, hasCard: queue.list().some((it) => it.sessionId === id),
+      handedBack: a.handedBack, hasCard: queue.list().some((it) => it.sessionId === id), canOpen: a.canOpen,
     };
   }
 
