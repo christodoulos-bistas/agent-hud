@@ -1,7 +1,8 @@
 // Agent HUD renderer. The render* functions are pure (snapshot in, HTML string out) and run in Node
 // for the tests; boot() wires them to the DOM and to window.hud from the preload. Every string that
 // comes from the snapshot goes through esc() before it reaches markup.
-import { GR, CLASSES, MOODS_BADGE, MOODS_ZEE, MOODS_PENNANT, FAMILIAR, spriteSvg } from './sprites.js';
+import { GR, CLASSES, MOODS_BADGE, FAMILIAR, spriteSvg } from './sprites.js';
+import { fmtDuration } from './format.js';
 
 const REPLY_MS = 540000; // the reply hold in the main process (queue replyMs)
 const ARM_MS = 500; // a new card's answer buttons stay inert this long (I7)
@@ -23,8 +24,6 @@ const cached = (key, make) => {
 const classOf = (id) => (NAMES.has(id) ? id : 'pathfinder');
 const sprite = (cls) => cached(`class:${classOf(cls)}`, () => spriteSvg(classOf(cls), 2));
 const sealSvg = () => cached('seal', () => GR.svg(MOODS_BADGE, 2));
-const zeeSvg = () => cached('zee', () => GR.svg(MOODS_ZEE, 2));
-const pennantSvg = () => cached('pennant', () => GR.svg(MOODS_PENNANT, 2));
 const famSvg = () => cached('fam', () => GR.svg(FAMILIAR, 2));
 
 const className = (cls) => NAMES.get(classOf(cls));
@@ -62,14 +61,31 @@ function doing(a, mood, ask) {
 }
 
 const SEAL = () => `<span class="seal" role="img" aria-label="Needs you">${sealSvg()}</span>`;
-const MARKS = {
-  needs: SEAL,
-  done: () => `<span class="pennant" role="img" aria-label="Done">${pennantSvg()}</span>`,
-  idle: () => `<span class="zee" role="img" aria-label="Idle">${zeeSvg()}</span>`,
-  working: () => '',
-};
 
-export function renderRow(agent, { ask } = {}) {
+const STAGES = new Set(['needs', 'turn', 'thinking', 'working', 'idle']);
+const STAGE_OF_MOOD = { needs: 'needs', done: 'turn', working: 'working', idle: 'idle' };
+const finite = (v) => v != null && Number.isFinite(Number(v));
+const since = (from, nowMs) => fmtDuration(Number(nowMs) - Number(from));
+
+// The stage chip: a coloured pill with the agent's stage and how long it has been that way.
+export function renderChip(agent, nowMs = Date.now()) {
+  const a = agent || {};
+  if (a.stuck) return '<span class="st stuck">⚠ Stuck?</span>';
+  const stage = STAGES.has(a.stage) ? a.stage : STAGE_OF_MOOD[moodOf(a)];
+  switch (stage) {
+    case 'needs': return '<span class="st needs">Needs you</span>';
+    case 'turn': return '<span class="st turn">Your turn</span>';
+    case 'thinking': return '<span class="st think">Thinking</span>';
+    case 'working': {
+      const from = finite(a.currentStepStartedAt) ? a.currentStepStartedAt : a.stageSince;
+      return `<span class="st work">Working${finite(from) ? ` · ${since(from, nowMs)}` : ''}</span>`;
+    }
+    default:
+      return `<span class="st idle">Idle${finite(a.lastActivityAt) ? ` · ${since(a.lastActivityAt, nowMs)}` : ''}</span>`;
+  }
+}
+
+export function renderRow(agent, { ask, selected = false, nowMs = Date.now() } = {}) {
   const a = agent || {};
   const mood = moodOf(a);
   const id = esc(a.id);
@@ -80,14 +96,14 @@ export function renderRow(agent, { ask } = {}) {
   const line = handed
     ? `<button type="button" class="link" data-act="open" data-session="${id}">Waiting in its window — open ↗</button>`
     : `<span class="cls">${esc(className(a.cls))}</span> · ${esc(doing(a, mood, ask))}${mood === 'working' ? '<span class="dots"></span>' : ''}`;
-  return `<div class="row ${mood}${handed ? ' handed' : ''}" data-key="row:${id}" style="--d:${bobDelay(a.id)}">` +
-    `<div class="sprite-box">${sprite(a.cls)}${fam}</div>` +
+  return `<div class="row ${mood}${handed ? ' handed' : ''}${selected ? ' selected' : ''}" data-key="row:${id}" style="--d:${bobDelay(a.id)}">` +
+    `<div class="sprite-box" data-act="select" data-session="${id}">${sprite(a.cls)}${fam}</div>` +
     '<div class="who">' +
-      `<button type="button" class="who-n" data-act="open" data-session="${id}" title="Open its window">${esc(a.display)}</button>` +
+      `<button type="button" class="who-n" data-act="select" data-session="${id}" title="Show details">${esc(a.display)}</button>` +
       `<div class="who-d${handed ? ' handed' : ''}">${line}</div>` +
       `<button type="button" class="wait" data-act="wait" data-session="${id}" aria-pressed="${a.replyOptIn ? 'true' : 'false'}"><i></i>wait for my reply</button>` +
     '</div>' +
-    `<span class="mark">${MARKS[mood]()}</span>` +
+    `<span class="mark">${renderChip(a, nowMs)}</span>` +
   '</div>';
 }
 
@@ -201,7 +217,8 @@ function face(a) {
     `<span class="sprite-box">${sprite(a.cls)}${mood === 'needs' ? SEAL() : ''}</span></button>`;
 }
 
-export function renderParty(snapshot, { collapsed = false, leftMs, arming = false } = {}) {
+export function renderParty(snapshot, { collapsed = false, leftMs, arming = false, nowMs = Date.now() } = {}) {
+  const selectedId = snapshot?.selected != null ? String(snapshot.selected) : null;
   const agents = Array.isArray(snapshot?.agents) ? snapshot.agents : [];
   if (collapsed) {
     return '<div class="party collapsed" data-key="party" data-deep>' +
@@ -216,7 +233,7 @@ export function renderParty(snapshot, { collapsed = false, leftMs, arming = fals
   let placed = false;
   for (const a of agents) {
     const mine = !!card && !placed && String(a.id) === owner;
-    parts.push(renderRow(a, mine ? { ask: card.kind } : {}));
+    parts.push(renderRow(a, { ...(mine ? { ask: card.kind } : {}), selected: selectedId != null && String(a.id) === selectedId, nowMs }));
     if (mine) { parts.push(slot()); placed = true; }
   }
   if (card && !placed) parts.unshift(slot());
@@ -320,6 +337,21 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     }, Math.max(0, st.cardSince + ARM_MS - Date.now()));
   }
 
+  // The row's vertical centre in CSS px from the top of #hud-root.
+  const rowCentre = (rowEl) => {
+    const r = rowEl.getBoundingClientRect();
+    return Math.round((r.top + r.height / 2 - root.getBoundingClientRect().top) * 10) / 10;
+  };
+  let lastOffset = null;
+  function syncRowOffset(snap) {
+    const id = snap?.selected != null ? String(snap.selected) : null;
+    if (id == null) { lastOffset = null; return; }
+    const rowEl = root.querySelector(`[data-key="row:${id.replace(/["\\]/g, '\\$&')}"]`);
+    if (!rowEl) return;
+    const y = rowCentre(rowEl);
+    if (lastOffset == null || Math.abs(y - lastOffset) >= 1) { lastOffset = y; call('rowOffset', id, y); }
+  }
+
   function render() {
     const snap = st.snap || { agents: [], card: null, next: null, counts: { total: 0, needs: 0 } };
     const card = snap.card || null;
@@ -330,18 +362,19 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     st.card = card;
     const arming = !!card && !actionsArmed(st.cardSince, Date.now());
     const tpl = doc.createElement('template');
-    tpl.innerHTML = renderParty(snap, { collapsed: st.collapsed, leftMs: leftMs(), arming });
+    tpl.innerHTML = renderParty(snap, { collapsed: st.collapsed, leftMs: leftMs(), arming, nowMs: Date.now() });
     patch(root, tpl.content, rendered);
     if (arming) armLater();
 
-    // The seal pulses three times when an agent starts waiting, then glows steady.
+    // The needs chip pulses three times when an agent starts waiting, then glows steady.
     const needs = new Set((snap.agents || []).filter((a) => a?.mood === 'needs').map((a) => String(a.id)));
-    for (const seal of root.querySelectorAll('.seal')) {
-      const key = seal.closest('[data-key]')?.dataset.key || '';
+    for (const chip of root.querySelectorAll('.row .st.needs')) {
+      const key = chip.closest('[data-key]')?.dataset.key || '';
       const id = key.slice(key.indexOf(':') + 1);
-      if (needs.has(id) && !st.needs.has(id)) seal.classList.add('call');
+      if (needs.has(id) && !st.needs.has(id)) chip.classList.add('call');
     }
     st.needs = needs;
+    syncRowOffset(snap);
     tick();
   }
 
@@ -389,6 +422,11 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
         call('collapse', st.collapsed); render(); break;
       case 'expand':
         st.collapsed = false; call('collapse', false); render(); break;
+      case 'select': {
+        const rowEl = el.closest('.row');
+        if (rowEl) { lastOffset = rowCentre(rowEl); call('selectAgent', el.dataset.session, lastOffset); }
+        break;
+      }
       case 'open':
         call('openWindow', el.dataset.session); break;
       case 'wait': {

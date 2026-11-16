@@ -69,7 +69,19 @@ button.who-n:hover { text-decoration: underline dotted rgba(240, 233, 218, .5); 
 .seal { position: relative; display: inline-block; width: 18px; height: 18px; line-height: 0; flex: none; }
 .seal .px { position: relative; z-index: 1; display: block; }
 .seal::before { content: ''; position: absolute; inset: 8%; border-radius: 50%; box-shadow: 0 0 0 2px rgba(237, 203, 133, .45), 0 0 10px 3px rgba(224, 180, 92, .5); }
-.zee { opacity: .85; }
+.sprite-box[data-act="select"] { cursor: pointer; }
+.row.selected { background: linear-gradient(90deg, rgba(224, 180, 92, .10), rgba(224, 180, 92, 0) 70%); }
+.row.selected::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 0 3px 3px 0; background: var(--gold); }
+
+/* stage chips (mockup option B) */
+.st { display: inline-flex; align-items: center; gap: 5px; font-size: .68rem; font-weight: 700; letter-spacing: .04em; border-radius: 999px; padding: 2px 8px; white-space: nowrap; border: 1px solid transparent; line-height: 1.3; }
+.st.think { color: #cfd6e6; background: rgba(79, 103, 135, .35); border-color: rgba(130, 155, 190, .35); }
+.st.work { color: #d9e8c4; background: rgba(111, 143, 73, .28); border-color: rgba(160, 192, 108, .35); }
+.st.needs { color: #1b120e; background: var(--gold); border-color: var(--gold-d); }
+.st.turn { color: var(--parch); background: rgba(240, 233, 218, .12); border-color: rgba(240, 233, 218, .3); }
+.st.idle { color: var(--sage); background: transparent; border-color: rgba(169, 179, 166, .3); }
+.st.stuck { color: #2a1606; background: #e8a33d; border-color: #b8761d; }
+.st.think::before, .st.work::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
 .queue { font-size: .72rem; color: var(--gold-l); padding: 6px 12px 8px; border-top: 1px solid rgba(224, 180, 92, .16); background: rgba(224, 180, 92, .05); }
 .queue b { font-weight: 700; }
@@ -169,7 +181,8 @@ button.who-n:hover { text-decoration: underline dotted rgba(240, 233, 218, .5); 
   .fam { animation: float 2.4s ease-in-out infinite; }
   .fam.f2 { animation-delay: -.8s; }
   .fam.f3 { animation-delay: -1.6s; }
-  .seal.call { animation: call 1s cubic-bezier(.2, .8, .2, 1) 3; }
+  .seal.call, .st.needs.call { animation: call 1s cubic-bezier(.2, .8, .2, 1) 3; }
+  .st.work::before { animation: blink 1.2s ease-in-out infinite; }
   .seal.call::before { animation: ring 1s ease-out 3; }
   .pennant .g-tw { animation: twinkle 1.4s steps(1, end) 3, gone 1ms 4.2s forwards; }
   .dots::after { content: '…'; display: inline-block; width: 1em; overflow: hidden; vertical-align: bottom; animation: dots 1.4s steps(4) infinite; }
@@ -185,4 +198,5 @@ button.who-n:hover { text-decoration: underline dotted rgba(240, 233, 218, .5); 
 @keyframes ring { 0% { transform: scale(.8); opacity: 1; } 100% { transform: scale(2.2); opacity: 0; } }
 @keyframes twinkle { 0% { opacity: 1; } 50% { opacity: 0; } }
 @keyframes gone { to { opacity: 0; } }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 @keyframes dots { from { width: 0; } to { width: 1em; } }

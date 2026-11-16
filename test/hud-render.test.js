@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { esc, renderRow, renderCard, renderParty, picksFrom, replyLeftMs, actionsArmed, clickAllowed } from '../src/renderer/hud.js';
+import { esc, renderChip, renderRow, renderCard, renderParty, picksFrom, replyLeftMs, actionsArmed, clickAllowed } from '../src/renderer/hud.js';
 import { GR, CLASSES, MOODS_BADGE, MOODS_ZEE, spriteSvg } from '../src/renderer/sprites.js';
 import { CLASS_IDS } from '../src/main/classes.js';
 
@@ -117,7 +117,8 @@ test('renderCard reply shows the first 200 chars of last_assistant_message', () 
 test("handedBack row contains 'Waiting in its window — open ↗'", () => {
   const html = renderRow(agent({ mood: 'needs', handedBack: true }));
   assert.ok(html.includes('Waiting in its window — open ↗'));
-  assert.ok(html.includes('class="seal'));
+  assert.match(html, /data-act="open"[^>]*>Waiting in its window/);
+  assert.ok(html.includes('class="st needs"'));
 });
 
 test('renderParty collapsed contains no card markup but keeps seals', () => {
@@ -148,12 +149,50 @@ test('renderParty with no agents shows an empty note', () => {
   assert.ok(html.includes('No agents are running'));
 });
 
-test('row moods: working dots, needs seal and rail class, idle zee, done pennant', () => {
+test('row moods: working dots, needs chip and rail class; no seal, zee or pennant on rows', () => {
   assert.ok(renderRow(agent()).includes('class="dots"'));
   assert.ok(renderRow(agent({ mood: 'needs' })).includes('class="row needs'));
-  assert.ok(renderRow(agent({ mood: 'idle' })).includes('class="zee'));
-  assert.ok(renderRow(agent({ mood: 'done' })).includes('class="pennant'));
-  assert.ok(!renderRow(agent({ mood: 'idle' })).includes('class="seal'));
+  assert.ok(renderRow(agent({ mood: 'needs' })).includes('class="st needs"'));
+  for (const mood of ['needs', 'idle', 'done', 'working']) {
+    const html = renderRow(agent({ mood }));
+    assert.ok(!/class="(seal|zee|pennant)/.test(html), mood);
+  }
+});
+
+test('renderChip: one chip per stage, with live clocks', () => {
+  const now = 1_000_000_000;
+  assert.equal(renderChip(agent({ stage: 'thinking' }), now), '<span class="st think">Thinking</span>');
+  assert.equal(renderChip(agent({ stage: 'working', currentStepStartedAt: now - 120000, stageSince: now - 900000 }), now), '<span class="st work">Working · 2m</span>');
+  assert.equal(renderChip(agent({ stage: 'working', currentStepStartedAt: null, stageSince: now - 45000 }), now), '<span class="st work">Working · 45s</span>');
+  assert.equal(renderChip(agent({ stage: 'needs' }), now), '<span class="st needs">Needs you</span>');
+  assert.equal(renderChip(agent({ stage: 'turn' }), now), '<span class="st turn">Your turn</span>');
+  assert.equal(renderChip(agent({ stage: 'idle', lastActivityAt: now - 25 * 60000 }), now), '<span class="st idle">Idle · 25m</span>');
+  assert.equal(renderChip(agent({ stage: 'working', stuck: { reason: 'x', detail: 'y' } }), now), '<span class="st stuck">⚠ Stuck?</span>');
+  assert.equal(renderChip(agent({ stage: 'thinking', stuck: { reason: 'x', detail: 'y' } }), now), '<span class="st stuck">⚠ Stuck?</span>');
+});
+
+test('renderRow: name and sprite select; name no longer opens; handed-back link still opens', () => {
+  const html = renderRow(agent());
+  assert.match(html, /class="sprite-box" data-act="select" data-session="s1"/);
+  assert.match(html, /class="who-n" data-act="select" data-session="s1"/);
+  assert.ok(!/class="who-n"[^>]*data-act="open"/.test(html));
+  assert.match(renderRow(agent({ mood: 'needs', handedBack: true })), /class="link" data-act="open"/);
+});
+
+test('renderRow escapes HTML in activity and display (chip included)', () => {
+  const html = renderRow(agent({ activity: XSS, display: XSS, stage: 'working', stageSince: 0 }), { nowMs: 5000 });
+  assert.ok(!html.includes('<img'));
+  assert.ok(html.includes('&lt;img'));
+});
+
+test('selected row gets class "selected"; others do not', () => {
+  assert.ok(renderRow(agent(), { selected: true }).startsWith('<div class="row working selected"'));
+  assert.ok(!renderRow(agent()).includes('selected'));
+  const snap = { agents: [agent({ id: 'a' }), agent({ id: 'b' })], card: null, next: null, selected: 'b', counts: { total: 2, needs: 0 } };
+  const html = renderParty(snap, {});
+  assert.equal(count(html, ' selected"'), 1);
+  assert.ok(html.indexOf('selected') > html.indexOf('row:a'));
+  assert.equal(count(renderParty({ ...snap, selected: undefined }, {}), 'selected'), 0);
 });
 
 test('row reply toggle reflects replyOptIn; familiars render, capped at 3', () => {
