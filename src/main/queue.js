@@ -1,10 +1,10 @@
 import { RELEASE } from './answers.js';
 
-export function createQueue({ holdMs = 60000, replyMs = 540000, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
+export function createQueue({ holdMs = 60000, replyMs = 540000, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, onError = (e) => console.error(e) } = {}) {
   const entries = []; // arrival order: { item, resolve, timer }
   let handed = [];
   const listeners = new Set();
-  const emit = () => { for (const fn of [...listeners]) fn(); };
+  const emit = () => { for (const fn of [...listeners]) { try { fn(); } catch (err) { try { onError(err); } catch { /* never break the queue */ } } } };
 
   const take = (id) => {
     const i = entries.findIndex((e) => e.item.id === id);

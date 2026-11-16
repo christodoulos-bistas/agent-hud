@@ -100,3 +100,21 @@ test('clearHandedBack removes that session entries; onChange fires on changes an
   assert.equal(n, before + 1); assert.deepEqual(q.handedBack().map((h) => h.sessionId), ['s2']);
   off(); q.add(it('c')); assert.equal(n, before + 1);
 });
+
+const mkE = (errs) => { const f = fake(); return [f, createQueue({ now: f.now, setTimer: f.setTimer, clearTimer: f.clearTimer, onError: (e) => errs.push(e) })]; };
+test('throwing listener does not reject add and item still resolves on answer', async () => {
+  const errs = []; const [, q] = mkE(errs); q.onChange(() => { throw new Error('boom'); });
+  const p = q.add(it('a')); q.answer('a', { ok: 1 });
+  assert.deepEqual(await p, { ok: 1 }); assert.equal(errs.length, 2);
+});
+test('throwing listener during timer expiry does not throw out of tick; item resolves RELEASE', async () => {
+  const errs = []; const [f, q] = mkE(errs); const p = q.add(it('a'));
+  q.onChange(() => { throw new Error('boom'); });
+  assert.doesNotThrow(() => f.tick(60000));
+  assert.equal(await p, RELEASE); assert.equal(errs.length, 1);
+});
+test('second listener still runs after the first throws', () => {
+  const [, q] = mkE([]); let ran = 0;
+  q.onChange(() => { throw new Error('boom'); }); q.onChange(() => { ran++; });
+  q.add(it('a')); assert.equal(ran, 1);
+});
