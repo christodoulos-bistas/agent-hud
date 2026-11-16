@@ -1,26 +1,11 @@
-import path from 'node:path';
 import { moodOf } from './classes.js';
 import { displayName, baseOf } from './sessions.js';
+import { activityLine } from './steps.js';
 
 const NEEDS_NOTIFS = new Set(['permission_prompt', 'elicitation_dialog', 'agent_needs_input']);
 const isSynthetic = (ev) => String((ev.raw || {}).prompt || '').trim().startsWith('<task-notification>');
 
-export function activityLine(ev) {
-  const t = ev.toolName; const i = ev.toolInput || {};
-  if (ev.event === 'UserPromptSubmit') return 'thinking';
-  switch (t) {
-    case 'Read': return `reading ${path.win32.basename(String(i.file_path || ''))}`;
-    case 'Edit': case 'Write': return `editing ${path.win32.basename(String(i.file_path || ''))}`;
-    case 'Bash': case 'PowerShell': return `running ${String(i.command || '').slice(0, 40)}`;
-    case 'Grep': case 'Glob': return 'searching code';
-    case 'WebSearch': return 'searching the web';
-    case 'WebFetch': {
-      try { return `reading ${new URL(String(i.url)).hostname}`; } catch { return 'reading the web'; }
-    }
-    case 'Agent': case 'Task': return `sending a ${i.subagent_type || 'general'} helper`;
-    default: return t || '';
-  }
-}
+export { activityLine } from './steps.js';
 
 const ASKS = { permission: 'asks permission', choice: 'asks a question', reply: 'wants a reply' };
 
