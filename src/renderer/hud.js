@@ -26,7 +26,7 @@ const sprite = (cls) => cached(`class:${classOf(cls)}`, () => spriteSvg(classOf(
 const sealSvg = () => cached('seal', () => GR.svg(MOODS_BADGE, 2));
 const famSvg = () => cached('fam', () => GR.svg(FAMILIAR, 2));
 
-const className = (cls) => NAMES.get(classOf(cls));
+export const className = (cls) => NAMES.get(classOf(cls));
 const moodOf = (a) => (MOODS.has(a?.mood) ? a.mood : 'idle');
 const int = (v, d) => (v != null && Number.isFinite(Number(v)) ? Math.trunc(Number(v)) : d);
 const sessionOf = (card) => String(card?.sessionId ?? card?.payload?.session_id ?? '');
