@@ -131,16 +131,20 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     return agents;
   }
 
-  function snapshot() {
-    const t = now();
-    const items = queue.list();
-    const agents = computeAgents(t);
+  function activeCard(t) {
     const a = queue.active();
-    const card = a ? {
+    return a ? {
       id: a.id, kind: a.kind, sessionId: a.sessionId, display: displayOf(a.sessionId), cls: engine.classOf(a.sessionId, t), payload: a.payload,
       expiresAt: Number.isFinite(a.addedAt) ? a.addedAt + (a.kind === 'reply' ? replyMs : holdMs) : null,
       canOpen: openable(sessions.find((x) => x.sessionId === a.sessionId)),
     } : null;
+  }
+
+  function snapshot() {
+    const t = now();
+    const items = queue.list();
+    const agents = computeAgents(t);
+    const card = activeCard(t);
     const second = items[1];
     const next = second ? `Next: ${displayOf(second.sessionId)} ${ASKS[second.kind] ?? 'asks a question'}` : null;
     return { agents, card, next, counts: { total: agents.length, needs: agents.filter((x) => x.mood === 'needs').length } };
@@ -149,7 +153,9 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
   function detail(id) {
     const sess = sessions.find((x) => x.sessionId === id);
     if (!sess) return null;
-    const a = computeAgents(now()).find((x) => x.id === id);
+    const t = now();
+    const a = computeAgents(t).find((x) => x.id === id);
+    const card = activeCard(t);
     const view = steps.view(id);
     return {
       id, display: a.display, cls: a.cls, stage: a.stage, stuck: a.stuck,
@@ -158,6 +164,8 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
       stepCount: view.stepCount, current: currentOf(view, sess.status), steps: view.steps, helpers: view.helpers,
       // Where a "needs you" is waiting, for the panel's line (M3): a card in the HUD, or its own window.
       handedBack: a.handedBack, hasCard: queue.list().some((it) => it.sessionId === id), canOpen: a.canOpen,
+      lastMessage: a.stage === 'turn' ? (view.lastMessage ?? null) : null,
+      card: card && card.sessionId === id ? card : null,
     };
   }
 

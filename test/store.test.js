@@ -439,3 +439,31 @@ test('canOpen defaults to true when no predicate is given', () => {
   store.setSessions([S('a')]);
   assert.equal(store.snapshot().agents[0].canOpen, true);
 });
+
+test('detail.lastMessage only while stage is turn', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1', { status: 'busy' })]);
+  store.onEvent(ev('s1', 'UserPromptSubmit', 1000, { raw: { prompt: 'x' } }));
+  assert.equal(store.detail('s1').lastMessage, null);
+  set(2000);
+  store.onEvent(ev('s1', 'Stop', 2000, { raw: { last_assistant_message: 'Finished it.' } }));
+  const d = store.detail('s1');
+  assert.equal(d.stage, 'turn'); assert.equal(d.lastMessage, 'Finished it.');
+  set(3000);
+  store.onEvent(ev('s1', 'UserPromptSubmit', 3000, { raw: { prompt: 'again' } }));
+  const d2 = store.detail('s1');
+  assert.notEqual(d2.stage, 'turn'); assert.equal(d2.lastMessage, null);
+});
+
+test('detail.card is the active card for that session, null for others', () => {
+  const { queue, store } = setup();
+  store.setSessions([S('s1'), S('s2')]);
+  assert.equal(store.detail('s1').card, null);
+  queue.add({ id: 'a', sessionId: 's1', kind: 'permission', payload: { tool_name: 'Bash' } });
+  queue.add({ id: 'b', sessionId: 's2', kind: 'choice', payload: {} });
+  const snap = store.snapshot();
+  assert.deepEqual(store.detail('s1').card, snap.card);
+  assert.equal(store.detail('s1').card.id, 'a');
+  assert.ok('expiresAt' in store.detail('s1').card && 'canOpen' in store.detail('s1').card);
+  assert.equal(store.detail('s2').card, null);
+});

@@ -135,7 +135,7 @@ test('cap: 25 closed steps gives 20, newest first', () => {
 
 test('view of an unknown session is empty; forget clears', () => {
   const l = createStepLog();
-  assert.deepEqual(l.view('nope'), { task: null, taskAt: null, stepCount: 0, current: null, steps: [], open: [], helpers: [], lastEventAt: null });
+  assert.deepEqual(l.view('nope'), { task: null, taskAt: null, stepCount: 0, current: null, steps: [], open: [], helpers: [], lastEventAt: null, lastMessage: null });
   l.push(ev('UserPromptSubmit', 1, { raw: { prompt: 'hi' } }));
   l.forget('s1');
   assert.equal(l.view('s1').task, null);
@@ -240,4 +240,20 @@ test('M8: why is whitespace-collapsed and capped at 300 chars', () => {
   assert.equal(a.why.length, 300);
   assert.ok(a.why.startsWith('Run the tests www'));
   assert.equal(b.why, null);
+});
+
+test('Stop sets lastMessage (collapsed, 600 cap); a new real prompt clears it; helper Stop ignored', () => {
+  const log = createStepLog();
+  assert.equal(log.view('s1').lastMessage, null);
+  log.push(ev('Stop', 1, { raw: { last_assistant_message: 'All\n\n  done   now ' + 'x'.repeat(700) } }));
+  const m = log.view('s1').lastMessage;
+  assert.equal(m.length, 600); assert.ok(m.startsWith('All done now xxx'));
+  log.push(ev('Stop', 2, { raw: { agent_id: 'h1', last_assistant_message: 'helper' } }));
+  assert.equal(log.view('s1').lastMessage, m);
+  log.push(ev('UserPromptSubmit', 3, { raw: { prompt: '<task-notification>x' } }));
+  assert.equal(log.view('s1').lastMessage, m);
+  log.push(ev('UserPromptSubmit', 4, { raw: { prompt: 'next' } }));
+  assert.equal(log.view('s1').lastMessage, null);
+  log.push(ev('Stop', 5, { raw: { last_assistant_message: '   ' } }));
+  assert.equal(log.view('s1').lastMessage, null);
 });

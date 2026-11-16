@@ -57,7 +57,7 @@ export function createStepLog({ cap = 20, supersedeMs = 10000 } = {}) {
   const sessions = new Map();
   const get = (id) => {
     let s = sessions.get(id);
-    if (!s) { s = { task: null, taskAt: null, stepCount: 0, open: [], closed: [], helpers: new Map(), lastEventAt: null }; sessions.set(id, s); }
+    if (!s) { s = { task: null, taskAt: null, stepCount: 0, open: [], closed: [], helpers: new Map(), lastEventAt: null, lastMessage: null }; sessions.set(id, s); }
     return s;
   };
 
@@ -113,8 +113,10 @@ export function createStepLog({ cap = 20, supersedeMs = 10000 } = {}) {
       s.task = collapse(prompt).slice(0, 300);
       s.taskAt = ev.at;
       s.stepCount = 0;
+      s.lastMessage = null;
       closeInterrupted(s, ev.at);
     } else if (e === 'Stop' || e === 'SessionEnd') {
+      if (e === 'Stop' && typeof raw.last_assistant_message === 'string') s.lastMessage = collapse(raw.last_assistant_message).slice(0, 600) || null;
       closeInterrupted(s, ev.at);
       // A helper can end without a SubagentStop reaching us: the main thread's Stop lists the helpers
       // still running (same rule as the class engine, classes.js).
@@ -156,7 +158,7 @@ export function createStepLog({ cap = 20, supersedeMs = 10000 } = {}) {
 
   function view(id) {
     const s = sessions.get(id);
-    if (!s) return { task: null, taskAt: null, stepCount: 0, current: null, steps: [], open: [], helpers: [], lastEventAt: null };
+    if (!s) return { task: null, taskAt: null, stepCount: 0, current: null, steps: [], open: [], helpers: [], lastEventAt: null, lastMessage: null };
     const open = s.open.slice();
     return {
       task: s.task, taskAt: s.taskAt, stepCount: s.stepCount,
@@ -164,7 +166,7 @@ export function createStepLog({ cap = 20, supersedeMs = 10000 } = {}) {
       steps: s.closed.slice().reverse(),
       open,
       helpers: [...s.helpers.values()].map((h) => ({ ...h })),
-      lastEventAt: s.lastEventAt,
+      lastEventAt: s.lastEventAt, lastMessage: s.lastMessage,
     };
   }
 
