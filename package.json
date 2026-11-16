@@ -6,10 +6,43 @@
   "main": "src/main/main.js",
   "scripts": {
     "test": "node --test test/",
-    "start": "electron ."
+    "start": "electron .",
+    "icon": "node scripts/icon.mjs",
+    "build:win": "node scripts/icon.mjs && electron-builder --win nsis --x64"
   },
   "devDependencies": {
     "electron": "44.7.2",
-    "electron-builder": "26.15.3"
+    "electron-builder": "26.15.3",
+    "sharp": "^0.35.5"
+  },
+  "build": {
+    "appId": "com.consortis.agenthud",
+    "productName": "Agent HUD",
+    "electronVersion": "44.7.2",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "asar": true
   }
 }
