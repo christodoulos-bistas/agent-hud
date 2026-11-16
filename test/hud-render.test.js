@@ -396,6 +396,7 @@ test('newlyIn reports fresh ids once', () => {
 test('needs rows carry glow-ask; turn chip contains the pennant svg', () => {
   const needs = renderRow(agent({ id: 'n', mood: 'needs', stage: 'needs' }));
   assert.match(needs, /class="row needs[^"]*glow-ask/);
+  assert.ok(!needs.includes(" call"), "the arrival pulses are added once by the DOM pass, not rendered");
   assert.ok(!renderRow(agent({ id: 'w', mood: 'working', stage: 'working' })).includes('glow-ask'));
   const turn = renderRow(agent({ id: 't', mood: 'done', stage: 'turn' }));
   assert.match(turn, /<span class="st turn"[^>]*><span class="flag"[^>]*><svg[\s\S]*?<\/svg><\/span>Your turn<\/span>/);

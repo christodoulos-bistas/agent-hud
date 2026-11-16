@@ -310,7 +310,7 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
 
     // The needs chip pulses three times when an agent starts waiting, then glows steady.
     const { needs, fresh } = newlyNeeding(snap.agents, st.needs);
-    for (const el of root.querySelectorAll('.face .seal, .row .st.needs')) {
+    for (const el of root.querySelectorAll('.face .seal, .row .st.needs, .row.needs')) {
       const key = el.closest('[data-key]')?.dataset.key || '';
       if (fresh.has(key.slice(key.indexOf(':') + 1))) el.classList.add('call');
     }
