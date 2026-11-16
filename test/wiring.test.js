@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli, guarded } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
 
@@ -275,4 +275,16 @@ test('I1: settingsTarget: the packaged app uses ~/.claude/settings.json unless t
   const home = 'C:/Users/u';
   assert.deepEqual(settingsTarget({ isPackaged: true, envPath: undefined, home }), { path: path.join(home, '.claude', 'settings.json'), blocked: false });
   assert.deepEqual(settingsTarget({ isPackaged: true, envPath: 'C:/x.json', home }), { path: 'C:/x.json', blocked: false });
+});
+
+test('I4: guarded runs the function, and a throw is logged with its label instead of escaping', () => {
+  const logged = [];
+  const log = (label, err) => logged.push([label, err.message]);
+  assert.equal(guarded('add', (a, b) => a + b, log)(2, 3), 5);
+  const boom = guarded('stage tick', () => { throw new Error('bad view'); }, log);
+  assert.doesNotThrow(() => boom());
+  assert.equal(boom(), undefined);
+  assert.deepEqual(logged[0], ['stage tick', 'bad view']);
+  const worse = guarded('push', () => { throw new Error('x'); }, () => { throw new Error('log broke'); });
+  assert.doesNotThrow(() => worse(), 'a throwing logger never escapes either');
 });

@@ -13,7 +13,7 @@ import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor } from './focus.js';
-import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli } from './wiring.js';
+import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli, guarded } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
@@ -38,6 +38,11 @@ const DEBUG = process.env.AGENT_HUD_DEBUG === '1';
 
 const log = (...a) => console.error('[agent-hud]', ...a);
 const debug = (...a) => { if (DEBUG) console.log('[agent-hud]', ...a); };
+
+// I4: an error that escapes must never reach Electron's default error box, which blocks the main
+// process and with it every hooked session waiting on its hooks. Log it and carry on.
+process.on('uncaughtException', (err) => { try { log('uncaught', err); } catch { /* nothing left to do */ } });
+process.on('unhandledRejection', (err) => { try { log('unhandled rejection', err); } catch { /* nothing left to do */ } });
 
 let win = null;
 let tray = null;
@@ -66,7 +71,8 @@ const store = createStore({ engine, queue, holdMs: HOLD_MS, replyMs: REPLY_MS })
 const hudState = () => ({ collapsed, visible: !!win && !win.isDestroyed() && win.isVisible() });
 
 // Every snapshot push also re-places the panel and refreshes its detail (spec 6.3: the same throttle).
-function pushNow() {
+// Run from timers and IPC, so guarded (I4): a throw is logged, never an error box.
+const pushNow = guarded('push', () => {
   if (!win || win.isDestroyed()) return;
   const snap = store.snapshot();
   // Its agent left the list, or the HUD was hidden or collapsed: the panel closes.
@@ -74,17 +80,17 @@ function pushNow() {
   try { win.webContents.send('snapshot', { ...snap, collapsed, selected: selected?.id ?? null }); } catch (err) { log('push', err); }
   placePanel(snap);
   pushDetail();
-}
+}, log);
 const push = createThrottle(pushNow, PUSH_MS);
 queue.onChange(push);
 
-function pushDetailNow() {
+const pushDetailNow = guarded('detail', () => {
   if (!panelWin || panelWin.isDestroyed()) return;
   const d = selected ? store.detail(selected.id) : null; // null empties a hidden panel
   const json = JSON.stringify(d);
   if (json === sentDetail) return;
   try { panelWin.webContents.send('detail', d); sentDetail = json; } catch (err) { log('detail', err); }
-}
+}, log);
 const pushDetail = createThrottle(pushDetailNow, PUSH_MS);
 
 // Where the panel's arrow goes: sent on `place` whenever the side or the row's height changes.
@@ -98,13 +104,13 @@ function sendPlace() {
 // The 1 s stage tick: stages and stuck hints move on with the clock alone (thinking -> silent, a long
 // step), so push when any agent's stage or stuck flag changed. The renderers tick their own clocks.
 let lastStageKey = null;
-function stageTick() {
+const stageTick = guarded('stage tick', () => {
   const k = store.stageKey();
   if (k === lastStageKey) return;
   lastStageKey = k;
   push();
   pushDetail();
-}
+}, log);
 
 // ---------------------------------------------------------------- sessions
 
@@ -289,7 +295,8 @@ function panelWindow() {
 }
 
 // Beside the HUD at the selected row while there is something to show (panelTarget), hidden otherwise.
-function placePanel(snap) {
+// Guarded (I4): it runs from dock, the push and IPC.
+const placePanel = guarded('place panel', (snap) => {
   const id = selected && !quitting ? panelTarget(selected.id, snap ?? store.snapshot(), hudState()) : null;
   if (!id) {
     if (panelWin && !panelWin.isDestroyed() && panelWin.isVisible()) panelWin.hide();
@@ -301,7 +308,7 @@ function placePanel(snap) {
   place = { side: b.side, arrowY: b.arrowY };
   sendPlace();
   if (!pw.isVisible()) pw.showInactive();
-}
+}, log);
 
 // A new selection (or none): the HUD highlights the row, the panel moves and gets the agent's detail.
 function select(next) {

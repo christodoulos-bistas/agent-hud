@@ -138,6 +138,18 @@ export function createThrottle(fn, ms, { now = () => performance.now(), setTimer
   };
 }
 
+// A main-process tick that can never throw (I4): an exception would reach Electron's default error box,
+// which blocks the main process, and with it every hooked session waiting on its hooks. The error is
+// handed to `onError(label, err)` instead; a throwing onError is swallowed too.
+export function guarded(label, fn, onError) {
+  return (...args) => {
+    try { return fn(...args); } catch (err) {
+      try { onError(label, err); } catch { /* never throw from a guard */ }
+      return undefined;
+    }
+  };
+}
+
 // True when the latest session list says the id is interactive. An id that isn't listed yet
 // (a session newer than the last poll) re-reads the session files once; still unknown -> false.
 export function createInteractiveCheck({ current, reread }) {
