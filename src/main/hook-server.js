@@ -5,6 +5,7 @@ import { RELEASE } from './answers.js';
 
 const HOOK_PATH = '/agent-hud/hook';
 const MAX_BODY = 1024 * 1024;
+const HARD_CAP = 16 * 1024 * 1024;
 
 export function createHookServer({ port = 0, secret, queue, isInteractive, replyOptIn, onEvent, onError = (e) => console.error(e) } = {}) {
   const safeError = (err) => { try { onError(err); } catch { /* never break a request */ } };
@@ -17,14 +18,18 @@ export function createHookServer({ port = 0, secret, queue, isInteractive, reply
   const sendAnswer = (res, response) => {
     if (res.writableEnded || res.destroyed) return;
     if (response === RELEASE || response == null) return sendEmpty(res);
+    const text = JSON.stringify(response);
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(response));
+    res.end(text);
   };
 
   function hold(res, item) {
     // 'close' before the response is finished means the client went away.
     res.on('close', () => { if (!res.writableEnded) queue.drop(item.id); });
-    queue.add(item).then((response) => sendAnswer(res, response), safeError);
+    Promise.resolve().then(() => queue.add(item)).then((response) => sendAnswer(res, response)).catch((err) => {
+      safeError(err);
+      if (!res.headersSent) sendEmpty(res); else res.destroy();
+    });
   }
 
   function route(body, res) {
@@ -67,18 +72,23 @@ export function createHookServer({ port = 0, secret, queue, isInteractive, reply
     const declared = Number(req.headers['content-length']);
     let size = 0;
     let tooBig = false;
+    let discarded = 0;
     const chunks = [];
     const reject = () => {
       if (tooBig) return;
       tooBig = true;
       chunks.length = 0;
-      res.setHeader('connection', 'close');
       sendEmpty(res, 413);
     };
     if (declared > MAX_BODY) reject();
 
     req.on('data', (c) => {
-      if (tooBig) return;
+      if (tooBig) {
+        // Lingering close: keep discarding so the client can finish sending and read the 413.
+        discarded += c.length;
+        if (discarded > HARD_CAP) req.destroy();
+        return;
+      }
       size += c.length;
       if (size > MAX_BODY) return reject();
       chunks.push(c);

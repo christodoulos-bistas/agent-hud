@@ -217,3 +217,40 @@ test('onEvent errors do not break the request', async () => {
     assert.equal(h.errors.length, 1);
   } finally { await h.srv.close(); }
 });
+
+test('streamed oversize body without content-length -> 413', async () => {
+  const h = await setup();
+  try {
+    const chunk = new Uint8Array(64 * 1024).fill(120);
+    let n = 0;
+    const body = new ReadableStream({ pull(c) { if (n++ < 48) c.enqueue(chunk); else c.close(); } });
+    const r = await fetch(h.url, { method: 'POST', headers: { 'X-Agent-HUD': SECRET }, body, duplex: 'half' });
+    assert.equal(r.status, 413);
+  } finally { await h.srv.close(); }
+});
+
+test('held request is answered with empty 200 when queue.add rejects', async () => {
+  const h = await setup();
+  h.queue.add = () => Promise.reject(new Error('queue broke'));
+  try {
+    const r = await h.post(ev('PermissionRequest', { tool_name: 'Bash' }));
+    assert.equal(r.status, 200); assert.equal(await r.text(), '');
+    assert.equal(h.errors.length, 1);
+  } finally { await h.srv.close(); }
+});
+
+test('unserializable answer -> empty 200, no unhandled rejection', async () => {
+  const h = await setup();
+  let unhandled = 0;
+  const onU = () => { unhandled++; };
+  process.on('unhandledRejection', onU);
+  try {
+    const p = h.post(ev('PermissionRequest', { tool_name: 'Bash' }));
+    await waitFor(() => h.queue.list().length === 1);
+    h.queue.answer(h.queue.list()[0].id, { n: 10n });
+    const r = await p;
+    assert.equal(r.status, 200); assert.equal(await r.text(), '');
+    await sleep(20);
+    assert.equal(unhandled, 0);
+  } finally { process.off('unhandledRejection', onU); await h.srv.close(); }
+});
