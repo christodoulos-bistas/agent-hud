@@ -38,3 +38,18 @@ test('renderCard escapes HTML in command and question text (Review Focus 5)', ()
     assert.ok(html.includes('&lt;img'), html);
   }
 });
+
+test('pointerdown makes the window interactive only for a text input inside a card', () => {
+  const handlers = {};
+  const host = { addEventListener: (type, fn) => { handlers[type] = fn; } };
+  const calls = [];
+  cards.mountCards(host, { api: {}, onInteractive: (on) => calls.push(on), adopt: true });
+  const target = (selfSel) => ({ closest: (sel) => (sel === '.ans' ? {} : sel.split(',').map((s) => s.trim()).includes(selfSel) ? {} : null) });
+  handlers.pointerdown({ target: target('button') });
+  assert.deepEqual(calls, []);
+  handlers.pointerdown({ target: target('input') });
+  handlers.pointerdown({ target: target('textarea') });
+  assert.deepEqual(calls, [true, true]);
+  handlers.pointerdown({ target: { closest: () => null } }); // outside any card
+  assert.deepEqual(calls, [true, true]);
+});

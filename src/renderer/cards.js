@@ -243,7 +243,8 @@ export function mountCards(host, { api, doc, onInteractive, adopt = false, draft
     if (open && cardEl.dataset.session) call('openWindow', cardEl.dataset.session);
   });
 
-  host.addEventListener('pointerdown', (e) => { if (cardOf(e.target)) interactive(true); });
+  // Focusable only while typing: a pointerdown in a text input inside a card (buttons work in a non-focusable window).
+  host.addEventListener('pointerdown', (e) => { if (cardOf(e.target) && e.target.closest('input, textarea')) interactive(true); });
 
   host.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');
