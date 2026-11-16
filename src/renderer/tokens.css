@@ -1,0 +1,6 @@
+/* Agent HUD · QuestBound colour tokens, shared by the HUD (index.html) and the detail panel
+   (panel.html). hud.css, panel.css and cards.css all read these; link this file first. */
+:root {
+  --night: #18221f; --panel: #2c3a34; --panel2: #3a4a42; --gold: #e0b45c; --gold-d: #c9973f; --gold-l: #edcb85;
+  --parch: #f0e9da; --sage: #a9b3a6; --rust: #b5442f; --slate: #4f6787; --moss: #6f8f49; --amber: #e8a33c;
+}

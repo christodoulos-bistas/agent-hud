@@ -1,9 +1,6 @@
-/* Agent HUD · QuestBound house style. Party frames (option A) and the three answer cards are ported
-   from .superpowers/brainstorm/1378-1794812926/content/hud-layout.html; moods from the roster mockup. */
-:root {
-  --night: #18221f; --panel: #2c3a34; --panel2: #3a4a42; --gold: #e0b45c; --gold-d: #c9973f; --gold-l: #edcb85;
-  --parch: #f0e9da; --sage: #a9b3a6; --rust: #b5442f; --slate: #4f6787; --moss: #6f8f49;
-}
+/* Agent HUD · QuestBound house style. Party frames (option A) are ported from
+   .superpowers/brainstorm/1378-1794812926/content/hud-layout.html; moods from the roster mockup.
+   Colours come from tokens.css; the answer cards (cards.css) live in the detail panel. */
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: transparent; }
 body {
@@ -54,7 +51,7 @@ button.who-n:hover { text-decoration: underline dotted rgba(240, 233, 218, .5); 
 .wait:hover { color: var(--parch); }
 .wait[aria-pressed="true"] { color: var(--gold-l); }
 .wait[aria-pressed="true"] i { background: var(--gold); border-color: var(--gold-d); }
-.wait[aria-pressed="true"] i::after, .chk input:checked + i::after {
+.wait[aria-pressed="true"] i::after {
   content: ''; position: absolute; left: 2.5px; top: .5px; width: 3px; height: 5.5px; border: solid #1b120e; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg);
 }
 
@@ -85,7 +82,6 @@ button.who-n:hover { text-decoration: underline dotted rgba(240, 233, 218, .5); 
 .queue { font-size: .72rem; color: var(--gold-l); padding: 6px 12px 8px; border-top: 1px solid rgba(224, 180, 92, .16); background: rgba(224, 180, 92, .05); }
 .queue b { font-weight: 700; }
 .empty { margin: 0; padding: 10px 12px 12px; font-size: .78rem; font-style: italic; color: var(--sage); }
-.card-slot { padding: 0 10px 10px; }
 
 /* collapsed: a column of faces; a waiting agent keeps its seal */
 .party.collapsed { width: auto; }

@@ -2,7 +2,8 @@
 // the tests; bootPanel wires it to the DOM and to window.panel from the preload. Every string that
 // comes from the detail goes through esc() before it reaches markup.
 import { spriteSvg } from './sprites.js';
-import { esc, renderChip, chipOf, className, createRenderGate } from './hud.js';
+import { esc, renderChip, chipOf, className, createRenderGate, patch } from './hud.js';
+import { renderCard, replyLeftMs, mountCards } from './cards.js';
 import { fmtDuration } from './format.js';
 
 const MAX_STEPS = 5;
@@ -39,10 +40,11 @@ function stuckLine(d, nowMs) {
   return `<div class="warn"><b>${head}</b> ${text}</div>`;
 }
 
-// Where the answer is waiting (M3): a card in the HUD; handed back to its window (the footer's
-// "open window ↗" opens it); or a native prompt the HUD never held.
+// Where the answer is waiting (M3), when its card is not the one shown above: queued behind the
+// current question (it opens here next); handed back to its window (the footer's "open window ↗"
+// opens it); or a native prompt the HUD never held.
 function needsNote(d) {
-  if (d.hasCard) return 'Waiting for your answer in the HUD';
+  if (d.hasCard) return 'Its question opens here after the current one';
   if (d.handedBack) return d.canOpen === false ? 'Waiting in its window' : 'Waiting in its window — open ↗';
   return 'Waiting for you in its window';
 }
@@ -74,8 +76,19 @@ function nowBlock(d, nowMs) {
   return '';
 }
 
-export function renderPanel(detail, nowMs = Date.now()) {
+// The agent's open question (detail.card), under the header and above the task. Keyed and sticky: the
+// keyed patch keeps the live card (its typed text, picks and focus) while new details re-render the
+// rest. `leftMs` and `arming` come from the mounted card (bootPanel); without them the reply clock
+// runs to the main process deadline.
+function cardSlot(card, nowMs, { leftMs, arming = false } = {}) {
+  if (!card) return '';
+  const left = leftMs ?? replyLeftMs(card, nowMs, nowMs);
+  return `<div class="card-slot" data-key="card:${esc(card.id)}" data-sticky>${renderCard(card, { leftMs: left, arming })}</div>`;
+}
+
+export function renderPanel(detail, nowMs = Date.now(), cardOpts = {}) {
   const d = detail || {};
+  const card = d.card && typeof d.card === 'object' ? d.card : null;
   const steps = (Array.isArray(d.steps) ? d.steps : []).slice(0, MAX_STEPS);
   const helpers = Array.isArray(d.helpers) ? d.helpers : [];
   const task = d.task ? `<p class="task">“${esc(d.task)}”</p>` : '<p class="task none">Started before the HUD</p>';
@@ -93,16 +106,18 @@ export function renderPanel(detail, nowMs = Date.now()) {
   const foot = finite(d.startedAt)
     ? timeSpan(d.startedAt, nowMs, { pre: 'started ', post: ` ago · ${count} steps` })
     : `<span>${count} steps</span>`;
-  return '<div class="fly">' +
-    '<div class="fly-top">' +
+  // data-key / data-deep: bootPanel patches this in place (hud.js patch), never replacing the card slot.
+  return '<div class="fly" data-key="fly" data-deep>' +
+    '<div class="fly-top" data-key="top">' +
       `<span class="spr">${spriteSvg(d.cls, 1.5)}</span>` +
       `<div class="who"><div class="who-n">${esc(d.display)}</div><div class="who-d"><span class="cls">${esc(className(d.cls))}</span></div></div>` +
       renderChip(d, nowMs) +
       '<button type="button" class="x" data-act="close" aria-label="Close">✕</button>' +
     '</div>' +
-    '<div class="det">' +
+    cardSlot(card, nowMs, cardOpts) +
+    '<div class="det" data-key="det">' +
       stuckLine(d, nowMs) +
-      (d.stage === 'needs' ? `<div class="needs-note">${needsNote(d)}</div>` : '') +
+      (d.stage === 'needs' && !card ? `<div class="needs-note">${needsNote(d)}</div>` : '') +
       '<p class="lbl">Task</p>' + task +
       nowBlock(d, nowMs) +
       list + help +
@@ -124,13 +139,46 @@ export function arrowOf(place) {
 
 export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   const root = doc.getElementById('panel-root');
+  const call = (name, ...args) => (typeof api?.[name] === 'function' ? api[name](...args) : undefined);
+  const rendered = new WeakMap();
   let detail = null;
   let timer = null;
 
-  // A full render only when a new detail arrives; between details the 1 s tick rewrites the time
-  // texts and the chip's clock in place (and swaps the stuck line, which holds no buttons), so a
-  // click that straddles a tick still lands and a focused button keeps its focus.
-  const render = () => { root.innerHTML = detail ? renderPanel(detail, Date.now()) : ''; };
+  // The panel takes the keyboard focus only while the user types into a card's text box, and gives it
+  // back as soon as the answer is sent or released, or the card goes (main: panel:setInteractive).
+  let interactive = false;
+  const setInteractive = (on) => {
+    if (interactive === on) return;
+    interactive = on;
+    call('setInteractive', on);
+  };
+  // The open question: answer buttons, the 500 ms arming, the reply countdown and typed-text drafts live
+  // in cards.js; its markup comes from renderPanel (adopt), kept by the keyed patch. "open window ↗" on
+  // the card hands it back (release) and opens its session's window: the session id goes along, since
+  // the release can already have moved the panel's selection back to what was open before.
+  const cards = mountCards(root, {
+    doc, adopt: true, onInteractive: setInteractive,
+    api: {
+      answer: (id, response) => call('answer', id, response),
+      release: (id) => call('release', id),
+      openWindow: (sessionId) => call('openWindow', sessionId),
+    },
+  });
+
+  // A render when a new detail arrives: the keyed patch replaces the header and the details, never the
+  // card being answered. Between details the 1 s tick rewrites the time texts, the chip's clock and the
+  // reply countdown in place (and swaps the stuck line, which holds no buttons), so a click that
+  // straddles a tick still lands and a focused button keeps its focus.
+  const render = () => {
+    const now = Date.now();
+    const { arming } = cards.show(detail?.card ?? null, now);
+    if (!detail) { root.innerHTML = ''; return; }
+    const tpl = doc.createElement('template');
+    tpl.innerHTML = renderPanel(detail, now, { leftMs: cards.leftMs(now), arming });
+    patch(root, tpl.content, rendered);
+    cards.refresh();
+    cards.tick(now);
+  };
   const swap = (el, html) => { if (el && html && el.outerHTML !== html) el.outerHTML = html; };
   const tick = () => {
     if (!detail) return;
@@ -143,6 +191,7 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
     const c = chipOf(detail, now);
     if (chip && chip.classList.contains(c.cls)) { if (chip.textContent !== c.text) chip.textContent = c.text; } else swap(chip, renderChip(detail, now));
     swap(root.querySelector('.det > .warn'), stuckLine(detail, now));
+    cards.tick(now);
   };
 
   // The arrow lives on <body> (a CSS triangle in an 8 px gutter, panel.css), outside the scrolling list.
@@ -168,7 +217,7 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   }).observe(root);
 
   // A new detail arrives on nearly every event of a busy agent: it waits while a pointer is down in the
-  // panel (createRenderGate), so ✕ and "open window ↗" are not replaced while being clicked.
+  // panel (createRenderGate), so ✕, "open window ↗" and the card's buttons are not replaced while being clicked.
   const gate = createRenderGate((next) => {
     detail = next || null;
     render();

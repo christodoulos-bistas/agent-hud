@@ -1,8 +1,5 @@
-/* Agent HUD detail panel · QuestBound house style; ported from mockup option B (.fly, .det). */
-:root {
-  --night: #18221f; --panel: #2c3a34; --gold: #e0b45c; --gold-d: #c9973f; --gold-l: #edcb85;
-  --parch: #f0e9da; --sage: #a9b3a6; --rust: #b5442f; --moss: #6f8f49; --amber: #e8a33c;
-}
+/* Agent HUD detail panel · QuestBound house style; ported from mockup option B (.fly, .det).
+   Colours come from tokens.css. */
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: transparent; }
 body { overflow: hidden; color: var(--parch); font: 400 16px/1.3 'Alegreya Sans', system-ui, sans-serif; -webkit-font-smoothing: antialiased; user-select: none; }
@@ -61,3 +58,7 @@ body[data-arrow="left"]::after { left: 0; border-right-color: rgba(224, 180, 92,
 .det .warn { background: rgba(232, 163, 60, .14); border: 1px solid rgba(232, 163, 60, .5); color: #f3cf94; border-radius: 7px; padding: 6px 8px; margin: 0 0 8px; }
 .det .warn b { color: var(--amber); }
 .det .needs-note { color: var(--gold-l); font-size: .74rem; margin: 0 0 8px; }
+
+/* The question (cards.css) sits under the agent header, above the task: the panel pops open on it. */
+.card-slot { margin: 0 0 9px; }
+.card-slot .ans { box-shadow: none; }

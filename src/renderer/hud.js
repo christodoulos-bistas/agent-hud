@@ -3,9 +3,10 @@
 // comes from the snapshot goes through esc() before it reaches markup.
 import { GR, CLASSES, MOODS_BADGE, FAMILIAR, spriteSvg } from './sprites.js';
 import { fmtDuration } from './format.js';
-import { esc, className, int, sessionOf, renderCard, replyLeftMs, picksFrom, actionsArmed, clickAllowed, mountCards } from './cards.js';
+import { esc, className, int, sessionOf, renderCard, replyLeftMs, picksFrom, actionsArmed, clickAllowed } from './cards.js';
 
-// The card code lives in cards.js (shared with the detail panel); these are re-exported so existing imports keep working.
+// The answer cards live in the detail panel now (cards.js, panel.js); the HUD shows only the asking
+// row and the "Next:" line. These are re-exported so existing imports keep working.
 export { esc, className, renderCard, replyLeftMs, picksFrom, actionsArmed, clickAllowed };
 
 const MOODS = new Set(['needs', 'done', 'working', 'idle']);
@@ -181,7 +182,9 @@ function face(a) {
     `<span class="sprite-box">${sprite(a.cls)}${mood === 'needs' ? SEAL() : ''}</span></button>`;
 }
 
-export function renderParty(snapshot, { collapsed = false, leftMs, arming = false } = {}) {
+// The party: rows (or, collapsed, a column of faces), the header and the "Next:" line. No answer card:
+// a question opens the detail panel on its agent, and the asking row only says what it asks.
+export function renderParty(snapshot, { collapsed = false } = {}) {
   const selectedId = snapshot?.selected != null ? String(snapshot.selected) : null;
   const agents = Array.isArray(snapshot?.agents) ? snapshot.agents : [];
   if (collapsed) {
@@ -192,15 +195,13 @@ export function renderParty(snapshot, { collapsed = false, leftMs, arming = fals
   }
   const card = snapshot?.card || null;
   const owner = card ? sessionOf(card) : null;
-  const slot = () => `<div class="card-slot" data-key="card:${esc(card.id)}" data-sticky>${renderCard(card, { leftMs, arming })}</div>`;
   const parts = [];
-  let placed = false;
+  let asked = false;
   for (const a of agents) {
-    const mine = !!card && !placed && String(a.id) === owner;
+    const mine = !!card && !asked && String(a.id) === owner;
     parts.push(renderRow(a, { ...(mine ? { ask: card.kind } : {}), selected: selectedId != null && String(a.id) === selectedId }));
-    if (mine) { parts.push(slot()); placed = true; }
+    if (mine) asked = true;
   }
-  if (card && !placed) parts.unshift(slot());
   if (!agents.length) parts.push('<p class="empty" data-key="empty">No agents are running.</p>');
 
   const total = int(snapshot?.counts?.total, agents.length);
@@ -217,9 +218,10 @@ export function renderParty(snapshot, { collapsed = false, leftMs, arming = fals
 // ---------------------------------------------------------------- DOM
 
 // Keyed patch: children carry data-key. A reused child is kept when its rendered HTML is unchanged
-// (data-deep children are patched recursively, data-sticky ones are never replaced), so an open
-// card keeps its typed text, picks and focus while the rest of the party updates around it.
-function patch(parent, fresh, rendered) {
+// (data-deep children are patched recursively, data-sticky ones are never replaced), so a row keeps
+// its animations and the button under the pointer, and the panel's open card keeps its typed text,
+// picks and focus while the rest updates around it. `rendered` (a WeakMap) remembers each node's HTML.
+export function patch(parent, fresh, rendered) {
   const old = new Map();
   for (const el of [...parent.children]) {
     if (el.dataset.key) old.set(el.dataset.key, el); else el.remove();
@@ -254,18 +256,11 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
   const root = doc.getElementById('hud-root');
   const call = (name, ...args) => (typeof api?.[name] === 'function' ? api[name](...args) : undefined);
   const rendered = new WeakMap();
-  const st = { snap: null, collapsed: false, interactive: false, needs: new Set() };
+  // The HUD has no text boxes (the answer cards are in the detail panel), so it never takes the focus.
+  const st = { snap: null, collapsed: false, needs: new Set() };
 
-  const setInteractive = (on) => {
-    if (st.interactive === on) return;
-    st.interactive = on;
-    call('setInteractive', on);
-  };
-  // The card slot's answer buttons, arming, reply countdown and typed-text drafts live in cards.js; the
-  // slot's markup comes from renderParty (adopt), so the keyed patch keeps it sticky.
-  const cards = mountCards(root, { api, doc, onInteractive: setInteractive, adopt: true });
-
-  const rowEl = (id) => root.querySelector(`[data-key="row:${String(id).replace(/["\\]/g, '\\$&')}"]`);
+  // The selected agent's row, or its face while collapsed (a question opens the panel beside the column).
+  const rowEl = (id) => root.querySelector(`[data-key="${st.collapsed ? 'face' : 'row'}:${String(id).replace(/["\\]/g, '\\$&')}"]`);
 
   // Row clocks: a timed chip carries its kind and start (rowChip) and its text is written here, in
   // place, so the row (its bob and dots animations, its buttons) is never replaced because time passed.
@@ -276,32 +271,31 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     }
   }
 
-  function tick() {
-    const now = Date.now();
-    tickChips(now);
-    cards.tick(now);
-  }
+  const tick = () => tickChips(Date.now());
 
+  // Where the selected row (or face) is, for the panel's placement and arrow. Reported when it moves,
+  // and always when the selection changes: main selects an asking agent by itself and doesn't know
+  // where its row is until this says.
   const rowCentre = (el) => rowCentreY(el.getBoundingClientRect());
   let lastOffset = null;
+  let lastOffsetId = null;
   function syncRowOffset(snap) {
     const id = snap?.selected != null ? String(snap.selected) : null;
-    if (id == null) { lastOffset = null; return; }
+    if (id == null) { lastOffset = null; lastOffsetId = null; return; }
     const el = rowEl(id);
     if (!el) return;
     const y = rowCentre(el);
-    if (lastOffset == null || Math.abs(y - lastOffset) >= 1) { lastOffset = y; call('rowOffset', id, y); }
+    if (id !== lastOffsetId || lastOffset == null || Math.abs(y - lastOffset) >= 1) {
+      lastOffset = y; lastOffsetId = id;
+      call('rowOffset', id, y);
+    }
   }
 
   function render() {
     const snap = st.snap || { agents: [], card: null, next: null, counts: { total: 0, needs: 0 } };
-    const card = snap.card || null;
-    const now = Date.now();
-    const { arming } = cards.show(card, now);
     const tpl = doc.createElement('template');
-    tpl.innerHTML = renderParty(snap, { collapsed: st.collapsed, leftMs: cards.leftMs(now), arming });
+    tpl.innerHTML = renderParty(snap, { collapsed: st.collapsed });
     patch(root, tpl.content, rendered);
-    cards.refresh();
 
     // The needs chip pulses three times when an agent starts waiting, then glows steady.
     const { needs, fresh } = newlyNeeding(snap.agents, st.needs);
@@ -319,14 +313,15 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     if (!el || !root.contains(el) || el.disabled) return;
     switch (el.dataset.act) {
       case 'collapse':
-        st.collapsed = !st.collapsed;
-        if (st.collapsed) setInteractive(false); // the main process makes the collapsed window non-focusable
-        call('collapse', st.collapsed); render(); break;
+        st.collapsed = !st.collapsed; call('collapse', st.collapsed); render(); break;
       case 'expand':
         st.collapsed = false; call('collapse', false); render(); break;
       case 'select': {
         const row = el.closest('.row');
-        if (row) { lastOffset = rowCentre(row); call('selectAgent', el.dataset.session, lastOffset); }
+        if (row) {
+          lastOffset = rowCentre(row); lastOffsetId = String(el.dataset.session);
+          call('selectAgent', el.dataset.session, lastOffset);
+        }
         break;
       }
       case 'open':
@@ -354,10 +349,7 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
   // can't replace the button being clicked.
   const gate = createRenderGate((snap) => {
     st.snap = snap;
-    if (typeof snap?.collapsed === 'boolean') { // the tray can collapse too
-      if (snap.collapsed && !st.collapsed) setInteractive(false);
-      st.collapsed = snap.collapsed;
-    }
+    if (typeof snap?.collapsed === 'boolean') st.collapsed = snap.collapsed; // the tray can collapse too
     render();
   });
   root.addEventListener('pointerdown', () => gate.down());

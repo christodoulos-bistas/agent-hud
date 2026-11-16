@@ -1,4 +1,5 @@
-/* Answer cards: shared by the HUD and the detail panel (cards.js). Uses the page's colour variables. */
+/* Answer cards (cards.js), shown in the detail panel. Self-contained apart from the colour tokens in
+   tokens.css: link that first. */
 /* ---------- answer cards ---------- */
 .ans { background: rgba(24, 34, 31, .98); border: 1px solid rgba(224, 180, 92, .4); border-radius: 10px; padding: 10px 12px 11px; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
 .ans.parch { background: #efe6d3; color: #2a211a; border-color: #c9a86a; }
@@ -40,6 +41,9 @@
 .chk input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
 .chk i { position: relative; width: 11px; height: 11px; flex: none; border: 1px solid rgba(169, 179, 166, .6); border-radius: 3px; display: inline-block; }
 .chk input:checked + i { background: var(--gold); border-color: var(--gold-d); }
+.chk input:checked + i::after {
+  content: ''; position: absolute; left: 2.5px; top: .5px; width: 3px; height: 5.5px; border: solid #1b120e; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg);
+}
 .chk input:focus-visible + i { outline: 2px solid var(--gold-l); outline-offset: 2px; }
 .chip { display: inline-block; font-size: .62rem; letter-spacing: .12em; text-transform: uppercase; color: var(--night); background: var(--gold-l); border-radius: 4px; padding: 1px 6px; margin-bottom: 5px; font-weight: 700; }
 .qn + .qn { margin-top: 4px; padding-top: 9px; border-top: 1px solid rgba(240, 233, 218, .08); }

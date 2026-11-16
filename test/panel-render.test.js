@@ -1,5 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import { renderPanel, timeText, arrowOf } from '../src/renderer/panel.js';
+import { ARM_MS } from '../src/renderer/cards.js';
 
 const NOW = 1_000_000_000;
 const XSS = '<img src=x onerror=alert(1)>';
@@ -54,9 +55,10 @@ test('task null → "Started before the HUD" (Review Focus 1)', () => {
   assert.match(renderPanel(detail({ task: null }), NOW), /Started before the HUD/);
 });
 
-test('needs with a card in the HUD → "Waiting for your answer in the HUD"', () => {
-  assert.match(renderPanel(detail({ stage: 'needs', hasCard: true }), NOW), /Waiting for your answer in the HUD/);
-  assert.doesNotMatch(renderPanel(detail(), NOW), /Waiting for your answer/);
+test('needs with a question queued behind the current one → "Its question opens here after the current one"', () => {
+  assert.match(renderPanel(detail({ stage: 'needs', hasCard: true }), NOW), /Its question opens here after the current one/);
+  assert.doesNotMatch(renderPanel(detail(), NOW), /Its question opens/);
+  assert.doesNotMatch(renderPanel(detail({ stage: 'needs', hasCard: true }), NOW), /in the HUD/, 'the HUD holds no cards any more');
 });
 
 test('HTML in task, command label and error is escaped (Review Focus 5)', () => {
@@ -113,7 +115,7 @@ test('M2: the long-step line names the flagged step from stuck, not the current 
 
 test('M3: the needs line says where the answer is waiting', () => {
   const at = (o) => renderPanel(detail({ stage: 'needs', ...o }), NOW);
-  assert.match(at({ hasCard: true, handedBack: true }), /class="needs-note">Waiting for your answer in the HUD</);
+  assert.match(at({ hasCard: true, handedBack: true }), /class="needs-note">Its question opens here after the current one</);
   assert.match(at({ hasCard: false, handedBack: true }), /class="needs-note">Waiting in its window — open ↗</);
   assert.match(at({ hasCard: false, handedBack: false }), /class="needs-note">Waiting for you in its window</);
   assert.doesNotMatch(renderPanel(detail({ hasCard: true }), NOW), /needs-note/, 'only while it needs you');
@@ -139,4 +141,41 @@ test('panel hides "open window" when the session cannot be focused', () => {
   const handed = renderPanel(detail({ stage: 'needs', handedBack: true, canOpen: false }), NOW);
   assert.match(handed, /Waiting in its window/);
   assert.doesNotMatch(handed, /open ↗/);
+});
+
+const replyCard = (o = {}) => ({
+  id: 'c9', kind: 'reply', sessionId: 's1', display: 'arsenal · e0', cls: 'runesmith', canOpen: true,
+  payload: { session_id: 's1', last_assistant_message: 'Done. Ship it?' }, expiresAt: NOW + 125000, ...o,
+});
+const permCard = (o = {}) => ({
+  id: 'c8', kind: 'permission', sessionId: 's1', display: 'arsenal · e0', cls: 'runesmith', canOpen: true, expiresAt: NOW + 60000,
+  payload: { session_id: 's1', tool_name: 'Bash', tool_input: { command: 'rm -rf build && npm run build -- --verbose' }, permission_suggestions: [] }, ...o,
+});
+
+test('renderPanel with detail.card renders the card above the task, with the countdown', () => {
+  const h = renderPanel(detail({ stage: 'needs', hasCard: true, card: replyCard() }), NOW);
+  const at = h.indexOf('class="ans');
+  assert.ok(at > 0, h);
+  assert.ok(at < h.indexOf('>Task<'), 'the card sits above the task');
+  assert.ok(h.indexOf('class="fly-top"') < at, 'below the agent header (sprite, name, chip, close)');
+  assert.match(h, /<span data-left>2:05<\/span>/, 'the reply countdown runs to the main process deadline (expiresAt)');
+  assert.match(h, /data-key="card:c9" data-sticky/, 'the card slot is keyed and sticky, so a new detail does not replace it');
+  assert.doesNotMatch(h, /needs-note/, 'the card is the note');
+  assert.match(renderPanel(detail({ card: replyCard() }), NOW, { leftMs: 61000 }), /<span data-left>1:01<\/span>/, "the mounted card's own clock wins");
+
+  const p = renderPanel(detail({ stage: 'needs', hasCard: true, card: permCard() }), NOW);
+  assert.ok(p.includes('rm -rf build &amp;&amp; npm run build -- --verbose'), 'the full command');
+  assert.match(p, /data-act="allow"/); assert.match(p, /data-act="deny"/);
+  assert.match(p, /data-act="open-card"/);
+  assert.match(renderPanel(detail({ card: permCard() }), NOW, { arming: true }), /<div class="ans arming"/, `inert for ${ARM_MS} ms after it appears`);
+  assert.doesNotMatch(p, /arming/);
+  assert.doesNotMatch(renderPanel(detail({ card: permCard({ display: XSS, payload: { tool_name: 'Bash', tool_input: { command: XSS } } }) }), NOW), /<img/);
+});
+
+test('renderPanel without card unchanged', () => {
+  const h = renderPanel(detail(), NOW);
+  assert.equal(h, renderPanel(detail({ card: null }), NOW));
+  assert.doesNotMatch(h, /class="ans|card-slot|data-sticky/);
+  assert.ok(h.startsWith('<div class="fly"'), h.slice(0, 60));
+  assert.match(h, /Make the updater keep 3 builds/);
 });

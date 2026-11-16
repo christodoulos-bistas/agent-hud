@@ -1,6 +1,6 @@
-// Answer cards (permission / multiple choice / reply), shared by the HUD and the detail panel:
-// the pure renderCard (snapshot card in, HTML string out) and mountCards, which wires a rendered card
-// to window.hud. Nothing here touches the DOM at import, so it loads in Node for the tests.
+// Answer cards (permission / multiple choice / reply), shown in the detail panel: the pure renderCard
+// (snapshot card in, HTML string out) and mountCards, which wires a rendered card to the panel's api.
+// Nothing here touches the DOM at import, so it loads in Node for the tests.
 import { CLASSES } from './sprites.js';
 
 export const REPLY_MS = 540000; // the reply hold in the main process (queue replyMs)
@@ -159,8 +159,9 @@ export function createDrafts() {
   };
 }
 
-// Wires cards to window.hud. Listeners are delegated on `host`. By default show() renders the card
-// into host; with { adopt: true } the caller renders the card markup itself (the HUD's keyed patch
+// Wires cards to an api with answer(id, response), release(id) and openWindow(sessionId) (the detail
+// panel's window.panel). Listeners are delegated on `host`. By default show() renders the card
+// into host; with { adopt: true } the caller renders the card markup itself (the panel's keyed patch
 // does) and show() only tracks it, then refresh() restores drafts once the markup is in place.
 export function mountCards(host, { api, doc, onInteractive, adopt = false, drafts = createDrafts() } = {}) {
   const call = (name, ...args) => (typeof api?.[name] === 'function' ? api[name](...args) : undefined);
@@ -172,7 +173,7 @@ export function mountCards(host, { api, doc, onInteractive, adopt = false, draft
   const leftMs = (now) => replyLeftMs(st.card, now, st.cardSince);
   const cardOf = (el) => el?.closest('.ans');
 
-  // The card element is sticky in the HUD (never re-rendered), so the arming class comes off the live element.
+  // The card element is sticky (never re-rendered by the keyed patch), so the arming class comes off the live element.
   function armLater() {
     clearTimeout(armTimer);
     armTimer = setTimeout(() => {
@@ -243,14 +244,17 @@ export function mountCards(host, { api, doc, onInteractive, adopt = false, draft
     if (open && cardEl.dataset.session) call('openWindow', cardEl.dataset.session);
   });
 
-  // Focusable only while typing: a pointerdown in a text input inside a card (buttons work in a non-focusable window).
-  host.addEventListener('pointerdown', (e) => { if (cardOf(e.target) && e.target.closest('input, textarea')) interactive(true); });
+  // Focusable only while typing: a pointerdown in a text box inside a card. Buttons and the "always
+  // allow" checkbox work in a non-focusable window, so clicking them takes no focus (R3).
+  host.addEventListener('pointerdown', (e) => {
+    if (cardOf(e.target) && e.target.closest('textarea, input:not([type=checkbox]):not([type=radio])')) interactive(true);
+  });
 
   host.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');
     if (!el || !host.contains(el) || el.disabled) return;
     const cardEl = cardOf(el);
-    if (!cardEl) return; // not a card action (the HUD's own buttons are handled by its own listener)
+    if (!cardEl) return; // not a card action (the page's own buttons are handled by its own listener)
     if (!clickAllowed(el.dataset.act, st.cardSince, Date.now())) return; // a click meant for the card this one replaced
     switch (el.dataset.act) {
       case 'allow':

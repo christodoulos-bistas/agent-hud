@@ -130,14 +130,28 @@ test('renderParty collapsed contains no card markup but keeps seals', () => {
   assert.equal(count(html, '<svg'), 3); // two sprites + one seal
 });
 
-test('renderParty expanded puts the card right after its agent row and escapes the next line', () => {
+test('renderParty renders no card markup even when snapshot.card is set; the Next line stays', () => {
+  const snap = {
+    agents: [agent({ id: 's0', display: 'first' }), agent({ id: 's2', mood: 'needs', display: 'second' }), agent({ id: 's3', display: 'third' })],
+    card: choice(), next: 'Next: agent-hud asks permission', counts: { total: 3, needs: 1 },
+  };
+  for (const opts of [{}, { collapsed: false }, { collapsed: false, arming: true, leftMs: 1000 }]) {
+    const html = renderParty(snap, opts);
+    for (const needle of ['class="ans', 'card-slot', 'data-sticky', 'data-act="answer"', 'data-act="open-card"', 'Something else', 'Should the updater']) {
+      assert.ok(!html.includes(needle), `${needle} in ${JSON.stringify(opts)}`);
+    }
+    assert.ok(html.includes('Next: <b>agent-hud</b> asks permission · after this one'), 'the Next line stays');
+    assert.match(html, /data-key="row:s2"[^]*· asks a question[^]*data-key="row:s3"/, "the asking agent's row still says what it asks");
+    assert.equal(count(html, 'asks a question'), 1, 'only the card owner\'s row');
+  }
+});
+
+test('renderParty expanded escapes the next line', () => {
   const snap = {
     agents: [agent({ id: 's0', display: 'first' }), agent({ id: 's1', mood: 'needs', display: 'second' }), agent({ id: 's2', display: 'third' })],
     card: permission(), next: `Next: ${XSS} asks a question`, counts: { total: 3, needs: 1 },
   };
   const html = renderParty(snap, { collapsed: false });
-  const i = (s) => html.indexOf(s);
-  assert.ok(i('second') < i('class="ans') && i('class="ans') < i('third'));
   assert.ok(html.includes('Next: <b>&lt;img src=x onerror=alert(1)&gt;</b> asks a question'));
   assert.ok(html.includes('3 at work'));
   assert.ok(html.includes('1 needs you'));
@@ -301,9 +315,7 @@ test('I7: a card rendered while arming carries the arming class; otherwise not',
   assert.ok(renderCard(permission(), { arming: true }).startsWith('<div class="ans arming"'));
   assert.ok(renderCard(reply('hi'), { arming: true }).startsWith('<div class="ans parch arming"'));
   assert.ok(!renderCard(permission()).includes('arming'));
-  const snap = { agents: [agent({ mood: 'needs' })], card: permission(), next: null, counts: { total: 1, needs: 1 } };
-  assert.ok(renderParty(snap, { arming: true }).includes('class="ans arming"'));
-  assert.ok(!renderParty(snap, {}).includes('arming'));
+  // (the card lives in the detail panel now: test/panel-render.test.js covers its arming class there)
 });
 
 test('I1: a working row renders the same HTML at two different times; its chip carries data-kind and data-since for the tick', () => {

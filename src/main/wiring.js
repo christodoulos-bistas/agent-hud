@@ -109,17 +109,45 @@ export function panelBounds(hud, workArea, { width = 340, height, rowY, gap = 8,
   const other = preferred === 'left' ? 'right' : 'left';
   const side = fits(preferred) ? preferred : fits(other) ? other : room.left >= room.right ? 'left' : 'right';
   const x = clamp(side === 'left' ? hud.x - gap - width : hud.x + hud.width + gap, wa.x, wa.x + wa.width - width);
-  const row = hud.y + (Number.isFinite(Number(rowY)) ? Number(rowY) : 40); // no row yet: level with the HUD's top
+  const row = hud.y + (rowY != null && Number.isFinite(Number(rowY)) ? Number(rowY) : 40); // no row yet: level with the HUD's top
   const y = Math.round(clamp(row - 40, wa.y, wa.y + wa.height - h));
   return { x: Math.round(x), y, width, height: h, side, arrowY: Math.round(clamp(row - y, 16, h - 16)) };
 }
 
-// Which agent the panel shows: the selected one, only while the HUD is visible and expanded and the
-// agent is still in the snapshot; otherwise none (the panel closes).
-export function panelTarget(selectedId, snapshot, { collapsed, visible } = {}) {
-  if (selectedId == null || collapsed || !visible) return null;
+// Which agent the panel shows: the selected one, only while the HUD is visible and the agent is still
+// in the snapshot; otherwise none (the panel closes). A collapsed HUD has a panel only for the agent
+// that owns the active question (`hasCard`): it opens beside the collapsed column.
+export function panelTarget(selectedId, snapshot, { collapsed, visible, hasCard } = {}) {
+  if (selectedId == null || !visible || (collapsed && !hasCard)) return null;
   const agents = Array.isArray(snapshot?.agents) ? snapshot.agents : [];
   return agents.some((a) => a && String(a.id) === String(selectedId)) ? selectedId : null;
+}
+
+// The panel's selection as a question comes and goes. state = { selected: {id,rowY}|null, auto, before,
+// cardId }; `card` is the snapshot's active card or null.
+// - A new card id opens the panel on its agent (auto). The selection to come back to (`before`) is the
+//   one the user had; a card replacing an auto-opened one keeps that original `before`.
+// - The card going away (answered here or in its own window, released, timed out) while the
+//   selection is still auto puts `before` back (null: the panel closes).
+// - The same card id changes nothing, so a choice the user made during the question (userSelect) stands.
+// rowY is unknown for a newly opened agent (null) until the HUD reports where its row is.
+export function autoSelect(state, card) {
+  const s = { selected: state?.selected ?? null, auto: !!state?.auto, before: state?.before ?? null, cardId: state?.cardId ?? null };
+  if (card && card.id != null) {
+    const cardId = String(card.id);
+    if (cardId === s.cardId) return s;
+    const id = String(card.sessionId);
+    const rowY = s.selected && String(s.selected.id) === id ? s.selected.rowY ?? null : null;
+    return { selected: { id, rowY }, auto: true, before: s.auto ? s.before : s.selected, cardId };
+  }
+  if (s.auto) return { selected: s.before, auto: false, before: null, cardId: null };
+  return { ...s, cardId: null };
+}
+
+// The user picked an agent (or closed the panel: sel null). Their choice stands: not auto, nothing to
+// go back to, and the current card id is kept so this question doesn't re-open the panel.
+export function userSelect(state, sel) {
+  return { selected: sel ?? null, auto: false, before: null, cardId: state?.cardId ?? null };
 }
 
 // At most one call per `ms`; a call inside the window schedules one trailing call, so the last

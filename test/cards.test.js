@@ -44,12 +44,39 @@ test('pointerdown makes the window interactive only for a text input inside a ca
   const host = { addEventListener: (type, fn) => { handlers[type] = fn; } };
   const calls = [];
   cards.mountCards(host, { api: {}, onInteractive: (on) => calls.push(on), adopt: true });
-  const target = (selfSel) => ({ closest: (sel) => (sel === '.ans' ? {} : sel.split(',').map((s) => s.trim()).includes(selfSel) ? {} : null) });
+  const target = (tag, type) => ({ closest: (sel) => (sel === '.ans' ? {} : matches({ tag, type }, sel) ? {} : null) });
   handlers.pointerdown({ target: target('button') });
   assert.deepEqual(calls, []);
-  handlers.pointerdown({ target: target('input') });
+  handlers.pointerdown({ target: target('input') }); // "Something else…" and the reply box carry no type
+  handlers.pointerdown({ target: target('input', 'text') });
   handlers.pointerdown({ target: target('textarea') });
-  assert.deepEqual(calls, [true, true]);
+  assert.deepEqual(calls, [true, true, true]);
   handlers.pointerdown({ target: { closest: () => null } }); // outside any card
-  assert.deepEqual(calls, [true, true]);
+  assert.deepEqual(calls, [true, true, true]);
+});
+
+// Just enough of CSS selector matching for the focus trigger: comma lists of `tag` with
+// `:not([type=x])` filters, the shape the selector has (R3).
+function matches(el, selector) {
+  return selector.split(',').some((part) => {
+    const m = /^\s*([a-z]+)((?::not\(\[type=[a-z]+\]\))*)\s*$/.exec(part);
+    if (!m) throw new Error(`selector part the test does not understand: ${part}`);
+    const excluded = [...m[2].matchAll(/\[type=([a-z]+)\]/g)].map((x) => x[1]);
+    return m[1] === el.tag && !excluded.includes(el.type);
+  });
+}
+
+test('R3: pointerdown on the "always allow" checkbox (or a radio) does not make the window interactive', () => {
+  const handlers = {};
+  const host = { addEventListener: (type, fn) => { handlers[type] = fn; } };
+  const calls = [];
+  cards.mountCards(host, { api: {}, onInteractive: (on) => calls.push(on), adopt: true });
+  const target = (tag, type) => ({ closest: (sel) => (sel === '.ans' ? {} : matches({ tag, type }, sel) ? {} : null) });
+  handlers.pointerdown({ target: target('input', 'checkbox') });
+  handlers.pointerdown({ target: target('input', 'radio') });
+  assert.deepEqual(calls, [], 'clicking a box is a plain click: no focus taken');
+  handlers.pointerdown({ target: target('input') });
+  assert.deepEqual(calls, [true]);
+  const perm = cards.renderCard({ id: 'c1', kind: 'permission', display: 'a', payload: { session_id: 's1', tool_name: 'Bash', tool_input: { command: 'ls' }, permission_suggestions: [{ type: 'addRules' }] } });
+  assert.match(perm, /<input type="checkbox" data-always>/, 'the always control is the checkbox the trigger skips');
 });

@@ -14,7 +14,7 @@ import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor, resolveCodeCmd, canOpen } from './focus.js';
-import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli, guarded } from './wiring.js';
+import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli, guarded } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
@@ -54,9 +54,11 @@ let sessions = [];
 let collapsed = false;
 let contentHeight = 120;
 let quitting = null;
-// The detail panel: main owns which agent is selected ({ id, rowY }: rowY is the row's centre in px
-// from the HUD's top), and creates the panel window the first time one is.
-let selected = null;
+// The detail panel: main owns which agent is selected (pick.selected = { id, rowY }: rowY is the row's
+// centre in px from the HUD's top, null until the HUD reports it), and creates the panel window the
+// first time one is. A question selects its agent by itself (autoSelect, pick.auto) and puts back what
+// was open (pick.before) when it goes; a click or ✕ is the user's choice (userSelect).
+let pick = { selected: null, auto: false, before: null, cardId: null };
 let panelWin = null;
 let panelHeight = 200; // until the panel reports its content height
 let sentDetail; // JSON of the last detail sent, so an unchanged one doesn't re-render the panel
@@ -75,15 +77,21 @@ const store = createStore({ engine, queue, holdMs: HOLD_MS, replyMs: REPLY_MS, o
 // ---------------------------------------------------------------- snapshot
 
 const hudState = () => ({ collapsed, visible: !!win && !win.isDestroyed() && win.isVisible() });
+// panelTarget's view of the HUD for agent `id`: hasCard when that agent owns the active question.
+const panelHud = (id, snap) => ({ ...hudState(), hasCard: !!snap?.card && String(snap.card.sessionId) === String(id) });
 
 // Every snapshot push also re-places the panel and refreshes its detail (spec 6.3: the same throttle).
 // Run from timers and IPC, so guarded (I4): a throw is logged, never an error box.
 const pushNow = guarded('push', () => {
   if (!win || win.isDestroyed()) return;
   const snap = store.snapshot();
-  // Its agent left the list, or the HUD was hidden or collapsed: the panel closes.
-  if (selected && !panelTarget(selected.id, snap, hudState())) selected = null;
-  try { win.webContents.send('snapshot', { ...snap, collapsed, selected: selected?.id ?? null }); } catch (err) { log('push', err); }
+  // A new question opens the panel on its agent; when it goes, the panel goes back to what was open.
+  pick = autoSelect(pick, snap.card);
+  // A selection the user made closes when its agent left the list, or the HUD was hidden or collapsed.
+  // One the question made stays until the question goes (its agent can be missing from the list for a
+  // poll or two; placePanel keeps the panel hidden meanwhile).
+  if (pick.selected && !pick.auto && !panelTarget(pick.selected.id, snap, panelHud(pick.selected.id, snap))) pick = { ...pick, selected: null };
+  try { win.webContents.send('snapshot', { ...snap, collapsed, selected: pick.selected?.id ?? null }); } catch (err) { log('push', err); }
   placePanel(snap);
   pushDetail();
 }, log);
@@ -92,7 +100,7 @@ queue.onChange(push);
 
 const pushDetailNow = guarded('detail', () => {
   if (!panelWin || panelWin.isDestroyed()) return;
-  const d = selected ? store.detail(selected.id) : null; // null empties a hidden panel
+  const d = pick.selected ? store.detail(pick.selected.id) : null; // null empties a hidden panel
   const json = JSON.stringify(d);
   if (json === sentDetail) return;
   try { panelWin.webContents.send('detail', d); sentDetail = json; } catch (err) { log('detail', err); }
@@ -203,19 +211,22 @@ function toggleWindow() {
 let rendererAlive = false;
 const canHold = () => !!win && !win.isDestroyed() && win.isVisible() && rendererAlive && !win.webContents.isCrashed();
 
-// Non-focusable again, and if the HUD held the focus give it back (blur activates the window
-// underneath); a HUD that never had the focus is not blurred, so nothing else gets activated.
-function releaseFocus() {
-  if (!win || win.isDestroyed()) return;
-  const had = win.isFocused();
-  win.setFocusable(false);
-  if (had) win.blur();
+// Non-focusable again, and if the window held the focus give it back (blur activates the window
+// underneath); a window that never had the focus is not blurred, so nothing else gets activated.
+function releaseFocusOf(w) {
+  if (!w || w.isDestroyed()) return;
+  const had = w.isFocused();
+  w.setFocusable(false);
+  if (had) w.blur();
 }
-
-function setInteractive(on) {
-  if (!win || win.isDestroyed()) return;
-  if (on) { win.setFocusable(true); win.focus(); } else releaseFocus();
+// Focusable and focused only while the user types into a text box (a card's "Something else…" or
+// reply); both windows are created non-focusable and are shown with showInactive.
+function setInteractiveOf(w, on) {
+  if (!w || w.isDestroyed()) return;
+  if (on) { w.setFocusable(true); w.focus(); } else releaseFocusOf(w);
 }
+const releaseFocus = () => releaseFocusOf(win);
+const setInteractive = (on) => setInteractiveOf(win, on);
 
 function setCollapsed(on) {
   collapsed = !!on;
@@ -303,13 +314,17 @@ function panelWindow() {
 // Beside the HUD at the selected row while there is something to show (panelTarget), hidden otherwise.
 // Guarded (I4): it runs from dock, the push and IPC.
 const placePanel = guarded('place panel', (snap) => {
-  const id = selected && !quitting ? panelTarget(selected.id, snap ?? store.snapshot(), hudState()) : null;
+  const s = snap ?? store.snapshot();
+  const id = pick.selected && !quitting ? panelTarget(pick.selected.id, s, panelHud(pick.selected.id, s)) : null;
   if (!id) {
-    if (panelWin && !panelWin.isDestroyed() && panelWin.isVisible()) panelWin.hide();
+    if (panelWin && !panelWin.isDestroyed() && panelWin.isVisible()) {
+      releaseFocusOf(panelWin); // a panel hidden while typing gives the focus back first
+      panelWin.hide();
+    }
     return;
   }
   const pw = panelWindow();
-  const b = panelBounds(win.getBounds(), workArea(), { width: PANEL_WIDTH, height: panelHeight, rowY: selected.rowY });
+  const b = panelBounds(win.getBounds(), workArea(), { width: PANEL_WIDTH, height: panelHeight, rowY: pick.selected.rowY });
   pw.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
   place = { side: b.side, arrowY: b.arrowY };
   sendPlace();
@@ -317,9 +332,10 @@ const placePanel = guarded('place panel', (snap) => {
   if (!pw.isVisible() || pw.isMinimized()) pw.showInactive();
 }, log);
 
-// A new selection (or none): the HUD highlights the row, the panel moves and gets the agent's detail.
+// The user's new selection (or none): the HUD highlights the row, the panel moves and gets the agent's
+// detail. It stands until a different question arrives (userSelect).
 function select(next) {
-  selected = next;
+  pick = userSelect(pick, next);
   placePanel();
   pushNow();
   pushDetail();
@@ -360,7 +376,8 @@ function fromHud(channel, handler) {
   });
 }
 
-fromHud('hud:answer', (id, response) => {
+// An answer from a card (the panel's; the HUD's channel stays for v1 and is harmless).
+function answerCard(id, response) {
   const item = queue.list().find((i) => i.id === id);
   if (!item) return;
   // An answer that doesn't fit its card is handed back to the session's own window.
@@ -368,8 +385,11 @@ fromHud('hud:answer', (id, response) => {
   if (encoded && item.kind === 'reply') store.replySent(item.sessionId); // Claude carries on: not "finished"
   if (encoded && item.kind === 'permission' && response.kind === 'deny') store.permissionDenied(item); // R8a
   queue.answer(id, encoded ?? RELEASE);
-});
-fromHud('hud:release', (id) => queue.answer(id, RELEASE));
+}
+const releaseCard = (id) => queue.answer(id, RELEASE);
+
+fromHud('hud:answer', answerCard);
+fromHud('hud:release', releaseCard);
 fromHud('hud:setReplyOptIn', (sessionId, on) => { store.setReplyOptIn(sessionId, !!on); push(); });
 fromHud('hud:openWindow', (sessionId) => openWindow(sessionId));
 fromHud('hud:setInteractive', (on) => setInteractive(!!on));
@@ -383,13 +403,14 @@ fromHud('hud:reportHeight', (px) => {
 // A click on a sprite or name toggles: the selected agent again closes the panel, another switches it.
 fromHud('hud:selectAgent', (id, rowY) => {
   const sid = String(id);
-  select(selected?.id === sid ? null : { id: sid, rowY: Number(rowY) });
+  select(pick.selected?.id === sid ? null : { id: sid, rowY: Number(rowY) });
 });
-// The selected row moved inside the HUD (rows above it came or went): the panel's arrow follows it.
+// The selected row moved inside the HUD (rows above it came or went), a question selected an agent
+// whose row main didn't know, or the HUD collapsed (its face, then): the panel and its arrow follow.
 fromHud('hud:rowOffset', (id, rowY) => {
   const y = Number(rowY);
-  if (!selected || selected.id !== String(id) || !Number.isFinite(y)) return;
-  selected.rowY = y;
+  if (!pick.selected || pick.selected.id !== String(id) || !Number.isFinite(y)) return;
+  pick = { ...pick, selected: { ...pick.selected, rowY: y } };
   placePanel();
 });
 
@@ -402,7 +423,15 @@ function fromPanel(channel, handler) {
 }
 
 fromPanel('panel:close', () => select(null));
-fromPanel('panel:openWindow', () => { if (selected) openWindow(selected.id); });
+// No id: the selected agent (the footer). The card's "open window ↗" names its own session: it is
+// sent right after the card's release, which can already have put the previous selection back.
+fromPanel('panel:openWindow', (sessionId) => {
+  const id = typeof sessionId === 'string' && sessionId ? sessionId : pick.selected?.id;
+  if (id) openWindow(id);
+});
+fromPanel('panel:answer', answerCard);
+fromPanel('panel:release', releaseCard);
+fromPanel('panel:setInteractive', (on) => setInteractiveOf(panelWin, !!on));
 fromPanel('panel:reportHeight', (px) => {
   const h = Number(px);
   // An emptied panel (no detail) reports 0: keep the last height for the next one.
@@ -532,7 +561,7 @@ async function firstRun() {
 
 function quit() {
   if (!quitting) {
-    selected = null;
+    pick = userSelect(pick, null);
     try { if (panelWin && !panelWin.isDestroyed()) panelWin.destroy(); } catch (err) { log('panel', err); }
     panelWin = null;
     // close() releases every held question, so each waiting agent carries on in its own window.

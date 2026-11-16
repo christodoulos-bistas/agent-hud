@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli, guarded } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli, guarded } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
 
@@ -98,6 +98,88 @@ test('panelTarget: null when collapsed, hidden, or the agent is not in the snaps
   assert.equal(panelTarget('gone', snap, { collapsed: false, visible: true }), null);
   assert.equal(panelTarget(null, snap, { collapsed: false, visible: true }), null);
   assert.equal(panelTarget('s1', null, { collapsed: false, visible: true }), null);
+});
+
+test('panelTarget: collapsed + hasCard → id; collapsed without card → null; hidden → null (Review Focus 4)', () => {
+  const snap = { agents: [{ id: 's1' }, { id: 's2' }] };
+  assert.equal(panelTarget('s1', snap, { collapsed: true, visible: true, hasCard: true }), 's1', 'the asking agent opens beside the collapsed face');
+  assert.equal(panelTarget('s1', snap, { collapsed: true, visible: true, hasCard: false }), null);
+  assert.equal(panelTarget('s1', snap, { collapsed: true, visible: false, hasCard: true }), null, 'a hidden HUD never has a panel');
+  assert.equal(panelTarget('s1', snap, { collapsed: false, visible: false, hasCard: true }), null);
+  assert.equal(panelTarget('gone', snap, { collapsed: true, visible: true, hasCard: true }), null, 'still only agents in the snapshot');
+  assert.equal(panelTarget('s1', snap, { collapsed: false, visible: true, hasCard: true }), 's1');
+});
+
+test('panelBounds: a selection without a known row (rowY null) sits level with the HUD top, like no rowY', () => {
+  const wa = { x: 0, y: 0, width: 1920, height: 1040 };
+  const hud = { x: 1632, y: 600, width: 272, height: 400 };
+  assert.deepEqual(panelBounds(hud, wa, { height: 300, rowY: null }), panelBounds(hud, wa, { height: 300 }));
+  assert.equal(panelBounds(hud, wa, { height: 300, rowY: null }).y, 600);
+});
+
+const NONE = { selected: null, auto: false, before: null, cardId: null };
+const qcard = (id, sessionId) => ({ id, sessionId, kind: 'permission' });
+
+test('autoSelect: new card opens its agent (auto), remembers the previous manual selection, restores it when the card goes; restores null when nothing was open', () => {
+  const manual = { id: 's2', rowY: 120 };
+  let s = autoSelect({ ...NONE, selected: manual }, qcard('c1', 's1'));
+  assert.deepEqual(s, { selected: { id: 's1', rowY: null }, auto: true, before: manual, cardId: 'c1' });
+  assert.deepEqual(autoSelect(s, qcard('c1', 's1')), s, 'the same card id changes nothing');
+  s = autoSelect(s, null);
+  assert.deepEqual(s, { selected: manual, auto: false, before: null, cardId: null }, 'back to what was open');
+
+  let t = autoSelect(NONE, qcard('c1', 's1'));
+  assert.deepEqual(t, { selected: { id: 's1', rowY: null }, auto: true, before: null, cardId: 'c1' });
+  t = autoSelect(t, null);
+  assert.deepEqual(t, NONE, 'opened by itself: closes again');
+
+  // The asking agent was already the one open: it stays, row position kept, and stays open afterwards.
+  const same = { id: 's1', rowY: 88 };
+  let u = autoSelect({ ...NONE, selected: same }, qcard('c1', 's1'));
+  assert.deepEqual(u, { selected: { id: 's1', rowY: 88 }, auto: true, before: same, cardId: 'c1' });
+  u = autoSelect(u, null);
+  assert.deepEqual(u.selected, same);
+  assert.equal(u.auto, false);
+
+  assert.deepEqual(autoSelect(NONE, null), NONE, 'no card, nothing open: nothing changes');
+});
+
+test('autoSelect: a second card while auto keeps the original before', () => {
+  const manual = { id: 's2', rowY: 120 };
+  let s = autoSelect({ ...NONE, selected: manual }, qcard('c1', 's1'));
+  s = autoSelect(s, qcard('c2', 's3'));
+  assert.deepEqual(s, { selected: { id: 's3', rowY: null }, auto: true, before: manual, cardId: 'c2' });
+  s = autoSelect(s, qcard('c1', 's1')); // c1 comes back after c2 pre-empted it
+  assert.deepEqual(s, { selected: { id: 's1', rowY: null }, auto: true, before: manual, cardId: 'c1' });
+  s = autoSelect(s, null);
+  assert.deepEqual(s.selected, manual);
+  assert.equal(s.auto, false);
+});
+
+test('userSelect during a question: the manual choice stands until a different card id arrives (Review Focus 2)', () => {
+  let s = autoSelect(NONE, qcard('c1', 's1'));
+  s = userSelect(s, { id: 's2', rowY: 80 });
+  assert.deepEqual(s, { selected: { id: 's2', rowY: 80 }, auto: false, before: null, cardId: 'c1' });
+  assert.deepEqual(autoSelect(s, qcard('c1', 's1')), s, 'the current question does not re-open');
+  assert.deepEqual(autoSelect(s, null).selected, { id: 's2', rowY: 80 }, 'the question goes: the manual choice stays');
+  const closed = userSelect(s, null);
+  assert.deepEqual(closed, { selected: null, auto: false, before: null, cardId: 'c1' }, '✕ during a question');
+  assert.deepEqual(autoSelect(closed, qcard('c1', 's1')), closed, 'closing keeps it closed for this question');
+  const next = autoSelect(s, qcard('c2', 's3'));
+  assert.deepEqual(next, { selected: { id: 's3', rowY: null }, auto: true, before: { id: 's2', rowY: 80 }, cardId: 'c2' }, 'a different card id opens again');
+});
+
+test('card answered natively (card null) → back to before (Review Focus 3)', () => {
+  const manual = { id: 's2', rowY: 64 };
+  let s = autoSelect({ ...NONE, selected: manual }, qcard('c1', 's1'));
+  // answered in the agent's own window: the hook request ends, the queue drops c1, and the next snapshot has no card
+  s = autoSelect(s, null);
+  assert.deepEqual(s, { selected: manual, auto: false, before: null, cardId: null });
+  // a queued question behind it becomes the active card instead: it opens, still returning to the manual choice
+  let q = autoSelect({ ...NONE, selected: manual }, qcard('c1', 's1'));
+  q = autoSelect(q, qcard('c2', 's1'));
+  assert.deepEqual(q, { selected: { id: 's1', rowY: null }, auto: true, before: manual, cardId: 'c2' });
+  assert.deepEqual(autoSelect(q, null).selected, manual);
 });
 
 function fakeClock() {
