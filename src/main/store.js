@@ -50,6 +50,9 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     } else if (e === 'Stop') {
       const bg = (ev.raw || {}).background_tasks;
       if (!(Array.isArray(bg) && bg.some((t) => t && t.status === 'running'))) s.stoppedAt = ev.at;
+      s.notif = null; // whatever it was asking for, the turn is over
+    } else if (e === 'SessionEnd') {
+      s.notif = null;
     } else if (e === 'Notification') {
       s.notif = { type: (ev.raw || {}).notification_type, at: ev.at };
     }

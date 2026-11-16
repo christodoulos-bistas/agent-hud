@@ -24,7 +24,8 @@ export function createQueue({ holdMs = 60000, replyMs = 540000, now = Date.now, 
       const e = { item, resolve, timer: null };
       e.timer = setTimer(() => {
         if (!take(item.id)) return;
-        handed.push({ sessionId: item.sessionId, at: now() });
+        // A reply that runs out just lets Claude stop: nothing waits in the session's window.
+        if (item.kind !== 'reply') handed.push({ sessionId: item.sessionId, at: now() });
         resolve(RELEASE);
         emit();
       }, item.kind === 'reply' ? replyMs : holdMs);

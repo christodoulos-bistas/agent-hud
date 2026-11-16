@@ -181,3 +181,22 @@ test('R19: createStore takes holdMs and replyMs for the card deadline', () => {
   queue.add({ id: 'r', sessionId: 's1', kind: 'reply', payload: {} });
   assert.equal(store.snapshot().card.expiresAt, 9200);
 });
+
+test('I2b: a needs-type Notification is cleared by Stop', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1')]);
+  store.onEvent(ev('s1', 'Notification', 1000, { raw: { notification_type: 'permission_prompt' } }));
+  assert.equal(store.snapshot().agents[0].mood, 'needs');
+  set(1010);
+  store.onEvent(ev('s1', 'Stop', 1010));
+  assert.equal(store.snapshot().agents[0].mood, 'done');
+});
+
+test('I2b: a needs-type Notification is cleared by SessionEnd', () => {
+  const { store } = setup(1000);
+  store.setSessions([S('s1')]);
+  store.onEvent(ev('s1', 'Notification', 1000, { raw: { notification_type: 'elicitation_dialog' } }));
+  assert.equal(store.snapshot().agents[0].mood, 'needs');
+  store.onEvent(ev('s1', 'SessionEnd', 1000, { raw: { reason: 'other' } }));
+  assert.notEqual(store.snapshot().agents[0].mood, 'needs');
+});

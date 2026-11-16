@@ -32,15 +32,30 @@ export function createHookServer({ port = 0, secret, queue, isInteractive, reply
     });
   }
 
+  // The main thread moved on (its turn ended, or the user typed a new prompt), so any question it was
+  // holding was answered elsewhere: release it. Subagent questions (agent_id set) are left alone.
+  function releaseMainQuestions(sessionId) {
+    for (const it of queue.list()) {
+      if ((it.kind === 'permission' || it.kind === 'choice') && it.sessionId === sessionId && (it.payload?.agent_id ?? null) === null) {
+        queue.answer(it.id, RELEASE);
+      }
+    }
+  }
+
   function route(body, res) {
     const sessionId = body.session_id;
     const event = body.hook_event_name;
     const toolName = body.tool_name;
+    const bgRunning = Array.isArray(body.background_tasks) && body.background_tasks.some((t) => t?.status === 'running');
 
     if (event === 'UserPromptSubmit') {
       const synthetic = typeof body.prompt === 'string' && body.prompt.trim().startsWith('<task-notification>');
-      if (!synthetic) queue.releaseSession(sessionId, ['reply']);
+      if (!synthetic) {
+        queue.releaseSession(sessionId, ['reply']);
+        releaseMainQuestions(sessionId);
+      }
     }
+    if (event === 'Stop' && !bgRunning) releaseMainQuestions(sessionId);
     if (event === 'PostToolUse' || event === 'PostToolUseFailure') {
       for (const it of queue.list()) {
         if (it.kind === 'permission' && it.sessionId === sessionId && it.payload?.tool_name === toolName) queue.answer(it.id, RELEASE);
@@ -50,10 +65,7 @@ export function createHookServer({ port = 0, secret, queue, isInteractive, reply
     let kind = null;
     if (event === 'PermissionRequest' && isInteractive(sessionId)) kind = 'permission';
     else if (event === 'PreToolUse' && toolName === 'AskUserQuestion' && isInteractive(sessionId)) kind = 'choice';
-    else if (event === 'Stop' && isInteractive(sessionId) && replyOptIn(sessionId)) {
-      const running = Array.isArray(body.background_tasks) && body.background_tasks.some((t) => t?.status === 'running');
-      if (!running) kind = 'reply';
-    }
+    else if (event === 'Stop' && !bgRunning && isInteractive(sessionId) && replyOptIn(sessionId)) kind = 'reply';
 
     if (!kind) return sendEmpty(res);
     hold(res, { id: randomUUID(), sessionId, kind, payload: body });

@@ -124,3 +124,10 @@ test('R19: add stamps item.addedAt with now() at arrival', () => {
   const byId = Object.fromEntries(q.list().map((i) => [i.id, i.addedAt]));
   assert.deepEqual(byId, { a: 0, b: 1234 });
 });
+
+test('I2a: a reply that times out resolves RELEASE but is not recorded as a hand-back', async () => {
+  const [f, q] = mk(); const p = q.add(it('r', 'reply'));
+  f.tick(540000);
+  assert.equal(await p, RELEASE); assert.equal(q.list().length, 0);
+  assert.deepEqual(q.handedBack(), []);
+});

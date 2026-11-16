@@ -254,3 +254,52 @@ test('unserializable answer -> empty 200, no unhandled rejection', async () => {
     assert.equal(unhandled, 0);
   } finally { process.off('unhandledRejection', onU); await h.srv.close(); }
 });
+
+// Holds a main-thread permission, a main-thread choice, a subagent permission (same session) and an
+// other-session permission; returns their pending responses.
+async function holdFour(h) {
+  const main = h.post(ev('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'ls' } }));
+  const choice = h.post(ev('PreToolUse', { tool_name: 'AskUserQuestion', tool_input: { questions: [] } }));
+  const sub = h.post(ev('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'ls' }, agent_id: 'a1', agent_type: 'Explore' }));
+  const other = h.post({ ...ev('PermissionRequest', { tool_name: 'Bash' }), session_id: 's2' });
+  await waitFor(() => h.queue.list().length === 4);
+  return { main, choice, sub, other };
+}
+
+test("I2c: Stop with no running background task releases that session's main-thread permission and choice", async () => {
+  const h = await setup();
+  try {
+    const p = await holdFour(h);
+    await h.post(ev('Stop', { background_tasks: [{ id: 'a1', type: 'subagent', status: 'completed' }] }));
+    for (const r of [await p.main, await p.choice]) { assert.equal(r.status, 200); assert.equal(await r.text(), ''); }
+    assert.deepEqual(h.queue.list().map((i) => [i.sessionId, i.payload.agent_id ?? null]), [['s1', 'a1'], ['s2', null]]);
+    assert.deepEqual(h.queue.handedBack(), [], 'a release, not a hand-back');
+    h.queue.releaseAll(); await p.sub; await p.other;
+  } finally { await h.srv.close(); }
+});
+
+test('I2c: Stop with a running background task releases nothing', async () => {
+  const h = await setup();
+  try {
+    const p = await holdFour(h);
+    await h.post(ev('Stop', { background_tasks: [{ id: 'a1', type: 'subagent', status: 'running' }] }));
+    await sleep(20);
+    assert.equal(h.queue.list().length, 4);
+    h.queue.releaseAll(); await Promise.all(Object.values(p));
+  } finally { await h.srv.close(); }
+});
+
+test("I2c: a real UserPromptSubmit releases that session's main-thread permission and choice; a synthetic one does not", async () => {
+  const h = await setup();
+  try {
+    const p = await holdFour(h);
+    await h.post(ev('UserPromptSubmit', { prompt: '<task-notification>x</task-notification>' }));
+    await sleep(20);
+    assert.equal(h.queue.list().length, 4);
+    await h.post(ev('UserPromptSubmit', { prompt: 'never mind, do this instead' }));
+    for (const r of [await p.main, await p.choice]) { assert.equal(r.status, 200); assert.equal(await r.text(), ''); }
+    assert.deepEqual(h.queue.list().map((i) => [i.sessionId, i.payload.agent_id ?? null]), [['s1', 'a1'], ['s2', null]]);
+    assert.deepEqual(h.queue.handedBack(), []);
+    h.queue.releaseAll(); await p.sub; await p.other;
+  } finally { await h.srv.close(); }
+});
