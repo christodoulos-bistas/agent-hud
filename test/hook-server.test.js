@@ -173,6 +173,28 @@ test('PostToolUse Bash releases a pending Bash permission of that session only',
   } finally { await h.srv.close(); }
 });
 
+test("I3: a subagent's PostToolUse releases only its own permission, matched by agent_id and tool_input", async () => {
+  const h = await setup();
+  try {
+    const input = { command: 'npm test' };
+    const pMain = h.post(ev('PermissionRequest', { tool_name: 'Bash', tool_input: input }));
+    const pSub = h.post(ev('PermissionRequest', { tool_name: 'Bash', tool_input: input, agent_id: 'a1', agent_type: 'Explore' }));
+    await waitFor(() => h.queue.list().length === 2);
+    await h.post(ev('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'ls' }, agent_id: 'a1' }));
+    await sleep(20);
+    assert.equal(h.queue.list().length, 2, 'different tool_input releases nothing');
+    await h.post(ev('PostToolUse', { tool_name: 'Bash', tool_input: input, agent_id: 'a1' }));
+    assert.equal(await (await pSub).text(), '');
+    assert.deepEqual(h.queue.list().map((i) => i.payload.agent_id ?? null), [null], "the main thread's permission is still held");
+    await h.post(ev('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'npm test', extra: 1 } }));
+    await sleep(20);
+    assert.equal(h.queue.list().length, 1);
+    await h.post(ev('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'npm test' } }));
+    assert.equal(await (await pMain).text(), '');
+    assert.equal(h.queue.list().length, 0);
+  } finally { await h.srv.close(); }
+});
+
 test('client abort while held -> item no longer in queue.list()', async () => {
   const h = await setup();
   try {

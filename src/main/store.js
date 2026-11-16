@@ -30,7 +30,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
   const optIn = new Map();
   const st = (id) => {
     let s = state.get(id);
-    if (!s) { s = { lastActivityAt: null, stoppedAt: null, notif: null, activity: '', cwd: null }; state.set(id, s); }
+    if (!s) { s = { lastActivityAt: null, lastMainActivityAt: null, stoppedAt: null, notif: null, activity: '', cwd: null }; state.set(id, s); }
     return s;
   };
 
@@ -39,14 +39,20 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     const s = st(ev.sessionId);
     if (ev.cwd) s.cwd = ev.cwd;
     const e = ev.event;
-    if (e === 'UserPromptSubmit') {
+    // Subagent events share the parent's session_id and carry agent_id (SPIKES.md).
+    const agentId = (ev.raw || {}).agent_id ?? null;
+    const active = () => {
       s.lastActivityAt = ev.at;
+      if (agentId === null) s.lastMainActivityAt = ev.at;
+    };
+    if (e === 'UserPromptSubmit') {
+      active();
       if (!isSynthetic(ev)) s.activity = activityLine(ev);
     } else if (e === 'PreToolUse') {
-      s.lastActivityAt = ev.at;
+      active();
       s.activity = activityLine(ev);
     } else if (typeof e === 'string' && e.startsWith('PostToolUse')) {
-      s.lastActivityAt = ev.at;
+      active();
     } else if (e === 'Stop') {
       const bg = (ev.raw || {}).background_tasks;
       if (!(Array.isArray(bg) && bg.some((t) => t && t.status === 'running'))) s.stoppedAt = ev.at;
@@ -56,7 +62,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     } else if (e === 'Notification') {
       s.notif = { type: (ev.raw || {}).notification_type, at: ev.at };
     }
-    if (e !== 'Notification') queue.clearHandedBack(ev.sessionId);
+    if (e !== 'Notification') queue.clearHandedBack(ev.sessionId, agentId);
   }
 
   function setSessions(list) {
@@ -85,7 +91,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
       const id = sess.sessionId;
       const s = st(id);
       const handedBack = handed.some((h) => h.sessionId === id);
-      const notifPending = !!s.notif && NEEDS_NOTIFS.has(s.notif.type) && s.notif.at >= (s.lastActivityAt ?? -Infinity);
+      const notifPending = !!s.notif && NEEDS_NOTIFS.has(s.notif.type) && s.notif.at >= (s.lastMainActivityAt ?? -Infinity);
       const pending = items.some((it) => it.sessionId === id) || handedBack || notifPending;
       return {
         id, display: displayName(sess), cls: engine.classOf(id, t),

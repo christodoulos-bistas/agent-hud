@@ -25,7 +25,7 @@ export function createQueue({ holdMs = 60000, replyMs = 540000, now = Date.now, 
       e.timer = setTimer(() => {
         if (!take(item.id)) return;
         // A reply that runs out just lets Claude stop: nothing waits in the session's window.
-        if (item.kind !== 'reply') handed.push({ sessionId: item.sessionId, at: now() });
+        if (item.kind !== 'reply') handed.push({ sessionId: item.sessionId, agentId: item.payload?.agent_id ?? null, at: now() });
         resolve(RELEASE);
         emit();
       }, item.kind === 'reply' ? replyMs : holdMs);
@@ -54,9 +54,10 @@ export function createQueue({ holdMs = 60000, replyMs = 540000, now = Date.now, 
     active: () => ordered()[0] ?? null,
     list: ordered,
     handedBack: () => handed.map((h) => ({ ...h })),
-    clearHandedBack(sessionId) {
+    // Only the thread that was handed back can clear it: the main thread (agentId null) or one subagent.
+    clearHandedBack(sessionId, agentId = null) {
       const n = handed.length;
-      handed = handed.filter((h) => h.sessionId !== sessionId);
+      handed = handed.filter((h) => h.sessionId !== sessionId || h.agentId !== (agentId ?? null));
       if (handed.length !== n) emit();
     },
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },

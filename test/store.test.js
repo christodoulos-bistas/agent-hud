@@ -182,6 +182,33 @@ test('R19: createStore takes holdMs and replyMs for the card deadline', () => {
   assert.equal(store.snapshot().card.expiresAt, 9200);
 });
 
+test("I3: a subagent event does not clear the main thread's hand-back; a main-thread event does", () => {
+  let t = 0; const timers = [];
+  const queue = createQueue({ now: () => t, setTimer: (fn) => { timers.push(fn); return timers.length; }, clearTimer: () => {} });
+  const store = createStore({ engine: createClassEngine(), queue, now: () => t });
+  store.setSessions([S('s1')]);
+  queue.add({ id: 'a', sessionId: 's1', kind: 'permission', payload: {} });
+  queue.add({ id: 'b', sessionId: 's1', kind: 'permission', payload: { agent_id: 'a1' } });
+  timers[0](); timers[1]();
+  store.onEvent(ev('s1', 'PreToolUse', 1, { toolName: 'Read', raw: { agent_id: 'a1', agent_type: 'Explore' } }));
+  assert.deepEqual(queue.handedBack().map((h) => h.agentId), [null]);
+  assert.equal(store.snapshot().agents[0].handedBack, true);
+  store.onEvent(ev('s1', 'PreToolUse', 2, { toolName: 'Read' }));
+  assert.deepEqual(queue.handedBack(), []);
+  assert.equal(store.snapshot().agents[0].handedBack, false);
+});
+
+test('I3: subagent activity does not make a needs Notification stale; main-thread activity does', () => {
+  const { store } = setup(1000);
+  store.setSessions([S('s1')]);
+  store.onEvent(ev('s1', 'Notification', 1000, { raw: { notification_type: 'permission_prompt' } }));
+  store.onEvent(ev('s1', 'PreToolUse', 1001, { toolName: 'Read', raw: { agent_id: 'a1', agent_type: 'Explore' } }));
+  store.onEvent(ev('s1', 'PostToolUse', 1002, { toolName: 'Read', raw: { agent_id: 'a1' } }));
+  assert.equal(store.snapshot().agents[0].mood, 'needs');
+  store.onEvent(ev('s1', 'PostToolUse', 1003, { toolName: 'Bash' }));
+  assert.notEqual(store.snapshot().agents[0].mood, 'needs');
+});
+
 test('I2b: a needs-type Notification is cleared by Stop', () => {
   const { store, set } = setup(1000);
   store.setSessions([S('s1')]);

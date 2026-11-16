@@ -42,7 +42,7 @@ test('permission not answered in 60 000 ms resolves RELEASE and appears in hande
   f.tick(59999); assert.equal(q.list().length, 1);
   f.tick(1);
   assert.equal(await p, RELEASE); assert.equal(q.list().length, 0);
-  assert.deepEqual(q.handedBack(), [{ sessionId: 's1', at: 60000 }]);
+  assert.deepEqual(q.handedBack(), [{ sessionId: 's1', agentId: null, at: 60000 }]);
 });
 test('reply not answered in 540 000 ms resolves RELEASE; at 539 999 ms still pending', async () => {
   const [f, q] = mk(); const p = q.add(it('a', 'reply')); const s = settled(p);
@@ -96,7 +96,7 @@ test('clearHandedBack removes that session entries; onChange fires on changes an
   const [f, q] = mk(); let n = 0; const off = q.onChange(() => { n++; });
   q.add(it('a')); q.add(it('b', 'permission', 's2')); assert.equal(n, 2);
   f.tick(60000); assert.equal(q.handedBack().length, 2);
-  const before = n; q.clearHandedBack('s1');
+  const before = n; q.clearHandedBack('s1', null);
   assert.equal(n, before + 1); assert.deepEqual(q.handedBack().map((h) => h.sessionId), ['s2']);
   off(); q.add(it('c')); assert.equal(n, before + 1);
 });
@@ -123,6 +123,19 @@ test('R19: add stamps item.addedAt with now() at arrival', () => {
   const [f, q] = mk(); q.add(it('a')); f.tick(1234); q.add(it('b', 'reply'));
   const byId = Object.fromEntries(q.list().map((i) => [i.id, i.addedAt]));
   assert.deepEqual(byId, { a: 0, b: 1234 });
+});
+
+test("I3: a hand-back carries the item's agent_id; clearHandedBack(sessionId, agentId) clears only that agent's entries", () => {
+  const [f, q] = mk();
+  q.add(it('m')); q.add({ id: 's', sessionId: 's1', kind: 'permission', payload: { agent_id: 'a1' } });
+  f.tick(60000);
+  assert.deepEqual(q.handedBack(), [{ sessionId: 's1', agentId: null, at: 60000 }, { sessionId: 's1', agentId: 'a1', at: 60000 }]);
+  q.clearHandedBack('s1', 'a1');
+  assert.deepEqual(q.handedBack().map((h) => h.agentId), [null]);
+  q.clearHandedBack('s1', 'a2');
+  assert.deepEqual(q.handedBack().map((h) => h.agentId), [null]);
+  q.clearHandedBack('s1', null);
+  assert.deepEqual(q.handedBack(), []);
 });
 
 test('I2a: a reply that times out resolves RELEASE but is not recorded as a hand-back', async () => {

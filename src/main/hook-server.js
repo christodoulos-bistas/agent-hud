@@ -1,6 +1,7 @@
 // node:http server that receives Claude Code HTTP hooks and holds the blocking ones in the queue.
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { RELEASE } from './answers.js';
 
 const HOOK_PATH = '/agent-hud/hook';
@@ -57,8 +58,13 @@ export function createHookServer({ port = 0, secret, queue, isInteractive, reply
     }
     if (event === 'Stop' && !bgRunning) releaseMainQuestions(sessionId);
     if (event === 'PostToolUse' || event === 'PostToolUseFailure') {
+      // The same thread (main, or the same subagent) ran exactly this call: its question was answered natively.
+      const agentId = body.agent_id ?? null;
       for (const it of queue.list()) {
-        if (it.kind === 'permission' && it.sessionId === sessionId && it.payload?.tool_name === toolName) queue.answer(it.id, RELEASE);
+        if (it.kind === 'permission' && it.sessionId === sessionId && it.payload?.tool_name === toolName &&
+          (it.payload?.agent_id ?? null) === agentId && isDeepStrictEqual(it.payload?.tool_input, body.tool_input)) {
+          queue.answer(it.id, RELEASE);
+        }
       }
     }
 
