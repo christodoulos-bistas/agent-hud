@@ -1,0 +1,88 @@
+// The parts of the Electron shell that don't need Electron: answer encoding, docking maths,
+// the snapshot throttle, the interactive-session check and the config file.
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from './answers.js';
+
+export const DEFAULT_PORT = 47821;
+
+// Renderer answer object -> hook response for that queue item, or null when it doesn't fit.
+export function encodeAnswer(item, response) {
+  if (!item || !response || typeof response !== 'object') return null;
+  const p = item.payload || {};
+  switch (item.kind) {
+    case 'permission':
+      if (response.kind === 'allow') return response.always ? permissionAllow(p.permission_suggestions) : permissionAllow();
+      if (response.kind === 'deny') return permissionDeny();
+      return null;
+    case 'choice': {
+      const picks = response.picks;
+      if (response.kind !== 'choice' || !picks || typeof picks !== 'object' || Array.isArray(picks)) return null;
+      return choiceAnswer(p.tool_input || {}, picks);
+    }
+    case 'reply': {
+      const text = typeof response.text === 'string' ? response.text.trim() : '';
+      return response.kind === 'reply' && text ? stopReply(text) : null;
+    }
+    default: return null;
+  }
+}
+
+// Bottom-right of the work area, `margin` px in; height capped at `maxFrac` of the work area.
+export function dockBounds(workArea, width, height, { margin = 16, maxFrac = 0.6 } = {}) {
+  const cap = Math.floor(workArea.height * maxFrac);
+  const h = Math.max(1, Math.min(cap, Math.ceil(Number(height) || 0)));
+  return {
+    x: Math.round(workArea.x + workArea.width - width - margin),
+    y: Math.round(workArea.y + workArea.height - h - margin),
+    width, height: h,
+  };
+}
+
+// At most one call per `ms`; a call inside the window schedules one trailing call, so the last
+// change is always delivered.
+export function createThrottle(fn, ms, { now = Date.now, setTimer = setTimeout } = {}) {
+  let last = -Infinity;
+  let pending = false;
+  const run = () => { pending = false; last = now(); fn(); };
+  return () => {
+    if (pending) return;
+    const wait = last + ms - now();
+    if (wait <= 0) return run();
+    pending = true;
+    setTimer(run, wait);
+  };
+}
+
+// True when the latest session list says the id is interactive. An id that isn't listed yet
+// (a session newer than the last poll) re-reads the session files once; still unknown -> false.
+export function createInteractiveCheck({ current, reread }) {
+  const kindIn = (list, id) => (Array.isArray(list) ? list.find((s) => s && s.sessionId === id)?.kind : undefined);
+  return (id) => {
+    let kind = kindIn(current(), id);
+    if (kind === undefined) {
+      try { kind = kindIn(reread(), id); } catch { kind = undefined; }
+    }
+    return kind === 'interactive';
+  };
+}
+
+// config.json: { port, secret, ...flags }. Missing or broken values are repaired and written back.
+export function loadConfig(file) {
+  let cfg = {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) cfg = parsed;
+  } catch { /* missing or corrupt: start fresh */ }
+  let dirty = false;
+  if (!Number.isInteger(cfg.port) || cfg.port < 1 || cfg.port > 65535) { cfg.port = DEFAULT_PORT; dirty = true; }
+  if (typeof cfg.secret !== 'string' || !/^[0-9a-f]{32}$/.test(cfg.secret)) { cfg.secret = crypto.randomBytes(16).toString('hex'); dirty = true; }
+  if (dirty) saveConfig(file, cfg);
+  return cfg;
+}
+
+export function saveConfig(file, cfg) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
+}

@@ -19,6 +19,7 @@ export function createQueue({ holdMs = 60000, replyMs = 540000, now = Date.now, 
   ].map((e) => e.item);
 
   function add(item) {
+    item.addedAt = now(); // the renderer's countdown reads the deadline from this (R19)
     return new Promise((resolve) => {
       const e = { item, resolve, timer: null };
       e.timer = setTimer(() => {

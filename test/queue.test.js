@@ -118,3 +118,9 @@ test('second listener still runs after the first throws', () => {
   q.onChange(() => { throw new Error('boom'); }); q.onChange(() => { ran++; });
   q.add(it('a')); assert.equal(ran, 1);
 });
+
+test('R19: add stamps item.addedAt with now() at arrival', () => {
+  const [f, q] = mk(); q.add(it('a')); f.tick(1234); q.add(it('b', 'reply'));
+  const byId = Object.fromEntries(q.list().map((i) => [i.id, i.addedAt]));
+  assert.deepEqual(byId, { a: 0, b: 1234 });
+});

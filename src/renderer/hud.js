@@ -174,8 +174,15 @@ export function renderCard(card, { leftMs } = {}) {
   return '';
 }
 
+// Time left on a reply card: the main process stamps the deadline (expiresAt, R19); without it,
+// fall back to counting from when the card appeared here.
+export function replyLeftMs(card, nowMs, sinceMs) {
+  if (card?.kind !== 'reply') return undefined;
+  return Number.isFinite(card.expiresAt) ? card.expiresAt - nowMs : REPLY_MS - (nowMs - sinceMs);
+}
+
 function nextLine(next) {
-  const m = /^Next: (.+) (asks a question|wants a reply)$/.exec(String(next));
+  const m = /^Next: (.+) (asks permission|asks a question|wants a reply)$/.exec(String(next));
   return m ? `Next: <b>${esc(m[1])}</b> ${m[2]} · after this one` : esc(next);
 }
 
@@ -283,7 +290,7 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     st.interactive = on;
     call('setInteractive', on);
   };
-  const leftMs = () => (st.card?.kind === 'reply' ? REPLY_MS - (Date.now() - st.cardSince) : undefined);
+  const leftMs = () => replyLeftMs(st.card, Date.now(), st.cardSince);
 
   function tick() {
     const el = root.querySelector('[data-left]');
@@ -356,7 +363,9 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     const cardEl = cardOf(el);
     switch (el.dataset.act) {
       case 'collapse':
-        st.collapsed = !st.collapsed; call('collapse', st.collapsed); render(); break;
+        st.collapsed = !st.collapsed;
+        if (st.collapsed) setInteractive(false); // the main process makes the collapsed window non-focusable
+        call('collapse', st.collapsed); render(); break;
       case 'expand':
         st.collapsed = false; call('collapse', false); render(); break;
       case 'open':
@@ -433,7 +442,14 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
 
   setInterval(tick, 1000);
   render();
-  call('onSnapshot', (snap) => { st.snap = snap; render(); });
+  call('onSnapshot', (snap) => {
+    st.snap = snap;
+    if (typeof snap?.collapsed === 'boolean') { // the tray can collapse too
+      if (snap.collapsed && !st.collapsed) setInteractive(false);
+      st.collapsed = snap.collapsed;
+    }
+    render();
+  });
 }
 
 if (typeof document !== 'undefined' && globalThis.hud) boot();

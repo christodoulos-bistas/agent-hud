@@ -144,3 +144,40 @@ test('R7: events for unknown sessions are kept but not listed; card falls back t
   assert.equal(store.snapshot().card.display, 'unknown');
   assert.equal(store.snapshot().counts.needs, 0);
 });
+
+test('R20: next line for a queued permission reads "asks permission"', () => {
+  const { queue, store } = setup();
+  store.setSessions([S('s1'), S('s2')]);
+  queue.add({ id: 'a', sessionId: 's1', kind: 'choice', payload: {} });
+  queue.add({ id: 'b', sessionId: 's2', kind: 'permission', payload: {} });
+  assert.equal(store.snapshot().next, 'Next: s2 · e0 asks permission');
+});
+
+test('R19: card carries sessionId and expiresAt = addedAt + holdMs (default 60 000 ms)', () => {
+  const { queue, store, set } = setup(1000);
+  store.setSessions([S('s1')]);
+  queue.add({ id: 'a', sessionId: 's1', kind: 'permission', payload: {} });
+  set(5000);
+  const card = store.snapshot().card;
+  assert.equal(card.sessionId, 's1');
+  assert.equal(card.expiresAt, 61000);
+});
+
+test('R19: reply card expiresAt = addedAt + replyMs (default 540 000 ms)', () => {
+  const { queue, store } = setup(2000);
+  store.setSessions([S('s1')]);
+  queue.add({ id: 'r', sessionId: 's1', kind: 'reply', payload: {} });
+  assert.equal(store.snapshot().card.expiresAt, 542000);
+});
+
+test('R19: createStore takes holdMs and replyMs for the card deadline', () => {
+  let t = 100;
+  const queue = createQueue({ now: () => t, setTimer: () => 0, clearTimer: () => {} });
+  const store = createStore({ engine: createClassEngine(), queue, now: () => t, holdMs: 5000, replyMs: 9000 });
+  queue.add({ id: 'c', sessionId: 's1', kind: 'choice', payload: {} });
+  assert.equal(store.snapshot().card.expiresAt, 5100);
+  queue.answer('c', {});
+  t = 200;
+  queue.add({ id: 'r', sessionId: 's1', kind: 'reply', payload: {} });
+  assert.equal(store.snapshot().card.expiresAt, 9200);
+});

@@ -22,7 +22,9 @@ export function activityLine(ev) {
   }
 }
 
-export function createStore({ engine, queue, now = Date.now }) {
+const ASKS = { permission: 'asks permission', choice: 'asks a question', reply: 'wants a reply' };
+
+export function createStore({ engine, queue, now = Date.now, holdMs = 60000, replyMs = 540000 }) {
   let sessions = [];
   const state = new Map();
   const optIn = new Map();
@@ -90,9 +92,12 @@ export function createStore({ engine, queue, now = Date.now }) {
       };
     });
     const a = queue.active();
-    const card = a ? { id: a.id, kind: a.kind, display: displayOf(a.sessionId), cls: engine.classOf(a.sessionId, t), payload: a.payload } : null;
+    const card = a ? {
+      id: a.id, kind: a.kind, sessionId: a.sessionId, display: displayOf(a.sessionId), cls: engine.classOf(a.sessionId, t), payload: a.payload,
+      expiresAt: Number.isFinite(a.addedAt) ? a.addedAt + (a.kind === 'reply' ? replyMs : holdMs) : null,
+    } : null;
     const second = items[1];
-    const next = second ? `Next: ${displayOf(second.sessionId)} ${second.kind === 'reply' ? 'wants a reply' : 'asks a question'}` : null;
+    const next = second ? `Next: ${displayOf(second.sessionId)} ${ASKS[second.kind] ?? 'asks a question'}` : null;
     return { agents, card, next, counts: { total: agents.length, needs: agents.filter((x) => x.mood === 'needs').length } };
   }
 

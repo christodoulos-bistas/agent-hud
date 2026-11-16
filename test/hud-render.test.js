@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { esc, renderRow, renderCard, renderParty, picksFrom } from '../src/renderer/hud.js';
+import { esc, renderRow, renderCard, renderParty, picksFrom, replyLeftMs } from '../src/renderer/hud.js';
 import { GR, CLASSES, MOODS_BADGE, MOODS_ZEE, spriteSvg } from '../src/renderer/sprites.js';
 import { CLASS_IDS } from '../src/main/classes.js';
 
@@ -181,4 +181,17 @@ test('MOODS badge and zee port and render through GR', () => {
 test('importing sprites.js and hud.js in Node does not throw', async () => {
   await assert.doesNotReject(import('../src/renderer/sprites.js?fresh'));
   await assert.doesNotReject(import('../src/renderer/hud.js?fresh'));
+});
+
+test('R19: replyLeftMs counts down to card.expiresAt when present, else from when the card appeared', () => {
+  const r = { ...reply('hi'), expiresAt: 600000 };
+  assert.equal(replyLeftMs(r, 100000, 99999), 500000);
+  assert.equal(replyLeftMs(reply('hi'), 100000, 40000), 540000 - 60000);
+  assert.equal(replyLeftMs(permission(), 100000, 0), undefined);
+  assert.equal(replyLeftMs(null, 100000, 0), undefined);
+});
+
+test('R20: next line for a queued permission is bolded like the others', () => {
+  const html = renderParty({ agents: [agent()], card: permission(), next: 'Next: agent-hud asks permission', counts: { total: 1, needs: 1 } });
+  assert.ok(html.includes('Next: <b>agent-hud</b> asks permission · after this one'));
 });
