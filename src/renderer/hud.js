@@ -4,6 +4,8 @@
 import { GR, CLASSES, MOODS_BADGE, MOODS_ZEE, MOODS_PENNANT, FAMILIAR, spriteSvg } from './sprites.js';
 
 const REPLY_MS = 540000; // the reply hold in the main process (queue replyMs)
+const ARM_MS = 500; // a new card's answer buttons stay inert this long (I7)
+const ARMED_ACTS = new Set(['allow', 'deny', 'answer', 'send', 'noreply']);
 const MOODS = new Set(['needs', 'done', 'working', 'idle']);
 const NAMES = new Map(CLASSES.map((c) => [c.id, c.name]));
 
@@ -94,8 +96,13 @@ function cardTop(card, mark) {
     '<button type="button" class="open" data-act="open-card">open window ↗</button></div>';
 }
 
-function cardOpen(card, kind, parch = false) {
-  return `<div class="ans${parch ? ' parch' : ''}" data-card="${esc(card.id)}" data-kind="${kind}" data-session="${esc(sessionOf(card))}">`;
+// A click or Enter meant for the card that was just replaced must not answer the new one: answer
+// actions count only once the card has been on screen for ARM_MS.
+export const actionsArmed = (cardSince, now) => now - cardSince >= ARM_MS;
+export const clickAllowed = (act, cardSince, now) => !ARMED_ACTS.has(act) || actionsArmed(cardSince, now);
+
+function cardOpen(card, kind, { parch = false, arming = false } = {}) {
+  return `<div class="ans${parch ? ' parch' : ''}${arming ? ' arming' : ''}" data-card="${esc(card.id)}" data-kind="${kind}" data-session="${esc(sessionOf(card))}">`;
 }
 
 const WANTS = {
@@ -110,7 +117,7 @@ function permissionTarget(input) {
   try { return JSON.stringify(input).slice(0, 2000); } catch { return ''; }
 }
 
-function permissionCard(card) {
+function permissionCard(card, arming) {
   const p = card.payload || {};
   const tool = String(p.tool_name || '');
   const input = p.tool_input && typeof p.tool_input === 'object' ? p.tool_input : {};
@@ -121,7 +128,7 @@ function permissionCard(card) {
   const always = canAlways
     ? `<label class="chk"><input type="checkbox" data-always><i></i>${tool === 'Bash' ? 'Always allow this exact command here' : 'Always allow this here'}</label>`
     : '';
-  return cardOpen(card, 'permission') +
+  return cardOpen(card, 'permission', { arming }) +
     cardTop(card, '<span class="ans-seal" aria-hidden="true">!</span>') +
     `<p class="ans-sub">${esc(className(card.cls))} ${esc(wants)}${via}</p>` +
     `<div class="cmd">${esc(permissionTarget(input))}</div>` +
@@ -131,7 +138,7 @@ function permissionCard(card) {
   '</div>';
 }
 
-function choiceCard(card) {
+function choiceCard(card, arming) {
   const body = questionsOf(card).map((q, qi) => {
     const multi = !!q.multiSelect;
     const opts = optionsOf(q).map((o, oi) =>
@@ -145,18 +152,18 @@ function choiceCard(card) {
       `<input class="other" data-q="${qi}" placeholder="Something else…" aria-label="Something else">` +
     '</div>';
   }).join('');
-  return cardOpen(card, 'choice') +
+  return cardOpen(card, 'choice', { arming }) +
     cardTop(card, '<span class="ans-seal q" aria-hidden="true">?</span>') +
     body +
     '<div class="btns"><button type="button" class="btn gold" data-act="answer" disabled>Answer</button></div>' +
   '</div>';
 }
 
-function replyCard(card, leftMs) {
+function replyCard(card, leftMs, arming) {
   const chars = Array.from(String(card.payload?.last_assistant_message ?? ''));
   const said = chars.length > 200 ? `${chars.slice(0, 200).join('').trimEnd()}…` : chars.join('');
   const left = Math.max(0, Math.min(REPLY_MS, int(leftMs, REPLY_MS)));
-  return cardOpen(card, 'reply', true) +
+  return cardOpen(card, 'reply', { parch: true, arming }) +
     cardTop(card, '<span class="tick" aria-hidden="true">✓</span>') +
     (said ? `<p class="said">“${esc(said)}”</p>` : '') +
     '<div class="reply"><input data-reply placeholder="Reply…" aria-label="Reply">' +
@@ -167,11 +174,11 @@ function replyCard(card, leftMs) {
   '</div>';
 }
 
-export function renderCard(card, { leftMs } = {}) {
+export function renderCard(card, { leftMs, arming = false } = {}) {
   if (!card) return '';
-  if (card.kind === 'permission') return permissionCard(card);
-  if (card.kind === 'choice') return choiceCard(card);
-  if (card.kind === 'reply') return replyCard(card, leftMs);
+  if (card.kind === 'permission') return permissionCard(card, arming);
+  if (card.kind === 'choice') return choiceCard(card, arming);
+  if (card.kind === 'reply') return replyCard(card, leftMs, arming);
   return '';
 }
 
@@ -194,7 +201,7 @@ function face(a) {
     `<span class="sprite-box">${sprite(a.cls)}${mood === 'needs' ? SEAL() : ''}</span></button>`;
 }
 
-export function renderParty(snapshot, { collapsed = false, leftMs } = {}) {
+export function renderParty(snapshot, { collapsed = false, leftMs, arming = false } = {}) {
   const agents = Array.isArray(snapshot?.agents) ? snapshot.agents : [];
   if (collapsed) {
     return '<div class="party collapsed" data-key="party" data-deep>' +
@@ -204,7 +211,7 @@ export function renderParty(snapshot, { collapsed = false, leftMs } = {}) {
   }
   const card = snapshot?.card || null;
   const owner = card ? sessionOf(card) : null;
-  const slot = () => `<div class="card-slot" data-key="card:${esc(card.id)}" data-sticky>${renderCard(card, { leftMs })}</div>`;
+  const slot = () => `<div class="card-slot" data-key="card:${esc(card.id)}" data-sticky>${renderCard(card, { leftMs, arming })}</div>`;
   const parts = [];
   let placed = false;
   for (const a of agents) {
@@ -303,6 +310,16 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     if (bar) bar.style.width = `${((ms / REPLY_MS) * 100).toFixed(1)}%`;
   }
 
+  // The card slot is sticky (never re-rendered), so the arming class comes off the live element.
+  let armTimer = null;
+  function armLater() {
+    clearTimeout(armTimer);
+    armTimer = setTimeout(() => {
+      if (!actionsArmed(st.cardSince, Date.now())) return armLater();
+      for (const el of root.querySelectorAll('.ans.arming')) el.classList.remove('arming');
+    }, Math.max(0, st.cardSince + ARM_MS - Date.now()));
+  }
+
   function render() {
     const snap = st.snap || { agents: [], card: null, next: null, counts: { total: 0, needs: 0 } };
     const card = snap.card || null;
@@ -311,9 +328,11 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
       setInteractive(false); // the card we were answering is gone (answered, handed back, or answered natively)
     }
     st.card = card;
+    const arming = !!card && !actionsArmed(st.cardSince, Date.now());
     const tpl = doc.createElement('template');
-    tpl.innerHTML = renderParty(snap, { collapsed: st.collapsed, leftMs: leftMs() });
+    tpl.innerHTML = renderParty(snap, { collapsed: st.collapsed, leftMs: leftMs(), arming });
     patch(root, tpl.content, rendered);
+    if (arming) armLater();
 
     // The seal pulses three times when an agent starts waiting, then glows steady.
     const needs = new Set((snap.agents || []).filter((a) => a?.mood === 'needs').map((a) => String(a.id)));
@@ -361,6 +380,7 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
   root.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');
     if (!el || !root.contains(el) || el.disabled) return;
+    if (!clickAllowed(el.dataset.act, st.cardSince, Date.now())) return; // a click meant for the card this one replaced
     const cardEl = cardOf(el);
     switch (el.dataset.act) {
       case 'collapse':
@@ -431,7 +451,7 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     if (!cardEl) return;
     const act = e.target.matches('[data-reply]') ? 'send' : e.target.matches('.other') ? 'answer' : null;
     const btn = act && cardEl.querySelector(`[data-act="${act}"]`);
-    if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
+    if (btn && !btn.disabled && clickAllowed(act, st.cardSince, Date.now())) { e.preventDefault(); btn.click(); }
   });
 
   // R4: the main process sizes and docks the window from the content height.

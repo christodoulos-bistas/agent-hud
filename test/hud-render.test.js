@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { esc, renderRow, renderCard, renderParty, picksFrom, replyLeftMs } from '../src/renderer/hud.js';
+import { esc, renderRow, renderCard, renderParty, picksFrom, replyLeftMs, actionsArmed, clickAllowed } from '../src/renderer/hud.js';
 import { GR, CLASSES, MOODS_BADGE, MOODS_ZEE, spriteSvg } from '../src/renderer/sprites.js';
 import { CLASS_IDS } from '../src/main/classes.js';
 
@@ -201,4 +201,28 @@ test('R19: replyLeftMs counts down to card.expiresAt when present, else from whe
 test('R20: next line for a queued permission is bolded like the others', () => {
   const html = renderParty({ agents: [agent()], card: permission(), next: 'Next: agent-hud asks permission', counts: { total: 1, needs: 1 } });
   assert.ok(html.includes('Next: <b>agent-hud</b> asks permission · after this one'));
+});
+
+test('I7: actionsArmed is false for 500 ms after a card first appears, then true', () => {
+  assert.equal(actionsArmed(10000, 10000), false);
+  assert.equal(actionsArmed(10000, 10499), false);
+  assert.equal(actionsArmed(10000, 10500), true);
+  assert.equal(actionsArmed(10000, 99999), true);
+});
+
+test('I7: clickAllowed blocks allow/deny/answer/send/noreply while arming; other actions always pass', () => {
+  for (const act of ['allow', 'deny', 'answer', 'send', 'noreply']) {
+    assert.equal(clickAllowed(act, 1000, 1200), false, act);
+    assert.equal(clickAllowed(act, 1000, 1500), true, act);
+  }
+  for (const act of ['pick', 'open', 'wait', 'collapse', 'expand']) assert.equal(clickAllowed(act, 1000, 1001), true, act);
+});
+
+test('I7: a card rendered while arming carries the arming class; otherwise not', () => {
+  assert.ok(renderCard(permission(), { arming: true }).startsWith('<div class="ans arming"'));
+  assert.ok(renderCard(reply('hi'), { arming: true }).startsWith('<div class="ans parch arming"'));
+  assert.ok(!renderCard(permission()).includes('arming'));
+  const snap = { agents: [agent({ mood: 'needs' })], card: permission(), next: null, counts: { total: 1, needs: 1 } };
+  assert.ok(renderParty(snap, { arming: true }).includes('class="ans arming"'));
+  assert.ok(!renderParty(snap, {}).includes('arming'));
 });
