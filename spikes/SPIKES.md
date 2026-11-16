@@ -128,3 +128,23 @@ visible lag per tool call.
   `background_tasks:[{"id":"a985432f35b6fcf5d","type":"subagent","status":"running","description":"...","agent_type":"Explore"}]`.
   When the subagent finished, a synthetic **UserPromptSubmit** arrived with `prompt` = `<task-notification>...` and a second Stop followed.
   Implication (Inferred): the HUD must not treat every UserPromptSubmit as a human prompt, and Stop with non-empty `background_tasks` does not mean idle.
+
+## Spike 6 - non-focusable panel clicks
+
+`spikes/panel-focus.mjs`: 340x200 window at DIP (200,200), `frame:false, alwaysOnTop, focusable:false, skipTaskbar`, sandboxed, shown with `showInactive()`;
+one full-window button -> IPC -> `CLICKED <ms>`; main polls `getFocusedWindow()` every 200 ms -> `FOCUSED`. Display scale factor 1 (so DIP == physical px;
+button centre = 370,300). Driven by PowerShell (`SetCursorPos` + `mouse_event` left down/up at the centre; `GetForegroundWindow`/`GetWindowText` before/after),
+with Notepad given the foreground first.
+
+| Run | Foreground before | Foreground after | CLICKED | FOCUSED |
+| --- | --- | --- | --- | --- |
+| 1 | `New Text Document (3).txt - Notepad` (hwnd 8587932) | same | yes (first line within ~1 s of the click) | never |
+| 2 | `New Text Document (3).txt - Notepad` (hwnd 17435874) | same | yes | never |
+| 3 | `New Text Document (3).txt - Notepad` (hwnd 2952074) | same | yes | never |
+
+Output excerpt (run 1): `READY scale=1 bounds={"x":200,"y":200,"width":340,"height":200} centerPhysical=370,300` then `CLICKED 1794828951145`.
+Extra later `CLICKED` lines in runs 1-2 (and a lone one in run 3 is the scripted click) came after the script's click while the cursor sat over the button for 20 s;
+likely real user/other-process clicks - not attributable to the script, and none produced FOCUSED or changed the foreground.
+
+**Result: `PANEL_CLICK_MODE = 'plain'`** - plain `onclick` buttons work in a `focusable:false` window, no focus theft. Task 6 needs no pointerdown-focus workaround.
+Caveat: synthetic `mouse_event` clicks, one machine (Win 11, scale 1); not tested at >100% scaling or with a real editor (VS Code) foreground.
