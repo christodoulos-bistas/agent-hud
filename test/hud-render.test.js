@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { esc, newlyIn, newlyNeeding, renderChip, chipOf, chipText, rowCentreY, renderRow, renderCard, renderParty, picksFrom, replyLeftMs, actionsArmed, clickAllowed, createRenderGate } from '../src/renderer/hud.js';
+import { esc, newlyIn, newlyNeeding, newlyFinished, renderChip, chipOf, chipText, rowCentreY, renderRow, renderCard, renderParty, picksFrom, replyLeftMs, actionsArmed, clickAllowed, createRenderGate } from '../src/renderer/hud.js';
 import { GR, CLASSES, MOODS_BADGE, MOODS_ZEE, spriteSvg } from '../src/renderer/sprites.js';
 import { CLASS_IDS } from '../src/main/classes.js';
 
@@ -407,4 +407,35 @@ test('v1.2 M7: renderParty needs only the card id, kind and session for the aski
   const html = renderParty({ agents: [agent({ id: 's1', mood: 'needs', stage: 'needs' })], card: { id: 'c1', kind: 'choice', sessionId: 's1' }, next: 'Next: b asks permission' });
   assert.match(html, /asks a question/);
   assert.match(html, /Next: <b>b<\/b> asks permission/);
+});
+
+test('v1.2 M5: the "Your turn" pennant carries the pennant class, so its sparkle twinkles (hud.css .pennant .g-tw)', () => {
+  const turn = renderRow(agent({ id: 't', mood: 'done', stage: 'turn' }));
+  assert.match(turn, /<span class="flag"[^>]*><svg class="px pennant"/);
+  assert.match(turn, /<g class="g-tw">/, 'the sparkle group the twinkle animates');
+});
+
+test('v1.2 M8: rows already in "Your turn" at the first snapshot (a start or reload) do not glow; later arrivals do', () => {
+  const turnA = [agent({ id: 'a', mood: 'done', stage: 'turn' }), agent({ id: 'b', stage: 'working' })];
+  const first = newlyFinished(turnA, null);
+  assert.deepEqual([...first.now], ['a'], 'seeded from the first snapshot');
+  assert.equal(first.fresh.size, 0, 'nothing glows on start');
+  const next = newlyFinished([agent({ id: 'a', mood: 'done', stage: 'turn' }), agent({ id: 'b', mood: 'done', stage: 'turn' })], first.now);
+  assert.deepEqual([...next.fresh], ['b'], 'an agent that finishes afterwards glows');
+  assert.equal(newlyFinished(null, null).now.size, 0);
+});
+
+test('v1.2 M4: the breathing question glow animates only the opacity of its own layer, never box-shadow forever', async () => {
+  const fs = await import('node:fs');
+  const css = fs.readFileSync(new URL('../src/renderer/hud.css', import.meta.url), 'utf8');
+  const breathe = /@keyframes ask-breathe\s*\{([^]*?)\n\}/.exec(css)?.[1] ?? /@keyframes ask-breathe\s*\{(.*)\}/.exec(css)?.[1];
+  assert.ok(breathe, 'ask-breathe keyframes exist');
+  assert.doesNotMatch(breathe, /box-shadow/, 'an infinite box-shadow animation repaints the row every frame');
+  assert.match(breathe, /opacity/);
+  assert.match(css, /\.row\.glow-ask::after\s*\{[^}]*box-shadow/, 'the glow is drawn on a pseudo-element');
+  for (const m of css.matchAll(/([^{}]+)\{[^}]*animation:[^;}]*ask-breathe[^;}]*\}/g)) {
+    assert.match(m[1], /::after/, `ask-breathe runs on the pseudo-element only: ${m[1].trim()}`);
+  }
+  assert.match(css, /\.row\.needs::before\s*\{/, 'the rail stays');
+  assert.match(css, /\.row\.selected\s*\{[^}]*box-shadow/, 'the selected style stays');
 });

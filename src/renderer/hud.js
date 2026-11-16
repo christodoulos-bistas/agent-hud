@@ -21,7 +21,8 @@ const cached = (key, make) => {
 const classOf = (id) => (NAMES.has(id) ? id : 'pathfinder');
 const sprite = (cls) => cached(`class:${classOf(cls)}`, () => spriteSvg(classOf(cls), 2));
 const sealSvg = () => cached('seal', () => GR.svg(MOODS_BADGE, 2));
-const pennantSvg = () => cached('pennant', () => GR.svg(MOODS_PENNANT, 1));
+// The pennant class lets its sparkle twinkle (hud.css .pennant .g-tw; static with reduced motion).
+const pennantSvg = () => cached('pennant', () => GR.svg(MOODS_PENNANT, 1, 'pennant'));
 const famSvg = () => cached('fam', () => GR.svg(FAMILIAR, 2));
 
 const moodOf = (a) => (MOODS.has(a?.mood) ? a.mood : 'idle');
@@ -156,6 +157,14 @@ export function newlyNeeding(agents, prev = new Set()) {
 // A row in "Your turn": stage turn, or (no stage yet) mood done; a stuck flag does not change that.
 const inTurn = (a) => (STAGES.has(a.stage) ? a.stage : STAGE_OF_MOOD[moodOf(a)]) === 'turn';
 
+// Rows that just reached "Your turn" (they glow green-gold once). `prev` is the set from the last
+// snapshot, null before the first: rows already in "Your turn" when the HUD starts or reloads
+// finished a while ago, so the first snapshot only seeds the set and nothing glows (M8).
+export function newlyFinished(agents, prev = null) {
+  const r = newlyIn(agents, prev ?? new Set(), inTurn);
+  return prev == null ? { now: r.now, fresh: new Set() } : r;
+}
+
 export function renderRow(agent, { ask, selected = false } = {}) {
   const a = agent || {};
   const mood = moodOf(a);
@@ -268,7 +277,8 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
   const call = (name, ...args) => (typeof api?.[name] === 'function' ? api[name](...args) : undefined);
   const rendered = new WeakMap();
   // The HUD has no text boxes (the answer cards are in the detail panel), so it never takes the focus.
-  const st = { snap: null, collapsed: false, needs: new Set(), turn: new Set() };
+  // `turn` stays null until the first snapshot seeds it (newlyFinished).
+  const st = { snap: null, collapsed: false, needs: new Set(), turn: null };
 
   // The selected agent's row, or its face while collapsed (a question opens the panel beside the column).
   const rowEl = (id) => root.querySelector(`[data-key="${st.collapsed ? 'face' : 'row'}:${String(id).replace(/["\\]/g, '\\$&')}"]`);
@@ -316,15 +326,17 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     }
     st.needs = needs;
     // A row that just got to "Your turn" glows twice, then the class goes (animationend; with reduced
-    // motion nothing animates, so a timer removes it).
-    const done = newlyIn(snap.agents, st.turn, inTurn);
-    for (const id of done.fresh) {
-      const el = rowEl(id);
-      if (!el) continue;
-      el.classList.add('glow-done');
-      if (globalThis.getComputedStyle?.(el).animationName === 'none') setTimeout(() => el.classList.remove('glow-done'), 3000);
+    // motion nothing animates, so a timer removes it). The render before any snapshot counts nothing.
+    if (st.snap) {
+      const done = newlyFinished(snap.agents, st.turn);
+      for (const id of done.fresh) {
+        const el = rowEl(id);
+        if (!el) continue;
+        el.classList.add('glow-done');
+        if (globalThis.getComputedStyle?.(el).animationName === 'none') setTimeout(() => el.classList.remove('glow-done'), 3000);
+      }
+      st.turn = done.now;
     }
-    st.turn = done.now;
     syncRowOffset(snap);
     tick();
   }
