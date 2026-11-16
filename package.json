@@ -7,6 +7,7 @@
   "scripts": {
     "test": "node --test test/",
     "start": "electron .",
+    "dev": "node scripts/dev.mjs",
     "icon": "node scripts/icon.mjs",
     "build:win": "node scripts/icon.mjs && electron-builder --win nsis --x64"
   },

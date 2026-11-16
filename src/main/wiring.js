@@ -68,6 +68,14 @@ export function createInteractiveCheck({ current, reread }) {
   };
 }
 
+// Which settings file install/uninstall may touch. AGENT_HUD_SETTINGS_PATH wins; without it only the
+// packaged app targets ~/.claude/settings.json, and a dev build is blocked (path null).
+export function settingsTarget({ isPackaged, envPath, home }) {
+  if (envPath) return { path: envPath, blocked: false };
+  if (!isPackaged) return { path: null, blocked: true };
+  return { path: path.join(home, '.claude', 'settings.json'), blocked: false };
+}
+
 // config.json: { port, secret, ...flags }. Missing or broken values are repaired and written back.
 export function loadConfig(file) {
   let cfg = {};

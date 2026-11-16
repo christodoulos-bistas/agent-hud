@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, createThrottle, createInteractiveCheck, loadConfig } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, createThrottle, createInteractiveCheck, loadConfig, settingsTarget } from '../src/main/wiring.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
 
 const SUGG = [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test' }], behavior: 'allow', destination: 'localSettings' }];
@@ -112,4 +112,16 @@ test('loadConfig: keeps a custom port and extra keys; repairs a missing secret; 
     const b = loadConfig(file);
     assert.equal(b.port, 47821); assert.match(b.secret, /^[0-9a-f]{32}$/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('I1: settingsTarget: a dev build without AGENT_HUD_SETTINGS_PATH is blocked and never names the global file', () => {
+  const home = 'C:/Users/u';
+  assert.deepEqual(settingsTarget({ isPackaged: false, envPath: undefined, home }), { path: null, blocked: true });
+  assert.deepEqual(settingsTarget({ isPackaged: false, envPath: '', home }), { path: null, blocked: true });
+  assert.deepEqual(settingsTarget({ isPackaged: false, envPath: 'C:/spike/s.json', home }), { path: 'C:/spike/s.json', blocked: false });
+});
+test('I1: settingsTarget: the packaged app uses ~/.claude/settings.json unless the env override is set', () => {
+  const home = 'C:/Users/u';
+  assert.deepEqual(settingsTarget({ isPackaged: true, envPath: undefined, home }), { path: path.join(home, '.claude', 'settings.json'), blocked: false });
+  assert.deepEqual(settingsTarget({ isPackaged: true, envPath: 'C:/x.json', home }), { path: 'C:/x.json', blocked: false });
 });

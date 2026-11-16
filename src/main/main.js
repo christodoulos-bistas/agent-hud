@@ -13,7 +13,7 @@ import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor } from './focus.js';
-import { encodeAnswer, dockBounds, createThrottle, createInteractiveCheck, loadConfig, saveConfig } from './wiring.js';
+import { encodeAnswer, dockBounds, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const HOLD_MS = 60000;
@@ -24,8 +24,10 @@ const WIDTH = 272;
 const COLLAPSED_WIDTH = 72;
 const QUIT_GRACE_MS = 3000;
 const SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions');
-// Dev override (R20): point install/uninstall at a scratch file instead of the user's settings.
-const SETTINGS_PATH = process.env.AGENT_HUD_SETTINGS_PATH || path.join(os.homedir(), '.claude', 'settings.json');
+// Dev override (R20): AGENT_HUD_SETTINGS_PATH points install/uninstall at a scratch file. A dev build
+// without it never touches the user's settings (I1): no first-run offer, install/remove refuse.
+const TARGET = settingsTarget({ isPackaged: app.isPackaged, envPath: process.env.AGENT_HUD_SETTINGS_PATH, home: os.homedir() });
+const SETTINGS_PATH = TARGET.path;
 const SKIP_FIRST_RUN = process.argv.includes('--no-first-run') || process.env.AGENT_HUD_NO_FIRST_RUN === '1';
 const DEBUG = process.env.AGENT_HUD_DEBUG === '1';
 
@@ -214,12 +216,38 @@ function notify(title, content, error = false) {
 
 const loginOptions = () => (app.isPackaged ? {} : { path: process.execPath, args: [path.resolve(app.getAppPath())] });
 
+function devBlocked() {
+  if (!TARGET.blocked) return false;
+  notify('Dev build: set AGENT_HUD_SETTINGS_PATH', 'Hooks were not changed. Start the dev build with "npm run dev", which points it at the spike settings file.', true);
+  return true;
+}
+
+// The same question on first run and from the tray; the tray's default button is Cancel.
+async function confirmInstall({ firstRun }) {
+  const { response } = await dialog.showMessageBox({
+    type: 'question', buttons: [firstRun ? 'Yes, add the hooks' : 'Add the hooks', firstRun ? 'No' : 'Cancel'],
+    defaultId: firstRun ? 0 : 1, cancelId: 1, noLink: true,
+    title: 'Agent HUD',
+    message: 'Connect Agent HUD to Claude Code?',
+    detail: `Agent HUD will add its hooks to this file:\n\n${SETTINGS_PATH}\n\n` +
+      `The file is backed up first (to ${path.resolve(SETTINGS_PATH)}.agent-hud.bak). Your other settings and hooks are left as they are. ` +
+      'You can remove the hooks at any time from the tray menu.',
+  });
+  return response === 0;
+}
+
 function doInstall() {
+  if (devBlocked()) return;
   const r = installHooks(SETTINGS_PATH, { port: cfg.port, secret: cfg.secret });
   if (r.ok) notify('Agent HUD hooks installed', `Added to ${SETTINGS_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}`);
   else notify('Could not install the hooks', `${SETTINGS_PATH}: ${r.error}`, true);
 }
+async function installFromTray() {
+  if (devBlocked()) return;
+  try { if (await confirmInstall({ firstRun: false })) doInstall(); } catch (err) { log('install', err); }
+}
 function doUninstall() {
+  if (devBlocked()) return;
   const r = uninstallHooks(SETTINGS_PATH);
   if (r.ok) notify('Agent HUD hooks removed', `Removed from ${SETTINGS_PATH}`);
   else notify('Could not remove the hooks', `${SETTINGS_PATH}: ${r.error}`, true);
@@ -234,7 +262,7 @@ function refreshMenu() {
     { label: visible ? 'Hide' : 'Show', click: toggleWindow },
     { label: 'Collapse', type: 'checkbox', checked: collapsed, click: (mi) => setCollapsed(mi.checked) },
     { type: 'separator' },
-    { label: 'Install hooks', click: doInstall },
+    { label: 'Install hooks', click: installFromTray },
     { label: 'Remove hooks', click: doUninstall },
     { type: 'separator' },
     { label: 'Start with Windows', type: 'checkbox', checked: atLogin, click: (mi) => { app.setLoginItemSettings({ openAtLogin: mi.checked, ...loginOptions() }); refreshMenu(); } },
@@ -270,18 +298,11 @@ async function startServer() {
 }
 
 async function firstRun() {
-  if (cfg.offeredHooks || SKIP_FIRST_RUN) return;
-  const { response } = await dialog.showMessageBox({
-    type: 'question', buttons: ['Yes, add the hooks', 'No'], defaultId: 0, cancelId: 1, noLink: true,
-    title: 'Agent HUD',
-    message: 'Connect Agent HUD to Claude Code?',
-    detail: `Agent HUD will add its hooks to this file:\n\n${SETTINGS_PATH}\n\n` +
-      `The file is backed up first (to ${path.resolve(SETTINGS_PATH)}.agent-hud.bak). Your other settings and hooks are left as they are. ` +
-      'You can remove the hooks at any time from the tray menu.',
-  });
+  if (cfg.offeredHooks || SKIP_FIRST_RUN || TARGET.blocked) return;
+  const yes = await confirmInstall({ firstRun: true });
   cfg.offeredHooks = true;
   try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
-  if (response === 0) doInstall();
+  if (yes) doInstall();
 }
 
 function quit() {
