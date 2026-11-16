@@ -66,3 +66,31 @@ test('fmtDuration', () => {
   assert.equal(fmtDuration(-5), '0s');
   assert.equal(fmtDuration(NaN), '0s');
 });
+
+test('ghost thinking: mood idle, taskAt set, no steps -> idle', () => {
+  assert.equal(stageOf({ mood: 'idle', view: V({ taskAt: 10 }), status: 'idle', now: 50 }), 'idle');
+});
+
+test('repeating does not carry over into the next task', () => {
+  const steps = [fail({ startedAt: 5 }), fail({ startedAt: 4 }), fail({ startedAt: 3 })];
+  assert.equal(stuckOf({ stage: 'working', view: V({ steps, taskAt: 10, lastEventAt: 10 }), status: 'busy', now: 11 }), null);
+  assert.equal(stuckOf({ stage: 'working', view: V({ steps, taskAt: 2, lastEventAt: 10 }), status: 'busy', now: 11 }).reason, 'repeating');
+});
+
+test('stale open step: status idle -> not working, no long; status busy -> working, long after 300001', () => {
+  const open = [step({ startedAt: 0, endedAt: null, ok: null })];
+  const view = V({ open, lastEventAt: 0 });
+  assert.equal(stageOf({ mood: 'idle', view, status: 'idle', now: 600000 }), 'idle');
+  assert.equal(stuckOf({ stage: 'idle', view, status: 'idle', now: 600000 }), null);
+  assert.equal(stuckOf({ stage: 'working', view, status: 'idle', now: 600000 }), null);
+  assert.equal(stageOf({ mood: 'idle', view, status: 'busy', now: 600000 }), 'working');
+  assert.equal(stuckOf({ stage: 'working', view, status: 'busy', now: 300001 }).reason, 'long');
+  assert.equal(stageOf({ mood: 'idle', view, status: undefined, now: 1 }), 'working');
+});
+
+test('silent never fires with an open step or when status is not busy', () => {
+  const now = 1000000;
+  const open = [step({ startedAt: now - 1000, endedAt: null, ok: null })];
+  assert.equal(stuckOf({ stage: 'working', view: V({ open, lastEventAt: 0 }), status: 'busy', now }), null);
+  assert.equal(stuckOf({ stage: 'working', view: V({ lastEventAt: 0 }), status: 'idle', now }), null);
+});
