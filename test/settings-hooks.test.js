@@ -153,3 +153,37 @@ test('uninstall on missing file is ok with no backup and creates nothing', () =>
     assert.ok(!fs.existsSync(t.file));
   } finally { t.done(); }
 });
+
+const USER_CMD = { type: 'command', command: 'node "C:/example/user-hook.js"' };
+const mixed = () => {
+  const x = load();
+  x.hooks.UserPromptSubmit = [{ matcher: '', hooks: [entries().UserPromptSubmit[0].hooks[0], structuredClone(USER_CMD)] }];
+  return x;
+};
+
+test('unmerge keeps a mixed group with only the user hook', () => {
+  const u = unmergeHooks(mixed());
+  assert.deepEqual(u.hooks.UserPromptSubmit, [{ matcher: '', hooks: [USER_CMD] }]);
+});
+
+test('merge keeps the user hook in a mixed group and appends exactly one HUD group', () => {
+  const m = mergeHooks(mixed(), entries());
+  const g = m.hooks.UserPromptSubmit;
+  assert.equal(g.length, 2);
+  assert.deepEqual(g[0], { matcher: '', hooks: [USER_CMD] });
+  assert.equal(g.filter(isHud).length, 1);
+  assert.ok(isHud(g[1]));
+});
+
+test('installHooks twice on a mixed group never loses the user hook', () => {
+  const t = tmp();
+  try {
+    fs.writeFileSync(t.file, JSON.stringify(mixed(), null, 2) + '\n');
+    assert.equal(installHooks(t.file, { port: 1, secret: 'a' }).ok, true);
+    assert.equal(installHooks(t.file, { port: 2, secret: 'b' }).ok, true);
+    const g = JSON.parse(fs.readFileSync(t.file, 'utf8')).hooks.UserPromptSubmit;
+    assert.deepEqual(g[0], { matcher: '', hooks: [USER_CMD] });
+    assert.equal(g.filter(isHud).length, 1);
+    assert.equal(g.length, 2);
+  } finally { t.done(); }
+});

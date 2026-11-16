@@ -11,14 +11,26 @@ export function buildHookEntries({ port, secret }) {
   return out;
 }
 
-const isHudGroup = (g) => Array.isArray(g?.hooks) && g.hooks.some((h) => h && h.type === 'http' && typeof h.url === 'string' && h.url.includes('/agent-hud/'));
+const isHudHook = (h) => !!h && h.type === 'http' && typeof h.url === 'string' && h.url.includes('/agent-hud/');
+
+// Removes HUD hooks at hook level. A group is dropped only if it held a HUD hook and is now empty.
+function stripHud(groups) {
+  const kept = []; let removed = false;
+  for (const g of groups) {
+    if (!Array.isArray(g?.hooks) || !g.hooks.some(isHudHook)) { kept.push(g); continue; }
+    removed = true;
+    const rest = g.hooks.filter((h) => !isHudHook(h));
+    if (rest.length) kept.push({ ...g, hooks: rest });
+  }
+  return { kept, removed };
+}
 const clone = (v) => structuredClone(v);
 
 export function mergeHooks(settings, entries) {
   const out = clone(settings);
   const hooks = out.hooks && typeof out.hooks === 'object' && !Array.isArray(out.hooks) ? out.hooks : {};
   for (const [ev, groups] of Object.entries(entries)) {
-    const existing = Array.isArray(hooks[ev]) ? hooks[ev].filter((g) => !isHudGroup(g)) : [];
+    const existing = Array.isArray(hooks[ev]) ? stripHud(hooks[ev]).kept : [];
     hooks[ev] = [...existing, ...clone(groups)];
   }
   out.hooks = hooks;
@@ -32,8 +44,9 @@ export function unmergeHooks(settings) {
   let removed = false;
   for (const ev of Object.keys(hooks)) {
     if (!Array.isArray(hooks[ev])) continue;
-    const kept = hooks[ev].filter((g) => !isHudGroup(g));
-    if (kept.length === hooks[ev].length) continue;
+    const r = stripHud(hooks[ev]);
+    if (!r.removed) continue;
+    const kept = r.kept;
     removed = true;
     if (kept.length === 0) delete hooks[ev]; else hooks[ev] = kept;
   }
