@@ -345,3 +345,20 @@ test('forgetting a session drops its step log', () => {
   store.setSessions([S('s1')]);
   assert.equal(store.detail('s1').task, null);
 });
+
+test('I2: a stale open step on an idle session is not current: detail.current and currentStepStartedAt are null', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1', { status: 'idle' })]);
+  store.onEvent(ev('s1', 'UserPromptSubmit', 1000, { raw: { prompt: 'run the tests' } }));
+  store.onEvent(ev('s1', 'PreToolUse', 1000, { toolName: 'Bash', toolInput: { command: 'npm test' }, raw: { tool_use_id: 't1' } }));
+  set(1000 + 12 * 60000); // Esc-interrupted: no Post, no Stop
+  const a = store.snapshot().agents[0];
+  assert.equal(a.stage, 'idle');
+  assert.equal(a.currentStepStartedAt, null);
+  const d = store.detail('s1');
+  assert.equal(d.current, null);
+  assert.equal(d.currentStepStartedAt, null);
+  store.setSessions([S('s1', { status: 'busy' })]);
+  assert.equal(store.detail('s1').current.label, 'npm test', 'busy again: the open step is current');
+  assert.equal(store.snapshot().agents[0].currentStepStartedAt, 1000);
+});

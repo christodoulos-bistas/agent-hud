@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { stageOf, stuckOf } from '../src/main/stages.js';
+import { stageOf, stuckOf, currentOf } from '../src/main/stages.js';
 import { fmtDuration } from '../src/renderer/format.js';
 
 const V = (o = {}) => ({ task: null, taskAt: null, stepCount: 0, current: null, steps: [], open: [], helpers: [], lastEventAt: null, ...o });
@@ -93,4 +93,15 @@ test('silent never fires with an open step or when status is not busy', () => {
   const open = [step({ startedAt: now - 1000, endedAt: null, ok: null })];
   assert.equal(stuckOf({ stage: 'working', view: V({ open, lastEventAt: 0 }), status: 'busy', now }), null);
   assert.equal(stuckOf({ stage: 'working', view: V({ lastEventAt: 0 }), status: 'idle', now }), null);
+});
+
+test('I2: currentOf is the most recently started live open step; none on an idle session (stale-step rule)', () => {
+  const a = step({ id: 'a', label: 'npm test', startedAt: 100, endedAt: null, ok: null });
+  const b = step({ id: 'b', label: 'npm run build', startedAt: 200, endedAt: null, ok: null });
+  const view = V({ open: [a, b] });
+  assert.equal(currentOf(view, 'busy').id, 'b');
+  assert.equal(currentOf(view, undefined).id, 'b', 'unknown status counts as live');
+  assert.equal(currentOf(view, 'idle'), null);
+  assert.equal(currentOf(V(), 'busy'), null);
+  assert.equal(currentOf(V({ open: [step({ startedAt: 5, endedAt: null, ok: null, agentId: 'h1' })] }), 'busy'), null, 'main-thread steps only');
 });

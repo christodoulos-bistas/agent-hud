@@ -1,7 +1,7 @@
 import { moodOf } from './classes.js';
 import { displayName, baseOf } from './sessions.js';
 import { activityLine, createStepLog } from './steps.js';
-import { stageOf, stuckOf } from './stages.js';
+import { stageOf, stuckOf, currentOf } from './stages.js';
 
 const NEEDS_NOTIFS = new Set(['permission_prompt', 'elicitation_dialog', 'agent_needs_input']);
 const isSynthetic = (ev) => String((ev.raw || {}).prompt || '').trim().startsWith('<task-notification>');
@@ -113,7 +113,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
         activity: s.activity, familiars: Math.min(engine.activeSubagents(id), 3),
         replyOptIn: !!optIn.get(id), entrypoint: sess.entrypoint, cwd: sess.cwd, handedBack,
         stage, stuck, stageSince: rec.since,
-        currentStepStartedAt: view.current ? view.current.startedAt : null,
+        currentStepStartedAt: currentOf(view, sess.status)?.startedAt ?? null,
         lastActivityAt: s.lastActivityAt,
       };
     });
@@ -143,7 +143,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
       id, display: a.display, cls: a.cls, stage: a.stage, stuck: a.stuck,
       stageSince: a.stageSince, currentStepStartedAt: a.currentStepStartedAt, lastActivityAt: a.lastActivityAt,
       task: view.task ?? null, startedAt: view.taskAt ?? sess.startedAt ?? null,
-      stepCount: view.stepCount, current: view.current, steps: view.steps, helpers: view.helpers,
+      stepCount: view.stepCount, current: currentOf(view, sess.status), steps: view.steps, helpers: view.helpers,
     };
   }
 

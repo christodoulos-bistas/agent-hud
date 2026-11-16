@@ -2,6 +2,17 @@
 // so its step stays open on a session that is really idle. Unknown status counts as live.
 const liveOpen = (view, status) => (status === 'idle' ? [] : (view.open || []));
 
+// The current step (the panel's "Now:", the chip's clock): the most recently started live open
+// main-thread step, or null. Same stale-step rule as the stages, so "Idle" never sits beside a "Now:".
+export function currentOf(view, status) {
+  let cur = null;
+  for (const s of liveOpen(view || {}, status)) {
+    if (s.agentId != null) continue;
+    if (!cur || s.startedAt >= cur.startedAt) cur = s;
+  }
+  return cur;
+}
+
 export function stageOf({ mood, view, status }) {
   if (mood === 'needs') return 'needs';
   if (mood === 'done') return 'turn';
