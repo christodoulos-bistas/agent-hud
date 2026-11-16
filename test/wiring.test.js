@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
 
@@ -94,6 +94,24 @@ test('move: the HUD is kept fully inside the work area (dragged off-screen or di
 test('move: anchorPoint lies just inside the anchored corner, so a shared monitor edge picks the right display', () => {
   assert.deepEqual(anchorPoint({ h: 'right', v: 'bottom', x: 1920, y: 1040 }), { x: 1919, y: 1039 });
   assert.deepEqual(anchorPoint({ h: 'left', v: 'top', x: 1920, y: 0 }), { x: 1920, y: 0 });
+});
+
+test('snap: dropped within 24 px of an edge -> lined up 16 px in from it', () => {
+  const wa = { x: 0, y: 0, width: 1920, height: 1040 };
+  assert.deepEqual(snapBounds({ x: 10, y: 400, width: 272, height: 300 }, wa), { x: 16, y: 400, width: 272, height: 300 });
+  assert.deepEqual(snapBounds({ x: 30, y: 400, width: 272, height: 300 }, wa), { x: 30, y: 400, width: 272, height: 300 }, '30 px away: left alone');
+  assert.deepEqual(snapBounds({ x: 1920 - 272 - 5, y: 400, width: 272, height: 300 }, wa), { x: 1920 - 272 - 16, y: 400, width: 272, height: 300 });
+  assert.deepEqual(snapBounds({ x: 800, y: 1040 - 300 - 20, width: 272, height: 300 }, wa), { x: 800, y: 1040 - 300 - 16, width: 272, height: 300 });
+});
+test('snap: near two edges -> into that corner; past the edge counts as near', () => {
+  const wa = { x: 0, y: 0, width: 1920, height: 1040 };
+  assert.deepEqual(snapBounds({ x: 3, y: -40, width: 272, height: 300 }, wa), { x: 16, y: 16, width: 272, height: 300 });
+  assert.deepEqual(snapBounds({ x: 1920 - 272 + 50, y: 1040 - 300 - 2, width: 272, height: 300 }, wa), { x: 1920 - 272 - 16, y: 1040 - 300 - 16, width: 272, height: 300 });
+});
+test('snap: works on a second monitor with an offset work area', () => {
+  const wa = { x: 1920, y: 0, width: 1280, height: 1000 };
+  assert.deepEqual(snapBounds({ x: 1925, y: 990 - 300, width: 272, height: 300 }, wa), { x: 1936, y: 1000 - 300 - 16, width: 272, height: 300 });
+  assert.deepEqual(snapBounds({ x: 2400, y: 500, width: 272, height: 300 }, wa), { x: 2400, y: 500, width: 272, height: 300 });
 });
 
 test('createThrottle: first call runs at once, a burst collapses into one trailing call', () => {

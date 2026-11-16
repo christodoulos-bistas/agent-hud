@@ -13,7 +13,7 @@ import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor } from './focus.js';
-import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, isAnchor, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli } from './wiring.js';
+import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
@@ -102,8 +102,9 @@ function dock() {
 // 'moved' fires once when the user lets go of a drag (by the header bar, -webkit-app-region: drag).
 function rememberPosition() {
   if (docking || !win || win.isDestroyed()) return;
-  const b = win.getBounds();
-  cfg.position = anchorFrom(b, screen.getDisplayMatching(b).workArea);
+  const dropped = win.getBounds();
+  const wa = screen.getDisplayMatching(dropped).workArea;
+  cfg.position = anchorFrom(snapBounds(dropped, wa), wa); // near an edge or corner: snap into line
   try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
   dock(); // pulls it back inside the work area if it was dropped partly off-screen
   refreshMenu();

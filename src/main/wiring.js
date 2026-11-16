@@ -62,6 +62,20 @@ export function anchorFrom(bounds, workArea) {
   };
 }
 
+// Light snapping on drop: within `threshold` px of an edge (or past it) the HUD lines up `margin` px in
+// from that edge, the same gap as the default corner; near two edges it lands in that corner.
+// Anywhere else the drop position is kept as is.
+export function snapBounds(bounds, workArea, { threshold = 24, margin = 16 } = {}) {
+  let { x, y } = bounds;
+  const { width, height } = bounds;
+  const right = workArea.x + workArea.width, bottom = workArea.y + workArea.height;
+  if (x - workArea.x <= threshold) x = workArea.x + margin;
+  else if (right - (x + width) <= threshold) x = right - width - margin;
+  if (y - workArea.y <= threshold) y = workArea.y + margin;
+  else if (bottom - (y + height) <= threshold) y = bottom - height - margin;
+  return { x, y, width, height };
+}
+
 // A point just inside the anchored corner, for finding the display the HUD belongs to (a right or
 // bottom edge sits on the first pixel of a neighbouring monitor).
 export function anchorPoint(a) {
