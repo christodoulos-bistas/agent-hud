@@ -80,3 +80,19 @@ test('R3: pointerdown on the "always allow" checkbox (or a radio) does not make 
   const perm = cards.renderCard({ id: 'c1', kind: 'permission', display: 'a', payload: { session_id: 's1', tool_name: 'Bash', tool_input: { command: 'ls' }, permission_suggestions: [{ type: 'addRules' }] } });
   assert.match(perm, /<input type="checkbox" data-always>/, 'the always control is the checkbox the trigger skips');
 });
+
+test('v1.2 M6: a mounted permission card ticks its countdown like the reply card', () => {
+  const left = { textContent: '' };
+  const bar = { style: { width: '' } };
+  const host = { addEventListener() {}, querySelector: (sel) => (sel === '[data-left]' ? left : sel === '[data-bar]' ? bar : null), querySelectorAll: () => [] };
+  const m = cards.mountCards(host, { api: {}, adopt: true });
+  const T = 1_000_000;
+  m.show({ id: 'p1', kind: 'permission', sessionId: 's1', expiresAt: T + 60000, payload: {} }, T);
+  assert.equal(left.textContent, '1:00');
+  m.tick(T + 15000);
+  assert.equal(left.textContent, '0:45');
+  assert.equal(bar.style.width, '75.0%', 'the bar is a share of the 60 s hold, not of the 9 min reply');
+  m.show({ id: 'p2', kind: 'choice', sessionId: 's1', payload: {} }, T);
+  assert.equal(m.leftMs(T + 1000), 59000, 'no deadline stamped: count from when the card appeared');
+  m.clear();
+});

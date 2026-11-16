@@ -4,6 +4,8 @@
 import { CLASSES } from './sprites.js';
 
 export const REPLY_MS = 540000; // the reply hold in the main process (queue replyMs)
+export const HOLD_MS = 60000; // the question hold (queue holdMs): then a permission or choice goes back to its window
+const holdOf = (card) => (card?.kind === 'reply' ? REPLY_MS : HOLD_MS);
 export const ARM_MS = 500; // a new card's answer buttons stay inert this long (I7)
 const ARMED_ACTS = new Set(['answer', 'allow', 'deny', 'send', 'noreply']);
 const NAMES = new Map(CLASSES.map((c) => [c.id, c.name]));
@@ -26,6 +28,15 @@ const optionsOf = (q) => (Array.isArray(q.options) ? q.options : []);
 function clock(ms) {
   const s = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// The countdown to the end of the card's hold (the 60 s question hold, the 9 min reply hold): a clock
+// and a bar, which mountCards' tick rewrites in place every second.
+function timer(card, leftMs, label, extra = '') {
+  const hold = holdOf(card);
+  const left = Math.max(0, Math.min(hold, int(leftMs, hold)));
+  return `<div class="timer"><span>${label} <span data-left>${clock(left)}</span></span>` +
+    `<span class="bar"><i data-bar style="width:${((left / hold) * 100).toFixed(1)}%"></i></span>${extra}</div>`;
 }
 
 function cardTop(card, mark) {
@@ -54,7 +65,7 @@ function permissionTarget(input) {
   try { return JSON.stringify(input).slice(0, 2000); } catch { return ''; }
 }
 
-function permissionCard(card, arming) {
+function permissionCard(card, leftMs, arming) {
   const p = card.payload || {};
   const tool = String(p.tool_name || '');
   const input = p.tool_input && typeof p.tool_input === 'object' ? p.tool_input : {};
@@ -72,10 +83,11 @@ function permissionCard(card, arming) {
     '<div class="btns"><button type="button" class="btn gold" data-act="allow">Allow</button>' +
     '<button type="button" class="btn ghost" data-act="deny">Deny</button></div>' +
     always +
+    timer(card, leftMs, 'Back to its window in') +
   '</div>';
 }
 
-function choiceCard(card, arming) {
+function choiceCard(card, leftMs, arming) {
   const body = questionsOf(card).map((q, qi) => {
     const multi = !!q.multiSelect;
     const opts = optionsOf(q).map((o, oi) =>
@@ -93,38 +105,40 @@ function choiceCard(card, arming) {
     cardTop(card, '<span class="ans-seal q" aria-hidden="true">?</span>') +
     body +
     '<div class="btns"><button type="button" class="btn gold" data-act="answer" disabled>Answer</button></div>' +
+    timer(card, leftMs, 'Back to its window in') +
   '</div>';
 }
 
 function replyCard(card, leftMs, arming) {
   const chars = Array.from(String(card.payload?.last_assistant_message ?? ''));
   const said = chars.length > 200 ? `${chars.slice(0, 200).join('').trimEnd()}…` : chars.join('');
-  const left = Math.max(0, Math.min(REPLY_MS, int(leftMs, REPLY_MS)));
   return cardOpen(card, 'reply', { parch: true, arming }) +
     cardTop(card, '<span class="tick" aria-hidden="true">✓</span>') +
     (said ? `<p class="said">“${esc(said)}”</p>` : '') +
     '<div class="reply"><input data-reply placeholder="Reply…" aria-label="Reply">' +
     '<button type="button" class="btn gold" data-act="send" disabled>Send</button></div>' +
-    `<div class="timer"><span>Reply open <span data-left>${clock(left)}</span></span>` +
-    `<span class="bar"><i data-bar style="width:${((left / REPLY_MS) * 100).toFixed(1)}%"></i></span>` +
-    '<button type="button" class="open" data-act="noreply">No reply</button></div>' +
+    timer(card, leftMs, 'Reply open', '<button type="button" class="open" data-act="noreply">No reply</button>') +
   '</div>';
 }
 
+// `leftMs`: the time left on the card's hold (cardLeftMs); without it the countdown shows the whole hold.
 export function renderCard(card, { leftMs, arming = false } = {}) {
   if (!card) return '';
-  if (card.kind === 'permission') return permissionCard(card, arming);
-  if (card.kind === 'choice') return choiceCard(card, arming);
+  if (card.kind === 'permission') return permissionCard(card, leftMs, arming);
+  if (card.kind === 'choice') return choiceCard(card, leftMs, arming);
   if (card.kind === 'reply') return replyCard(card, leftMs, arming);
   return '';
 }
 
-// Time left on a reply card: the main process stamps the deadline (expiresAt, R19); without it,
-// fall back to counting from when the card appeared here.
-export function replyLeftMs(card, nowMs, sinceMs) {
-  if (card?.kind !== 'reply') return undefined;
-  return Number.isFinite(card.expiresAt) ? card.expiresAt - nowMs : REPLY_MS - (nowMs - sinceMs);
+// Time left on a card's hold (a question's 60 s before it goes back to its window, a reply's 9 min):
+// the main process stamps the deadline (expiresAt, R19); without it, fall back to counting from when
+// the card appeared here. Undefined for no card or an unknown kind.
+export function cardLeftMs(card, nowMs, sinceMs) {
+  if (!['permission', 'choice', 'reply'].includes(card?.kind)) return undefined;
+  return Number.isFinite(card.expiresAt) ? card.expiresAt - nowMs : holdOf(card) - (nowMs - sinceMs);
 }
+// The same for a reply card only (v1's name, kept for its callers).
+export const replyLeftMs = (card, nowMs, sinceMs) => (card?.kind === 'reply' ? cardLeftMs(card, nowMs, sinceMs) : undefined);
 
 // Picks for a choice card: question text -> label (array of labels for multiSelect), or the free
 // text when filled. `sel` is { [questionIndex]: { opts: [optionIndex], other } }. Null until every
@@ -170,7 +184,7 @@ export function mountCards(host, { api, doc, onInteractive, adopt = false, draft
   let armTimer = null;
 
   const arming = (now) => !!st.card && !actionsArmed(st.cardSince, now);
-  const leftMs = (now) => replyLeftMs(st.card, now, st.cardSince);
+  const leftMs = (now) => cardLeftMs(st.card, now, st.cardSince);
   const cardOf = (el) => el?.closest('.ans');
 
   // The card element is sticky (never re-rendered by the keyed patch), so the arming class comes off the live element.
@@ -186,10 +200,11 @@ export function mountCards(host, { api, doc, onInteractive, adopt = false, draft
     const el = host.querySelector('[data-left]');
     const left = leftMs(now);
     if (!el || left === undefined) return;
-    const ms = Math.max(0, left);
+    const hold = holdOf(st.card);
+    const ms = Math.max(0, Math.min(hold, left));
     el.textContent = clock(ms);
     const bar = host.querySelector('[data-bar]');
-    if (bar) bar.style.width = `${((ms / REPLY_MS) * 100).toFixed(1)}%`;
+    if (bar) bar.style.width = `${((ms / hold) * 100).toFixed(1)}%`;
   }
 
   function picksOf(cardEl) {

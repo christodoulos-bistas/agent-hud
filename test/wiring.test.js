@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli, guarded, releaseFocusOf, closeApplies } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
 
@@ -407,4 +407,12 @@ test('v1.2 M2: a ✕ closes the panel only when it names the agent still selecte
   assert.equal(closeApplies(undefined, 's2'), false);
   assert.equal(closeApplies('s1', null), false, 'nothing selected: nothing to close');
   assert.equal(closeApplies(7, '7'), true);
+});
+
+test('v1.2 M7: the HUD gets only the id, kind and session of the active card (the panel gets the rest)', () => {
+  const card = { id: 'c1', kind: 'permission', sessionId: 's1', display: 'arsenal', cls: 'runesmith', canOpen: true, expiresAt: 5,
+    payload: { tool_name: 'Bash', tool_input: { command: 'npm test' } } };
+  assert.deepEqual(hudCard(card), { id: 'c1', kind: 'permission', sessionId: 's1' });
+  assert.equal(hudCard(null), null);
+  assert.equal(hudCard(undefined), null);
 });

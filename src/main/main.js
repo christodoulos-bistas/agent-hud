@@ -14,7 +14,7 @@ import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor, resolveCodeCmd, canOpen } from './focus.js';
-import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli, guarded, releaseFocusOf, closeApplies } from './wiring.js';
+import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
@@ -91,7 +91,7 @@ const pushNow = guarded('push', () => {
   // One the question made stays until the question goes (its agent can be missing from the list for a
   // poll or two; placePanel keeps the panel hidden meanwhile).
   if (pick.selected && !pick.auto && !panelTarget(pick.selected.id, snap, panelHud(pick.selected.id, snap))) pick = { ...pick, selected: null };
-  try { win.webContents.send('snapshot', { ...snap, collapsed, selected: pick.selected?.id ?? null }); } catch (err) { log('push', err); }
+  try { win.webContents.send('snapshot', { ...snap, card: hudCard(snap.card), collapsed, selected: pick.selected?.id ?? null }); } catch (err) { log('push', err); }
   placePanel(snap);
   pushDetail();
 }, log);

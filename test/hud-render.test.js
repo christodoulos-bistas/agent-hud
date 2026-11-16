@@ -402,3 +402,9 @@ test('needs rows carry glow-ask; turn chip contains the pennant svg', () => {
   assert.match(turn, /<span class="st turn"[^>]*><span class="flag"[^>]*><svg[\s\S]*?<\/svg><\/span>Your turn<\/span>/);
   assert.ok(!turn.includes('glow-done'), 'glow-done is added by the DOM once, not rendered');
 });
+
+test('v1.2 M7: renderParty needs only the card id, kind and session for the asking row and the Next line', () => {
+  const html = renderParty({ agents: [agent({ id: 's1', mood: 'needs', stage: 'needs' })], card: { id: 'c1', kind: 'choice', sessionId: 's1' }, next: 'Next: b asks permission' });
+  assert.match(html, /asks a question/);
+  assert.match(html, /Next: <b>b<\/b> asks permission/);
+});

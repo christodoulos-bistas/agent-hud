@@ -203,3 +203,16 @@ test('v1.2 M1/M2: the header ✕ and the footer "open window ↗" name the agent
   assert.deepEqual(panelAction('open', null), { call: 'openWindow', id: null });
   assert.equal(panelAction('allow', d), null, "the card's own buttons are handled by cards.js");
 });
+
+test('v1.2 M6: permission and choice cards show the countdown to the 60 s hand-back, from expiresAt', () => {
+  const p = renderPanel(detail({ stage: 'needs', hasCard: true, card: permCard({ expiresAt: NOW + 42000 }) }), NOW);
+  assert.match(p, /Back to its window in <span data-left>0:42<\/span>/);
+  assert.match(p, /<i data-bar style="width:70\.0%"><\/i>/, '42 s of the 60 s hold');
+  assert.match(renderPanel(detail({ card: permCard() }), NOW), /<span data-left>1:00<\/span>/);
+  assert.match(renderPanel(detail({ card: permCard({ expiresAt: NOW - 5000 }) }), NOW), /<span data-left>0:00<\/span>/, 'never below zero');
+  assert.match(renderPanel(detail({ card: permCard() }), NOW, { leftMs: 9000 }), /<span data-left>0:09<\/span>/, "the mounted card's own clock wins");
+  const choiceCard = { id: 'c7', kind: 'choice', sessionId: 's1', display: 'a', cls: 'runesmith', canOpen: true, expiresAt: NOW + 30000,
+    payload: { session_id: 's1', tool_input: { questions: [{ question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] }] } } };
+  assert.match(renderPanel(detail({ card: choiceCard }), NOW), /Back to its window in <span data-left>0:30<\/span>/);
+  assert.match(renderPanel(detail({ card: replyCard() }), NOW), /Reply open <span data-left>2:05<\/span>/,'the reply card keeps its own words');
+});

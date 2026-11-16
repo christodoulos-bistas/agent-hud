@@ -150,6 +150,12 @@ export function userSelect(state, sel) {
   return { selected: sel ?? null, auto: false, before: null, cardId: state?.cardId ?? null };
 }
 
+// The HUD's view of the active card: only what the asking row ("asks a question") and the "Next:" line
+// need. The whole card (payload, command, options) goes to the panel with the detail (M7).
+export function hudCard(card) {
+  return card ? { id: card.id, kind: card.kind, sessionId: card.sessionId } : null;
+}
+
 // The panel's ✕ names the agent it was showing; it closes the panel only if that agent is still the
 // selected one. A question can switch the panel to its own agent while the pointer is down on ✕, and
 // that close must not dismiss the new question (M2).

@@ -162,7 +162,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
       stageSince: a.stageSince, currentStepStartedAt: a.currentStepStartedAt, lastActivityAt: a.lastActivityAt,
       task: view.task ?? null, startedAt: view.taskAt ?? knownTime(sess.startedAt),
       stepCount: view.stepCount, current: currentOf(view, sess.status), steps: view.steps, helpers: view.helpers,
-      // Where a "needs you" is waiting, for the panel's line (M3): a card in the HUD, or its own window.
+      // Where a "needs you" is waiting, for the panel's line (M3): a card in the panel, or its own window.
       handedBack: a.handedBack, hasCard: queue.list().some((it) => it.sessionId === id), canOpen: a.canOpen,
       lastMessage: a.stage === 'turn' ? (view.lastMessage ?? null) : null,
       card: card && card.sessionId === id ? card : null,

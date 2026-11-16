@@ -3,7 +3,7 @@
 // comes from the detail goes through esc() before it reaches markup.
 import { spriteSvg } from './sprites.js';
 import { esc, renderChip, chipOf, className, createRenderGate, patch } from './hud.js';
-import { renderCard, replyLeftMs, mountCards } from './cards.js';
+import { renderCard, cardLeftMs, mountCards } from './cards.js';
 import { fmtDuration } from './format.js';
 
 const MAX_STEPS = 5;
@@ -78,11 +78,11 @@ function nowBlock(d, nowMs) {
 
 // The agent's open question (detail.card), under the header and above the task. Keyed and sticky: the
 // keyed patch keeps the live card (its typed text, picks and focus) while new details re-render the
-// rest. `leftMs` and `arming` come from the mounted card (bootPanel); without them the reply clock
-// runs to the main process deadline.
+// rest. `leftMs` and `arming` come from the mounted card (bootPanel); without them the countdown (every
+// card has one: the 60 s question hold, the 9 min reply hold) runs to the main process deadline.
 function cardSlot(card, nowMs, { leftMs, arming = false } = {}) {
   if (!card) return '';
-  const left = leftMs ?? replyLeftMs(card, nowMs, nowMs);
+  const left = leftMs ?? cardLeftMs(card, nowMs, nowMs);
   return `<div class="card-slot" data-key="card:${esc(card.id)}" data-sticky>${renderCard(card, { leftMs: left, arming })}</div>`;
 }
 
@@ -174,7 +174,7 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
     interactive = on;
     call('setInteractive', on);
   };
-  // The open question: answer buttons, the 500 ms arming, the reply countdown and typed-text drafts live
+  // The open question: answer buttons, the 500 ms arming, the countdown and typed-text drafts live
   // in cards.js; its markup comes from renderPanel (adopt), kept by the keyed patch. "open window ↗" on
   // the card hands it back (release) and opens its session's window: the session id goes along, since
   // the release can already have moved the panel's selection back to what was open before.
@@ -189,7 +189,7 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
 
   // A render when a new detail arrives: the keyed patch replaces the header and the details, never the
   // card being answered. Between details the 1 s tick rewrites the time texts, the chip's clock and the
-  // reply countdown in place (and swaps the stuck line, which holds no buttons), so a click that
+  // card's countdown in place (and swaps the stuck line, which holds no buttons), so a click that
   // straddles a tick still lands and a focused button keeps its focus.
   const render = () => {
     const now = Date.now();
