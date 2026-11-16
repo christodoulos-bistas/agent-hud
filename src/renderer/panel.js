@@ -2,7 +2,7 @@
 // the tests; bootPanel wires it to the DOM and to window.panel from the preload. Every string that
 // comes from the detail goes through esc() before it reaches markup.
 import { spriteSvg } from './sprites.js';
-import { esc, renderChip, chipOf, className } from './hud.js';
+import { esc, renderChip, chipOf, className, createRenderGate } from './hud.js';
 import { fmtDuration } from './format.js';
 
 const MAX_STEPS = 5;
@@ -155,12 +155,19 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
     if (h !== lastHeight) { lastHeight = h; api.reportHeight?.(h); }
   }).observe(root);
 
-  api.onDetail?.((next) => {
+  // A new detail arrives on nearly every event of a busy agent: it waits while a pointer is down in the
+  // panel (createRenderGate), so ✕ and "open window ↗" are not replaced while being clicked.
+  const gate = createRenderGate((next) => {
     detail = next || null;
     render();
     if (detail && !timer) timer = setInterval(tick, 1000);
     else if (!detail && timer) { clearInterval(timer); timer = null; }
   });
+  root.addEventListener('pointerdown', () => gate.down());
+  doc.addEventListener('pointerup', () => gate.up());
+  doc.addEventListener('pointercancel', () => gate.up());
+
+  api.onDetail?.((next) => gate.offer(next));
 }
 
 if (typeof document !== 'undefined' && globalThis.panel) bootPanel();

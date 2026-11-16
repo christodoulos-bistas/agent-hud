@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { esc, newlyNeeding, renderChip, chipOf, rowCentreY, renderRow, renderCard, renderParty, picksFrom, replyLeftMs, actionsArmed, clickAllowed } from '../src/renderer/hud.js';
+import { esc, newlyNeeding, renderChip, chipOf, chipText, rowCentreY, renderRow, renderCard, renderParty, picksFrom, replyLeftMs, actionsArmed, clickAllowed, createRenderGate } from '../src/renderer/hud.js';
 import { GR, CLASSES, MOODS_BADGE, MOODS_ZEE, spriteSvg } from '../src/renderer/sprites.js';
 import { CLASS_IDS } from '../src/main/classes.js';
 
@@ -304,4 +304,56 @@ test('I7: a card rendered while arming carries the arming class; otherwise not',
   const snap = { agents: [agent({ mood: 'needs' })], card: permission(), next: null, counts: { total: 1, needs: 1 } };
   assert.ok(renderParty(snap, { arming: true }).includes('class="ans arming"'));
   assert.ok(!renderParty(snap, {}).includes('arming'));
+});
+
+test('I1: a working row renders the same HTML at two different times; its chip carries data-kind and data-since for the tick', () => {
+  const now = 1_000_000_000;
+  const w = agent({ stage: 'working', currentStepStartedAt: now - 45000, stageSince: now - 90000 });
+  assert.equal(renderRow(w, { nowMs: now }), renderRow(w, { nowMs: now + 61000 }));
+  assert.match(renderRow(w), new RegExp(`<span class="st work" data-kind="work" data-since="${now - 45000}">Working</span>`));
+  const idle = agent({ mood: 'idle', stage: 'idle', lastActivityAt: now - 25 * 60000 });
+  assert.equal(renderRow(idle, { nowMs: now }), renderRow(idle, { nowMs: now + 3600000 }));
+  assert.match(renderRow(idle), new RegExp(`<span class="st idle" data-kind="idle" data-since="${now - 25 * 60000}">Idle</span>`));
+  assert.match(renderRow(agent({ stage: 'thinking' })), /<span class="st think">Thinking<\/span>/, 'untimed chips carry no clock');
+  const snap = { agents: [w, idle], card: null, next: null, counts: { total: 2, needs: 0 } };
+  assert.equal(renderParty(snap, { nowMs: now }), renderParty(snap, { nowMs: now + 5000 }));
+});
+
+test('I1: chipText is the live chip text for a kind and start (strings from the DOM accepted)', () => {
+  const now = 1_000_000_000;
+  assert.equal(chipText('work', String(now - 120000), now), 'Working · 2m');
+  assert.equal(chipText('idle', now - 25 * 60000, now), 'Idle · 25m');
+  assert.equal(chipText('work', null, now), 'Working');
+  assert.equal(chipText('think', undefined, now), 'Thinking');
+  const w = agent({ stage: 'working', currentStepStartedAt: now - 45000 });
+  assert.equal(chipText('work', now - 45000, now + 1000), chipOf(w, now + 1000).text, 'the tick writes what chipOf would');
+});
+
+test('I1: the render gate holds renders while a pointer is down and applies only the latest after the click', () => {
+  const timers = [];
+  const setTimer = (fn, ms) => { timers.push({ fn, ms, live: true }); return timers.length - 1; };
+  const clearTimer = (i) => { if (timers[i]) timers[i].live = false; };
+  const fire = (ms) => { for (const t of timers.filter((x) => x.live && x.ms === ms)) { t.live = false; t.fn(); } };
+  const applied = [];
+  const g = createRenderGate((v) => applied.push(v), { setTimer, clearTimer, maxHoldMs: 5000 });
+  g.offer('a');
+  assert.deepEqual(applied, ['a'], 'no pointer down: applied at once');
+  g.down(); g.offer('b'); g.offer('c');
+  assert.deepEqual(applied, ['a'], 'held while the pointer is down');
+  g.up();
+  assert.deepEqual(applied, ['a'], 'not on pointerup itself: the click lands first');
+  g.offer('d');
+  assert.deepEqual(applied, ['a'], 'still held until the click has been dispatched');
+  fire(0);
+  assert.deepEqual(applied, ['a', 'd'], 'then only the latest');
+  g.down(); g.up(); fire(0);
+  assert.deepEqual(applied, ['a', 'd'], 'nothing pending: nothing rendered');
+  g.down(); g.offer('e'); g.up(); g.down(); fire(0);
+  assert.deepEqual(applied, ['a', 'd'], 'a second press before the release keeps holding');
+  g.up(); g.up(); fire(0);
+  assert.deepEqual(applied, ['a', 'd', 'e'], 'pointerup + pointercancel release once');
+  g.down(); g.offer('f'); fire(5000);
+  assert.deepEqual(applied, ['a', 'd', 'e', 'f'], 'a lost pointerup never freezes the view');
+  g.up(); fire(0);
+  assert.deepEqual(applied, ['a', 'd', 'e', 'f']);
 });

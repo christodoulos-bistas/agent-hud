@@ -64,32 +64,91 @@ const SEAL = () => `<span class="seal" role="img" aria-label="Needs you">${sealS
 
 const STAGES = new Set(['needs', 'turn', 'thinking', 'working', 'idle']);
 const STAGE_OF_MOOD = { needs: 'needs', done: 'turn', working: 'working', idle: 'idle' };
+const CHIP_LABEL = { stuck: '⚠ Stuck?', needs: 'Needs you', turn: 'Your turn', think: 'Thinking', work: 'Working', idle: 'Idle' };
 const finite = (v) => v != null && Number.isFinite(Number(v));
-const since = (from, nowMs) => fmtDuration(Number(nowMs) - Number(from));
 
-// The stage chip's class and text. `timed` chips (Working, Idle with a time) show a clock, which the
-// renderers' 1 s ticks rewrite in place without re-rendering the row.
-export function chipOf(agent, nowMs = Date.now()) {
+// The stage chip's kind and, for a timed chip (Working, Idle with a time), the ms timestamp its clock
+// counts from (null otherwise).
+function chipState(agent) {
   const a = agent || {};
-  if (a.stuck) return { cls: 'stuck', text: '⚠ Stuck?', timed: false };
+  if (a.stuck) return { cls: 'stuck', since: null };
   const stage = STAGES.has(a.stage) ? a.stage : STAGE_OF_MOOD[moodOf(a)];
   switch (stage) {
-    case 'needs': return { cls: 'needs', text: 'Needs you', timed: false };
-    case 'turn': return { cls: 'turn', text: 'Your turn', timed: false };
-    case 'thinking': return { cls: 'think', text: 'Thinking', timed: false };
+    case 'needs': return { cls: 'needs', since: null };
+    case 'turn': return { cls: 'turn', since: null };
+    case 'thinking': return { cls: 'think', since: null };
     case 'working': {
       const from = finite(a.currentStepStartedAt) ? a.currentStepStartedAt : a.stageSince;
-      return { cls: 'work', text: `Working${finite(from) ? ` · ${since(from, nowMs)}` : ''}`, timed: finite(from) };
+      return { cls: 'work', since: finite(from) ? Number(from) : null };
     }
-    default:
-      return { cls: 'idle', text: `Idle${finite(a.lastActivityAt) ? ` · ${since(a.lastActivityAt, nowMs)}` : ''}`, timed: finite(a.lastActivityAt) };
+    default: return { cls: 'idle', since: finite(a.lastActivityAt) ? Number(a.lastActivityAt) : null };
   }
+}
+
+// A chip's text: its label, plus the time since `from` when it has one. `from` may be the string a
+// data-since attribute holds.
+export function chipText(cls, from, nowMs = Date.now()) {
+  const label = CHIP_LABEL[cls] ?? '';
+  return finite(from) ? `${label} · ${fmtDuration(Number(nowMs) - Number(from))}` : label;
+}
+
+// The stage chip's class and text. `timed` chips show a clock, which the renderers' 1 s ticks rewrite
+// in place without re-rendering the row.
+export function chipOf(agent, nowMs = Date.now()) {
+  const s = chipState(agent);
+  return { cls: s.cls, text: chipText(s.cls, s.since, nowMs), timed: s.since != null };
 }
 
 // The stage chip: a coloured pill with the agent's stage and how long it has been that way.
 export function renderChip(agent, nowMs = Date.now()) {
   const c = chipOf(agent, nowMs);
   return `<span class="st ${c.cls}">${esc(c.text)}</span>`;
+}
+
+// A row's chip holds no clock text, so the row's HTML does not change as time passes and the keyed
+// patch keeps the row (and the button under the pointer). A timed chip carries its kind and start;
+// the HUD's tick (tickChips) writes the clock after every patch and every second.
+function rowChip(agent) {
+  const s = chipState(agent);
+  const live = s.since != null ? ` data-kind="${s.cls}" data-since="${s.since}"` : '';
+  return `<span class="st ${s.cls}"${live}>${esc(CHIP_LABEL[s.cls])}</span>`;
+}
+
+// Renders wait while a pointer is down inside a window, so the button being pressed is not replaced
+// before its click lands (I1). offer() hands in the newest snapshot or detail; down() on pointerdown;
+// up() on pointerup or pointercancel lets it through on a 0 ms timer, after the click has been
+// dispatched, and only the latest offer is applied. A hold never outlasts maxHoldMs (a lost pointerup
+// must not freeze the view).
+export function createRenderGate(apply, { setTimer = setTimeout, clearTimer = clearTimeout, maxHoldMs = 5000 } = {}) {
+  let held = false;
+  let gen = 0;
+  let safety = null;
+  let pending = false;
+  let latest;
+  const open = () => {
+    held = false;
+    clearTimer(safety);
+    safety = null;
+    if (!pending) return;
+    const v = latest;
+    pending = false;
+    latest = undefined;
+    apply(v);
+  };
+  return {
+    offer(v) { latest = v; pending = true; if (!held) open(); },
+    down() {
+      held = true;
+      const g = ++gen;
+      clearTimer(safety);
+      safety = setTimer(() => { if (g === gen) open(); }, maxHoldMs);
+    },
+    up() {
+      if (!held) return;
+      const g = gen;
+      setTimer(() => { if (g === gen && held) open(); }, 0);
+    },
+  };
 }
 
 // A row's vertical centre in CSS px from the top of the HUD window (its bounding rect is viewport-
@@ -102,7 +161,7 @@ export function newlyNeeding(agents, prev = new Set()) {
   return { needs, fresh: new Set([...needs].filter((id) => !prev.has(id))) };
 }
 
-export function renderRow(agent, { ask, selected = false, nowMs = Date.now() } = {}) {
+export function renderRow(agent, { ask, selected = false } = {}) {
   const a = agent || {};
   const mood = moodOf(a);
   const id = esc(a.id);
@@ -120,7 +179,7 @@ export function renderRow(agent, { ask, selected = false, nowMs = Date.now() } =
       `<div class="who-d${handed ? ' handed' : ''}">${line}</div>` +
       `<button type="button" class="wait" data-act="wait" data-session="${id}" aria-pressed="${a.replyOptIn ? 'true' : 'false'}"><i></i>wait for my reply</button>` +
     '</div>' +
-    `<span class="mark">${renderChip(a, nowMs)}</span>` +
+    `<span class="mark">${rowChip(a)}</span>` +
   '</div>';
 }
 
@@ -234,7 +293,7 @@ function face(a) {
     `<span class="sprite-box">${sprite(a.cls)}${mood === 'needs' ? SEAL() : ''}</span></button>`;
 }
 
-export function renderParty(snapshot, { collapsed = false, leftMs, arming = false, nowMs = Date.now() } = {}) {
+export function renderParty(snapshot, { collapsed = false, leftMs, arming = false } = {}) {
   const selectedId = snapshot?.selected != null ? String(snapshot.selected) : null;
   const agents = Array.isArray(snapshot?.agents) ? snapshot.agents : [];
   if (collapsed) {
@@ -250,7 +309,7 @@ export function renderParty(snapshot, { collapsed = false, leftMs, arming = fals
   let placed = false;
   for (const a of agents) {
     const mine = !!card && !placed && String(a.id) === owner;
-    parts.push(renderRow(a, { ...(mine ? { ask: card.kind } : {}), selected: selectedId != null && String(a.id) === selectedId, nowMs }));
+    parts.push(renderRow(a, { ...(mine ? { ask: card.kind } : {}), selected: selectedId != null && String(a.id) === selectedId }));
     if (mine) { parts.push(slot()); placed = true; }
   }
   if (card && !placed) parts.unshift(slot());
@@ -336,19 +395,17 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
 
   const rowEl = (id) => root.querySelector(`[data-key="row:${String(id).replace(/["\\]/g, '\\$&')}"]`);
 
-  // Row clocks: a timed chip's text is rewritten in place, so the row (its bob and dots animations,
-  // its buttons) is never replaced just because a second went by.
+  // Row clocks: a timed chip carries its kind and start (rowChip) and its text is written here, in
+  // place, so the row (its bob and dots animations, its buttons) is never replaced because time passed.
   function tickChips(now) {
-    for (const a of Array.isArray(st.snap?.agents) ? st.snap.agents : []) {
-      const c = chipOf(a, now);
-      if (!c.timed) continue;
-      const el = rowEl(a?.id)?.querySelector('.mark .st');
-      if (el && el.classList.contains(c.cls) && el.textContent !== c.text) el.textContent = c.text;
+    for (const el of root.querySelectorAll('.row .mark .st[data-since]')) {
+      const text = chipText(el.dataset.kind, el.dataset.since, now);
+      if (el.textContent !== text) el.textContent = text;
     }
   }
 
   function tick() {
-    if (!st.collapsed) tickChips(Date.now());
+    tickChips(Date.now());
     const el = root.querySelector('[data-left]');
     const left = leftMs();
     if (!el || left === undefined) return;
@@ -389,7 +446,7 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     st.card = card;
     const arming = !!card && !actionsArmed(st.cardSince, Date.now());
     const tpl = doc.createElement('template');
-    tpl.innerHTML = renderParty(snap, { collapsed: st.collapsed, leftMs: leftMs(), arming, nowMs: Date.now() });
+    tpl.innerHTML = renderParty(snap, { collapsed: st.collapsed, leftMs: leftMs(), arming });
     patch(root, tpl.content, rendered);
     if (arming) armLater();
 
@@ -527,9 +584,9 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
   // Scrolling the list moves the selected row on screen: the panel's arrow follows it.
   doc.getElementById('hud')?.addEventListener('scroll', () => syncRowOffset(st.snap), { passive: true });
 
-  setInterval(tick, 1000);
-  render();
-  call('onSnapshot', (snap) => {
+  // Snapshots wait while a pointer is down in the HUD (createRenderGate), so a busy agent's pushes
+  // can't replace the button being clicked.
+  const gate = createRenderGate((snap) => {
     st.snap = snap;
     if (typeof snap?.collapsed === 'boolean') { // the tray can collapse too
       if (snap.collapsed && !st.collapsed) setInteractive(false);
@@ -537,6 +594,13 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     }
     render();
   });
+  root.addEventListener('pointerdown', () => gate.down());
+  doc.addEventListener('pointerup', () => gate.up());
+  doc.addEventListener('pointercancel', () => gate.up());
+
+  setInterval(tick, 1000);
+  render();
+  call('onSnapshot', (snap) => gate.offer(snap));
 }
 
 if (typeof document !== 'undefined' && globalThis.hud) boot();
