@@ -89,3 +89,60 @@ test('mood: priorities', () => {
   assert.equal(moodOf({ pending: false, lastActivityAt: 75000, status: 'idle' }, 100000), 'idle');
   assert.equal(moodOf({ pending: false, lastActivityAt: 75000, status: 'busy' }, 100000), 'working');
 });
+
+test('bash: quoted keywords and precedence', () => {
+  assert.deepEqual(cls(ev('Bash', { command: 'git commit -m "fix test"' }, 0)), ['herald']);
+  assert.deepEqual(cls(ev('Bash', { command: 'gh pr create --title "add build step"' }, 0)), ['herald']);
+  assert.deepEqual(cls(ev('Bash', { command: 'git push && npm test' }, 0)), ['herald']);
+  assert.deepEqual(cls(ev('Bash', { command: 'npm test' }, 0)), ['alchemist']);
+  assert.deepEqual(cls(ev('Bash', { command: 'psql -f m.sql' }, 0)), ['vaultkeeper']);
+});
+
+test('expiry: forget and SessionEnd drop session state', () => {
+  const sub = (id, at) => ({ sessionId: 's', event: 'SubagentStart', at, raw: { agent_id: id } });
+  for (const drop of [(e) => e.forget('s'), (e) => e.push({ sessionId: 's', event: 'SessionEnd', at: 5 })]) {
+    const e = createClassEngine(); edits(e); e.push(sub('a1', 1)); e.push(sub('a2', 2));
+    assert.equal(e.classOf('s', 60000), 'summoner');
+    drop(e);
+    assert.equal(e.activeSubagents('s'), 0);
+    assert.equal(e.classOf('s', 60000), 'pathfinder');
+  }
+});
+
+test('expiry: Stop reconciles active subagents to running background_tasks', () => {
+  const e = createClassEngine();
+  for (const id of ['a1', 'a2', 'a3']) e.push({ sessionId: 's', event: 'SubagentStart', at: 1, raw: { agent_id: id } });
+  e.push({ sessionId: 's', event: 'Stop', at: 2, raw: { background_tasks: [
+    { id: 'a3', type: 'subagent', status: 'running' }, { id: 'a2', type: 'subagent', status: 'done' }, { id: 'x', type: 'shell', status: 'running' }] } });
+  assert.equal(e.activeSubagents('s'), 1);
+  e.push({ sessionId: 's', event: 'Stop', at: 3, raw: {} });
+  assert.equal(e.activeSubagents('s'), 1);
+  e.push({ sessionId: 's', event: 'Stop', at: 4, raw: { background_tasks: [] } });
+  assert.equal(e.activeSubagents('s'), 0);
+});
+
+const burst = (e, cmd, from, n) => { for (let i = 0; i < n; i++) e.push(ev('Bash', { command: cmd }, from + i * 100)); };
+
+test('sticky: >1.5x lead for less than holdMs stays, then switches', () => {
+  const e = createClassEngine(); edits(e); burst(e, 'npm test', 61000, 20);
+  assert.equal(e.classOf('s', 65000), 'runesmith');
+  assert.equal(e.classOf('s', 73000), 'alchemist');
+});
+
+test('sticky: top above current but below 1.5x never switches', () => {
+  const e = createClassEngine(); edits(e); burst(e, 'npm test', 61000, 15);
+  assert.equal(e.classOf('s', 100000), 'runesmith');
+});
+
+test('sticky: hold resets when the top scorer changes', () => {
+  const e = createClassEngine(); edits(e); burst(e, 'npm test', 61000, 20); burst(e, 'psql -f m.sql', 63000, 25);
+  assert.equal(e.classOf('s', 73000), 'runesmith');
+  assert.equal(e.classOf('s', 76000), 'vaultkeeper');
+});
+
+test('sticky: old signals fall out of the window', () => {
+  const e = createClassEngine(); edits(e);
+  for (const t of [190000, 191000, 192000]) e.push(ev('Read', {}, t));
+  assert.equal(e.classOf('s', 192000), 'runesmith');
+  assert.equal(e.classOf('s', 201000), 'pathfinder');
+});

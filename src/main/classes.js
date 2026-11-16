@@ -22,10 +22,10 @@ function toolClass(name, input) {
   if (name === 'ExitPlanMode') return 'star-reader';
   if (typeof name === 'string' && name.startsWith('mcp__azure-devops__')) return 'herald';
   if (name === 'Bash') {
-    const c = String(input.command || '');
-    if (/\b(test|vitest|jest|pytest|build|lint|tsc)\b/.test(c)) return 'alchemist';
+    const c = String(input.command || '').replace(/"[^"]*"|'[^']*'/g, '');
     if (/\bgit (push|commit|merge|tag)\b|\bgh\b|\baz (repos|pipelines)\b/.test(c)) return 'herald';
     if (/\bpsql\b|\bmigrat/.test(c) || /\.sql\b/.test(c)) return 'vaultkeeper';
+    if (/\b(test|vitest|jest|pytest|build|lint|tsc)\b/.test(c)) return 'alchemist';
   }
   return null;
 }
@@ -68,9 +68,15 @@ export function createClassEngine({ windowMs = 120000, leadRatio = 1.5, holdMs =
   const count = (s) => s.ids.size + s.anon;
 
   return {
+    forget(sessionId) { sessions.delete(sessionId); },
     push(ev) {
+      if (ev.event === 'SessionEnd') { sessions.delete(ev.sessionId); return; }
       const s = get(ev.sessionId);
       const raw = ev.raw || {};
+      if (ev.event === 'Stop' && Array.isArray(raw.background_tasks)) {
+        s.ids = new Set(raw.background_tasks.filter((t) => t && t.type === 'subagent' && t.status === 'running' && t.id).map((t) => t.id));
+        s.anon = 0;
+      }
       if (ev.event === 'SubagentStart') {
         if (raw.agent_id) s.ids.add(raw.agent_id); else s.anon++;
       } else if (ev.event === 'SubagentStop') {
