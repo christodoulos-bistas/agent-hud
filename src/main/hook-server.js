@@ -8,8 +8,13 @@ const HOOK_PATH = '/agent-hud/hook';
 const MAX_BODY = 1024 * 1024;
 const HARD_CAP = 16 * 1024 * 1024;
 
-export function createHookServer({ port = 0, secret, queue, isInteractive, replyOptIn, onEvent, onError = (e) => console.error(e) } = {}) {
+// shouldHold(): false while nobody can answer (HUD hidden, renderer gone); blocking events then pass
+// straight through with an empty 200.
+export function createHookServer({ port = 0, secret, queue, isInteractive, replyOptIn, shouldHold = () => true, onEvent, onError = (e) => console.error(e) } = {}) {
   const safeError = (err) => { try { onError(err); } catch { /* never break a request */ } };
+  const canHold = () => {
+    try { return !!shouldHold(); } catch (err) { safeError(err); return false; }
+  };
 
   const sendEmpty = (res, status = 200) => {
     if (res.writableEnded || res.destroyed) return;
@@ -69,11 +74,12 @@ export function createHookServer({ port = 0, secret, queue, isInteractive, reply
     }
 
     let kind = null;
-    if (event === 'PermissionRequest' && isInteractive(sessionId)) kind = 'permission';
+    // AskUserQuestion's PermissionRequest is never held: its PreToolUse already is the choice card (I4).
+    if (event === 'PermissionRequest' && toolName !== 'AskUserQuestion' && isInteractive(sessionId)) kind = 'permission';
     else if (event === 'PreToolUse' && toolName === 'AskUserQuestion' && isInteractive(sessionId)) kind = 'choice';
     else if (event === 'Stop' && !bgRunning && isInteractive(sessionId) && replyOptIn(sessionId)) kind = 'reply';
 
-    if (!kind) return sendEmpty(res);
+    if (!kind || !canHold()) return sendEmpty(res);
     hold(res, { id: randomUUID(), sessionId, kind, payload: body });
   }
 

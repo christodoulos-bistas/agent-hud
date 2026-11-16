@@ -16,6 +16,7 @@ import { openCommandFor } from './focus.js';
 import { encodeAnswer, dockBounds, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const INDEX = path.join(SRC, 'renderer', 'index.html');
 const HOLD_MS = 60000;
 const REPLY_MS = 540000;
 const POLL_MS = 3000;
@@ -23,6 +24,7 @@ const PUSH_MS = 100;
 const WIDTH = 272;
 const COLLAPSED_WIDTH = 72;
 const QUIT_GRACE_MS = 3000;
+const RELOAD_MS = 1000;
 const SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions');
 // Dev override (R20): AGENT_HUD_SETTINGS_PATH points install/uninstall at a scratch file. A dev build
 // without it never touches the user's settings (I1): no first-run offer, install/remove refuse.
@@ -94,10 +96,22 @@ function showWindow() {
   win.showInactive();
   refreshMenu();
 }
+// A hidden HUD can't be answered: let every held question go back to its own window (a release, not a
+// hand-back), and hold nothing new until it is shown again (canHold).
+function hideWindow() {
+  if (!win || win.isDestroyed()) return;
+  win.hide();
+  queue.releaseAll();
+  refreshMenu();
+}
 function toggleWindow() {
   if (!win || win.isDestroyed()) return;
-  if (win.isVisible()) { win.hide(); refreshMenu(); } else showWindow();
+  if (win.isVisible()) hideWindow(); else showWindow();
 }
+
+// The hook server holds a question only while someone can answer it (I5).
+let rendererAlive = false;
+const canHold = () => !!win && !win.isDestroyed() && win.isVisible() && rendererAlive && !win.webContents.isCrashed();
 
 function setInteractive(on) {
   if (!win || win.isDestroyed()) return;
@@ -121,17 +135,26 @@ function createWindow() {
   const wc = win.webContents;
   wc.setWindowOpenHandler(() => ({ action: 'deny' }));
   wc.on('will-navigate', (e) => e.preventDefault());
-  wc.on('did-finish-load', pushNow);
+  wc.on('did-finish-load', () => { rendererAlive = true; pushNow(); });
   wc.on('console-message', (e, lvl, msg) => {
     const level = e?.level ?? lvl;
     const message = e?.message ?? msg;
     if (DEBUG || level === 'error' || level === 3) log('renderer:', level, message);
   });
-  wc.on('render-process-gone', (_e, details) => log('renderer gone', details?.reason));
+  wc.on('render-process-gone', (_e, details) => {
+    log('renderer gone', details?.reason);
+    rendererAlive = false;
+    queue.releaseAll(); // nothing can answer them now
+    if (quitting) return;
+    setTimeout(() => {
+      if (quitting || !win || win.isDestroyed()) return;
+      win.loadFile(INDEX).catch((err) => log('reload', err));
+    }, RELOAD_MS);
+  });
   win.once('ready-to-show', showWindow);
-  win.on('close', (e) => { if (!quitting) { e.preventDefault(); win.hide(); refreshMenu(); } });
+  win.on('close', (e) => { if (!quitting) { e.preventDefault(); hideWindow(); } });
   dock();
-  win.loadFile(path.join(SRC, 'renderer', 'index.html'));
+  win.loadFile(INDEX);
 }
 
 // ---------------------------------------------------------------- opening a session's window
@@ -282,7 +305,7 @@ function createTray() {
 
 async function startServer() {
   const srv = createHookServer({
-    port: cfg.port, secret: cfg.secret, queue, isInteractive,
+    port: cfg.port, secret: cfg.secret, queue, isInteractive, shouldHold: canHold,
     replyOptIn: (id) => !!store.snapshot().agents.find((a) => a.id === id)?.replyOptIn,
     onEvent: (ev) => { store.onEvent(ev); push(); },
     onError: (err) => log('hook server', err?.message ?? err),

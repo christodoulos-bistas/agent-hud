@@ -19,6 +19,7 @@ async function setup(opts = {}) {
     port: 0, secret: SECRET, queue,
     isInteractive: opts.isInteractive ?? (() => true),
     replyOptIn: opts.replyOptIn ?? (() => false),
+    shouldHold: opts.shouldHold,
     onEvent: opts.onEvent ?? ((e) => events.push(e)),
     onError: (e) => errors.push(e),
   });
@@ -26,7 +27,9 @@ async function setup(opts = {}) {
   const url = `http://127.0.0.1:${port}/agent-hud/hook`;
   const post = (body, { headers = { 'X-Agent-HUD': SECRET }, signal, raw } = {}) =>
     fetch(url, { method: 'POST', headers, body: raw ?? JSON.stringify(body), signal });
-  return { queue, events, errors, srv, port, url, post };
+  let maxHeld = 0; // the most items the queue ever held at once
+  queue.onChange(() => { maxHeld = Math.max(maxHeld, queue.list().length); });
+  return { queue, events, errors, srv, port, url, post, maxHeld: () => maxHeld };
 }
 const ev = (name, extra = {}) => ({ session_id: 's1', hook_event_name: name, cwd: 'C:/x', transcript_path: 't', prompt_id: 'p', ...extra });
 
@@ -99,6 +102,43 @@ test("AskUserQuestion PreToolUse is queued as kind 'choice'", async () => {
     assert.equal(h.queue.list()[0].kind, 'choice');
     h.queue.answer(h.queue.list()[0].id, RELEASE);
     assert.equal((await p).status, 200);
+  } finally { await h.srv.close(); }
+});
+
+test('I4: PermissionRequest for AskUserQuestion is answered at once and never queued (the PreToolUse is the choice card)', async () => {
+  const h = await setup();
+  try {
+    const r = await h.post(ev('PermissionRequest', { tool_name: 'AskUserQuestion', tool_input: { questions: [] } }));
+    assert.equal(r.status, 200); assert.equal(await r.text(), '');
+    assert.equal(h.maxHeld(), 0, 'never queued');
+    assert.equal(h.events.at(-1).event, 'PermissionRequest');
+  } finally { await h.srv.close(); }
+});
+
+test('I5: when shouldHold() is false every blocking event is answered at once with an empty 200', async () => {
+  let hold = false;
+  const h = await setup({ shouldHold: () => hold, replyOptIn: () => true });
+  try {
+    for (const body of [ev('PermissionRequest', { tool_name: 'Bash' }), ev('PreToolUse', { tool_name: 'AskUserQuestion', tool_input: { questions: [] } }), ev('Stop')]) {
+      const r = await h.post(body);
+      assert.equal(r.status, 200); assert.equal(await r.text(), '');
+    }
+    assert.equal(h.maxHeld(), 0, 'never queued');
+    assert.equal(h.events.length, 3, 'events still reach the store');
+    hold = true;
+    const p = h.post(ev('PermissionRequest', { tool_name: 'Bash' }));
+    await waitFor(() => h.queue.list().length === 1);
+    h.queue.releaseAll(); await p;
+  } finally { await h.srv.close(); }
+});
+
+test('I5: a throwing shouldHold() counts as false and is reported', async () => {
+  const h = await setup({ shouldHold: () => { throw new Error('window gone'); } });
+  try {
+    const r = await h.post(ev('PermissionRequest', { tool_name: 'Bash' }));
+    assert.equal(r.status, 200); assert.equal(await r.text(), '');
+    assert.equal(h.maxHeld(), 0, 'never queued');
+    assert.equal(h.errors.length, 1);
   } finally { await h.srv.close(); }
 });
 
