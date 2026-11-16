@@ -139,9 +139,14 @@ export function createHookServer({ port = 0, secret, queue, isInteractive, reply
     listen() {
       return new Promise((resolve, reject) => {
         server.once('error', reject);
-        server.listen(port, '127.0.0.1', () => { server.off('error', reject); resolve(server.address().port); });
+        server.listen(port, '127.0.0.1', () => {
+          server.off('error', reject);
+          server.on('error', safeError); // a later error must not become an uncaught exception
+          resolve(server.address().port);
+        });
       });
     },
+    get httpServer() { return server; },
     close() {
       return new Promise((resolve) => {
         if (!server.listening) return resolve();

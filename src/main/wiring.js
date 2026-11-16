@@ -47,14 +47,15 @@ export function dockBounds(workArea, width, height, { margin = 16, maxFrac = 0.6
 }
 
 // At most one call per `ms`; a call inside the window schedules one trailing call, so the last
-// change is always delivered.
-export function createThrottle(fn, ms, { now = Date.now, setTimer = setTimeout } = {}) {
+// change is always delivered. Monotonic clock by default; the wait is clamped to `ms` anyway, so a
+// clock that steps backwards can never freeze the trailing call.
+export function createThrottle(fn, ms, { now = () => performance.now(), setTimer = setTimeout } = {}) {
   let last = -Infinity;
   let pending = false;
   const run = () => { pending = false; last = now(); fn(); };
   return () => {
     if (pending) return;
-    const wait = last + ms - now();
+    const wait = Math.min(ms, last + ms - now());
     if (wait <= 0) return run();
     pending = true;
     setTimer(run, wait);

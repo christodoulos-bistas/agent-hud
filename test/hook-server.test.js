@@ -271,6 +271,17 @@ test('invalid JSON -> 200 empty, no crash; 2 MB body -> 413', async () => {
   } finally { await h.srv.close(); }
 });
 
+test('I9a: a server error emitted after listen() is reported, not thrown, and the server keeps serving', async () => {
+  const h = await setup();
+  try {
+    assert.doesNotThrow(() => h.srv.httpServer.emit('error', new Error('socket trouble')));
+    assert.equal(h.errors.length, 1);
+    assert.equal(h.errors[0].message, 'socket trouble');
+    const r = await h.post(ev('PreToolUse', { tool_name: 'Read' }));
+    assert.equal(r.status, 200);
+  } finally { await h.srv.close(); }
+});
+
 test('onEvent errors do not break the request', async () => {
   const h = await setup({ onEvent: () => { throw new Error('boom'); } });
   try {

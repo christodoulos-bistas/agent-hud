@@ -77,6 +77,23 @@ test('createThrottle: a call during the window is never lost', () => {
   push(); c.advance(99); push(); c.advance(1); assert.equal(n, 2);
 });
 
+test('I9b: createThrottle does not freeze when the clock steps backwards', () => {
+  let t = 1_000_000; const timers = [];
+  const clock = {
+    now: () => t,
+    setTimer: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
+  };
+  let n = 0;
+  const push = createThrottle(() => { n++; }, 100, clock);
+  push(); assert.equal(n, 1);
+  t = 1000; // the wall clock jumps back ~16 minutes
+  push(); assert.equal(n, 1);
+  assert.equal(timers.length, 1);
+  assert.ok(timers[0].ms <= 100, `trailing call waits at most one window, not ${timers[0].ms} ms`);
+  timers[0].fn(); assert.equal(n, 2);
+  t += 100; push(); assert.equal(n, 3, 'and runs normally afterwards');
+});
+
 test('isInteractive: known sessions decide from kind without re-reading', () => {
   let reads = 0;
   const check = createInteractiveCheck({
