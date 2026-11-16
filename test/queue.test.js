@@ -1,0 +1,102 @@
+import test from 'node:test'; import assert from 'node:assert/strict';
+import { createQueue } from '../src/main/queue.js';
+import { RELEASE } from '../src/main/answers.js';
+
+function fake() {
+  let t = 0, nextId = 1; const timers = new Map();
+  return {
+    now: () => t,
+    setTimer: (fn, ms) => { const id = nextId++; timers.set(id, { fn, at: t + ms }); return id; },
+    clearTimer: (id) => { timers.delete(id); },
+    pending: () => timers.size,
+    tick(ms) {
+      t += ms;
+      for (;;) {
+        const due = [...timers].filter(([, v]) => v.at <= t).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!due) break;
+        timers.delete(due[0]); due[1].fn();
+      }
+    },
+  };
+}
+const mk = () => { const f = fake(); return [f, createQueue({ now: f.now, setTimer: f.setTimer, clearTimer: f.clearTimer })]; };
+const it = (id, kind = 'permission', sessionId = 's1') => ({ id, sessionId, kind, payload: {} });
+const settled = (p) => { let v = 'pending'; p.then((x) => { v = x; }); return () => v; };
+
+test('order: reply added first, then permission -> active() is the permission', () => {
+  const [, q] = mk(); q.add(it('r', 'reply')); q.add(it('p', 'permission'));
+  assert.equal(q.active().id, 'p');
+  assert.deepEqual(q.list().map((i) => i.id), ['p', 'r']);
+});
+test('two permissions from the same session stay in arrival order', () => {
+  const [, q] = mk(); q.add(it('a')); q.add(it('b', 'choice')); q.add(it('c'));
+  assert.deepEqual(q.list().map((i) => i.id), ['a', 'b', 'c']);
+});
+test('answer resolves the promise with the given response and removes the item', async () => {
+  const [, q] = mk(); const p = q.add(it('a')); const r = { ok: 1 };
+  q.answer('a', r);
+  assert.equal(await p, r); assert.equal(q.active(), null); assert.deepEqual(q.handedBack(), []);
+});
+test('permission not answered in 60 000 ms resolves RELEASE and appears in handedBack()', async () => {
+  const [f, q] = mk(); const p = q.add(it('a'));
+  f.tick(59999); assert.equal(q.list().length, 1);
+  f.tick(1);
+  assert.equal(await p, RELEASE); assert.equal(q.list().length, 0);
+  assert.deepEqual(q.handedBack(), [{ sessionId: 's1', at: 60000 }]);
+});
+test('reply not answered in 540 000 ms resolves RELEASE; at 539 999 ms still pending', async () => {
+  const [f, q] = mk(); const p = q.add(it('a', 'reply')); const s = settled(p);
+  f.tick(539999); await Promise.resolve(); assert.equal(s(), 'pending');
+  f.tick(1); assert.equal(await p, RELEASE);
+});
+test('clock starts at arrival: item queued behind another for 50 s still releases at 60 s', async () => {
+  const [f, q] = mk(); q.add(it('a')); f.tick(50000);
+  const p = q.add(it('b')); const s = settled(p);
+  f.tick(10000); // a expires (t=60s); b has waited 10s
+  await Promise.resolve(); assert.equal(s(), 'pending');
+  f.tick(50000); assert.equal(await p, RELEASE);
+  // and one added at t=0 behind nothing releases at its own 60s: covered by a
+});
+test('drop removes without resolving; releaseAll resolves every pending item with RELEASE', async () => {
+  const [f, q] = mk(); const a = q.add(it('a')); const sa = settled(a);
+  const b = q.add(it('b')); const c = q.add(it('c', 'reply'));
+  q.drop('a'); await Promise.resolve(); assert.equal(sa(), 'pending');
+  assert.deepEqual(q.list().map((i) => i.id), ['b', 'c']);
+  q.releaseAll();
+  assert.equal(await b, RELEASE); assert.equal(await c, RELEASE);
+  assert.equal(q.list().length, 0); assert.equal(f.pending(), 0);
+});
+test("releaseSession(s, ['reply']) releases only that session's reply", async () => {
+  const [, q] = mk();
+  q.add(it('p1', 'permission', 's1')); const r1 = q.add(it('r1', 'reply', 's1'));
+  q.add(it('r2', 'reply', 's2'));
+  q.releaseSession('s1', ['reply']);
+  assert.equal(await r1, RELEASE);
+  assert.deepEqual(q.list().map((i) => i.id), ['p1', 'r2']);
+  assert.deepEqual(q.handedBack(), []);
+});
+test('releaseSession without kinds releases every kind for the session', async () => {
+  const [, q] = mk(); const a = q.add(it('a')); const b = q.add(it('b', 'reply')); q.add(it('c', 'permission', 's2'));
+  q.releaseSession('s1');
+  assert.equal(await a, RELEASE); assert.equal(await b, RELEASE);
+  assert.deepEqual(q.list().map((i) => i.id), ['c']);
+});
+test('answer(id, RELEASE) resolves RELEASE, removes the item, and is not handed back', async () => {
+  const [, q] = mk(); const p = q.add(it('a'));
+  q.answer('a', RELEASE);
+  assert.equal(await p, RELEASE); assert.equal(q.list().length, 0); assert.deepEqual(q.handedBack(), []);
+});
+test('answer/drop on unknown or resolved ids are no-ops; resolved timer never fires', async () => {
+  const [f, q] = mk(); const p = q.add(it('a')); q.answer('a', { x: 1 });
+  assert.equal(f.pending(), 0);
+  assert.doesNotThrow(() => { q.answer('a', { y: 2 }); q.answer('zzz', {}); q.drop('a'); q.drop('zzz'); });
+  f.tick(600000); assert.deepEqual(await p, { x: 1 }); assert.deepEqual(q.handedBack(), []);
+});
+test('clearHandedBack removes that session entries; onChange fires on changes and unsubscribes', () => {
+  const [f, q] = mk(); let n = 0; const off = q.onChange(() => { n++; });
+  q.add(it('a')); q.add(it('b', 'permission', 's2')); assert.equal(n, 2);
+  f.tick(60000); assert.equal(q.handedBack().length, 2);
+  const before = n; q.clearHandedBack('s1');
+  assert.equal(n, before + 1); assert.deepEqual(q.handedBack().map((h) => h.sessionId), ['s2']);
+  off(); q.add(it('c')); assert.equal(n, before + 1);
+});
