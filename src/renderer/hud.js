@@ -116,7 +116,8 @@ function permissionCard(card) {
   const input = p.tool_input && typeof p.tool_input === 'object' ? p.tool_input : {};
   const wants = Object.hasOwn(WANTS, tool) ? WANTS[tool] : `wants to use ${tool || 'a tool'}`;
   const via = p.agent_type ? ` · via ${esc(p.agent_type)} helper` : '';
-  const canAlways = Array.isArray(p.permission_suggestions) && p.permission_suggestions.length > 0;
+  // Only addRules suggestions are forwarded (wiring.js encodeAnswer), so only they earn the box.
+  const canAlways = Array.isArray(p.permission_suggestions) && p.permission_suggestions.some((s) => s?.type === 'addRules');
   const always = canAlways
     ? `<label class="chk"><input type="checkbox" data-always><i></i>${tool === 'Bash' ? 'Always allow this exact command here' : 'Always allow this here'}</label>`
     : '';

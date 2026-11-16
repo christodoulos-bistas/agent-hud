@@ -12,8 +12,18 @@ const reply = { id: 'r', sessionId: 's1', kind: 'reply', payload: {} };
 test('encodeAnswer: allow without always -> plain allow', () => {
   assert.deepEqual(encodeAnswer(perm, { kind: 'allow', always: false }), permissionAllow());
 });
-test('encodeAnswer: allow with always forwards permission_suggestions unchanged (R20)', () => {
+test('encodeAnswer: allow with always forwards the addRules suggestions (R22)', () => {
   assert.deepEqual(encodeAnswer(perm, { kind: 'allow', always: true }), permissionAllow(SUGG));
+});
+test('I6: allow with always forwards only addRules suggestions; none -> plain allow (spec 6.2, R22)', () => {
+  const MODE = { type: 'setMode', mode: 'acceptEdits', destination: 'session' };
+  const DIRS = { type: 'addDirectories', directories: ['C:/x'], destination: 'session' };
+  const mixed = { ...perm, payload: { ...perm.payload, permission_suggestions: [MODE, ...SUGG, DIRS] } };
+  assert.deepEqual(encodeAnswer(mixed, { kind: 'allow', always: true }), permissionAllow(SUGG));
+  const none = { ...perm, payload: { ...perm.payload, permission_suggestions: [MODE, DIRS] } };
+  assert.deepEqual(encodeAnswer(none, { kind: 'allow', always: true }), permissionAllow());
+  const missing = { ...perm, payload: { tool_name: 'Bash' } };
+  assert.deepEqual(encodeAnswer(missing, { kind: 'allow', always: true }), permissionAllow());
 });
 test('encodeAnswer: deny, choice and reply map to their encoders', () => {
   assert.deepEqual(encodeAnswer(perm, { kind: 'deny' }), permissionDeny());

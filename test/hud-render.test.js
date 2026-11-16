@@ -66,6 +66,13 @@ test('permission card from a sub-agent names its helper; no suggestions means no
   assert.ok(renderCard(permission({ agent_type: XSS })).includes('via &lt;img'));
 });
 
+test('I6: the always box shows only when at least one addRules suggestion exists', () => {
+  const MODE = { type: 'setMode', mode: 'acceptEdits', destination: 'session' };
+  assert.ok(!renderCard(permission({ permission_suggestions: [MODE] })).includes('data-always'));
+  assert.ok(!renderCard(permission({ permission_suggestions: [null, 'x'] })).includes('data-always'));
+  assert.ok(renderCard(permission({ permission_suggestions: [MODE, ...permission().payload.permission_suggestions] })).includes('data-always'));
+});
+
 test("renderCard choice renders one option per tool_input option plus a 'Something else…' input", () => {
   const html = renderCard(choice());
   assert.equal(html.match(/class="opt( multi)?"/g).length, 5);

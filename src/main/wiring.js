@@ -7,13 +7,19 @@ import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from './answ
 
 export const DEFAULT_PORT = 47821;
 
+// "Always allow" forwards only the addRules entries of permission_suggestions (spec 6.2, R22).
+const addRulesOf = (suggestions) => (Array.isArray(suggestions) ? suggestions.filter((s) => s?.type === 'addRules') : []);
+
 // Renderer answer object -> hook response for that queue item, or null when it doesn't fit.
 export function encodeAnswer(item, response) {
   if (!item || !response || typeof response !== 'object') return null;
   const p = item.payload || {};
   switch (item.kind) {
     case 'permission':
-      if (response.kind === 'allow') return response.always ? permissionAllow(p.permission_suggestions) : permissionAllow();
+      if (response.kind === 'allow') {
+        const rules = response.always ? addRulesOf(p.permission_suggestions) : [];
+        return rules.length ? permissionAllow(rules) : permissionAllow();
+      }
       if (response.kind === 'deny') return permissionDeny();
       return null;
     case 'choice': {
