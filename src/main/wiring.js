@@ -94,6 +94,34 @@ export function placeBounds(workArea, width, height, anchor, { margin = 16, maxF
 }
 export { isAnchor };
 
+// The detail panel beside the HUD: on its left, or on its right when the HUD's centre is in the left
+// half of the work area; the other side if that one doesn't fit; if neither fits, the side with more
+// room, clamped inside the work area (overlapping the HUD only then). Height capped at `maxFrac` of
+// the work area. Vertically the clicked row (`rowY`, px from the HUD's top) sits 40 px down the panel
+// where it can, and `arrowY` (px from the panel's top, 16 px clear of each end) points at it.
+export function panelBounds(hud, workArea, { width = 340, height, rowY, gap = 8, maxFrac = 0.6 } = {}) {
+  const wa = workArea;
+  const cap = Math.floor(wa.height * maxFrac);
+  const h = Math.max(1, Math.min(cap, Math.ceil(Number(height) || 0)));
+  const room = { left: hud.x - wa.x, right: wa.x + wa.width - (hud.x + hud.width) };
+  const fits = (s) => room[s] >= width + gap;
+  const preferred = hud.x + hud.width / 2 < wa.x + wa.width / 2 ? 'right' : 'left';
+  const other = preferred === 'left' ? 'right' : 'left';
+  const side = fits(preferred) ? preferred : fits(other) ? other : room.left >= room.right ? 'left' : 'right';
+  const x = clamp(side === 'left' ? hud.x - gap - width : hud.x + hud.width + gap, wa.x, wa.x + wa.width - width);
+  const row = hud.y + (Number.isFinite(Number(rowY)) ? Number(rowY) : 40); // no row yet: level with the HUD's top
+  const y = Math.round(clamp(row - 40, wa.y, wa.y + wa.height - h));
+  return { x: Math.round(x), y, width, height: h, side, arrowY: Math.round(clamp(row - y, 16, h - 16)) };
+}
+
+// Which agent the panel shows: the selected one, only while the HUD is visible and expanded and the
+// agent is still in the snapshot; otherwise none (the panel closes).
+export function panelTarget(selectedId, snapshot, { collapsed, visible } = {}) {
+  if (selectedId == null || collapsed || !visible) return null;
+  const agents = Array.isArray(snapshot?.agents) ? snapshot.agents : [];
+  return agents.some((a) => a && String(a.id) === String(selectedId)) ? selectedId : null;
+}
+
 // At most one call per `ms`; a call inside the window schedules one trailing call, so the last
 // change is always delivered. Monotonic clock by default; the wait is clamped to `ms` anyway, so a
 // clock that steps backwards can never freeze the trailing call.

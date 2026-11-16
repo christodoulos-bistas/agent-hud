@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
 
@@ -49,6 +49,55 @@ test('dockBounds: height capped at 60% of the work-area height; offset work area
   assert.deepEqual(dockBounds(wa, 72, 5000), { x: 100 + 1000 - 72 - 16, y: 50 + 1000 - 600 - 16, width: 72, height: 600 });
   assert.equal(dockBounds(wa, 272, 0).height, 1);
   assert.equal(dockBounds(wa, 272, 120.4).height, 121);
+});
+
+test('panelBounds: HUD in the right half → panel on the left, 8 px gap, arrow at the row', () => {
+  const wa = { x: 0, y: 0, width: 1920, height: 1040 };
+  const hud = { x: 1632, y: 600, width: 272, height: 400 };
+  assert.deepEqual(panelBounds(hud, wa, { height: 300, rowY: 100 }),
+    { x: 1632 - 8 - 340, y: 660, width: 340, height: 300, side: 'left', arrowY: 40 });
+});
+test('panelBounds: HUD in the left half → panel on the right', () => {
+  const wa = { x: 0, y: 0, width: 1920, height: 1040 };
+  const hud = { x: 16, y: 100, width: 272, height: 400 };
+  assert.deepEqual(panelBounds(hud, wa, { height: 200, rowY: 60 }),
+    { x: 16 + 272 + 8, y: 120, width: 340, height: 200, side: 'right', arrowY: 40 });
+});
+test("panelBounds: preferred side doesn't fit → other side; neither fits → side with more room, clamped inside the work area", () => {
+  // The preferred side always has at least as much room as the other (room left − room right is twice
+  // the HUD centre's offset from the work area's middle), so when it doesn't fit, the other doesn't
+  // either and the "more room" rule decides: the panel may then overlap the HUD, clamped inside.
+  const wa = { x: 0, y: 0, width: 800, height: 1000 };
+  assert.deepEqual(panelBounds({ x: 400, y: 300, width: 272, height: 300 }, wa, { height: 200, rowY: 40 }),
+    { x: 52, y: 300, width: 340, height: 200, side: 'left', arrowY: 40 }, 'fits on the preferred side');
+  const left = panelBounds({ x: 300, y: 300, width: 272, height: 300 }, wa, { height: 200, rowY: 40 });
+  assert.equal(left.side, 'left'); assert.equal(left.x, 0, '300 px of room on the left, 228 on the right');
+  const right = panelBounds({ x: 220, y: 300, width: 272, height: 300 }, wa, { height: 200, rowY: 40 });
+  assert.equal(right.side, 'right'); assert.equal(right.x, 800 - 340, '308 px of room on the right, 220 on the left');
+  const second = panelBounds({ x: 2150, y: 300, width: 272, height: 300 }, { x: 1920, y: 0, width: 700, height: 1000 }, { height: 200, rowY: 40 });
+  assert.equal(second.side, 'left'); assert.equal(second.x, 1920, 'an offset work area clamps to its own left edge');
+});
+test('panelBounds: height capped at 60% of the work area; y clamped inside it; arrowY between 16 and height-16', () => {
+  const wa = { x: 0, y: 40, width: 1920, height: 1000 };
+  const low = panelBounds({ x: 1632, y: 640, width: 272, height: 384 }, wa, { height: 5000, rowY: 350 });
+  assert.equal(low.height, 600);
+  assert.equal(low.y, 40 + 1000 - 600, 'pushed up so the bottom stays inside');
+  assert.equal(low.arrowY, 640 + 350 - low.y);
+  const top = panelBounds({ x: 1632, y: 40, width: 272, height: 384 }, wa, { height: 300, rowY: 10 });
+  assert.equal(top.y, 40, 'never above the work area');
+  assert.equal(top.arrowY, 16, 'row above the panel top: arrow pinned 16 px down');
+  const bottom = panelBounds({ x: 1632, y: 640, width: 272, height: 384 }, wa, { height: 200, rowY: 390 });
+  assert.equal(bottom.y, 40 + 1000 - 200);
+  assert.equal(bottom.arrowY, 200 - 16, 'row below the panel bottom: arrow pinned 16 px up');
+});
+test('panelTarget: null when collapsed, hidden, or the agent is not in the snapshot (Review Focus 4); the id otherwise', () => {
+  const snap = { agents: [{ id: 's1' }, { id: 's2' }] };
+  assert.equal(panelTarget('s1', snap, { collapsed: false, visible: true }), 's1');
+  assert.equal(panelTarget('s1', snap, { collapsed: true, visible: true }), null);
+  assert.equal(panelTarget('s1', snap, { collapsed: false, visible: false }), null);
+  assert.equal(panelTarget('gone', snap, { collapsed: false, visible: true }), null);
+  assert.equal(panelTarget(null, snap, { collapsed: false, visible: true }), null);
+  assert.equal(panelTarget('s1', null, { collapsed: false, visible: true }), null);
 });
 
 function fakeClock() {

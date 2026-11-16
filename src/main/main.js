@@ -13,10 +13,13 @@ import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor } from './focus.js';
-import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli } from './wiring.js';
+import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
+const PANEL = path.join(SRC, 'renderer', 'panel.html');
+const PANEL_WIDTH = 340;
+const STAGE_TICK_MS = 1000;
 const HOLD_MS = 60000;
 const REPLY_MS = 540000;
 const POLL_MS = 3000;
@@ -45,6 +48,12 @@ let sessions = [];
 let collapsed = false;
 let contentHeight = 120;
 let quitting = null;
+// The detail panel: main owns which agent is selected ({ id, rowY }: rowY is the row's centre in px
+// from the HUD's top), and creates the panel window the first time one is.
+let selected = null;
+let panelWin = null;
+let panelHeight = 200; // until the panel reports its content height
+let sentDetail; // JSON of the last detail sent, so an unchanged one doesn't re-render the panel
 
 const queue = createQueue({ holdMs: HOLD_MS, replyMs: REPLY_MS, onError: log });
 const engine = createClassEngine();
@@ -52,12 +61,40 @@ const store = createStore({ engine, queue, holdMs: HOLD_MS, replyMs: REPLY_MS })
 
 // ---------------------------------------------------------------- snapshot
 
+const hudState = () => ({ collapsed, visible: !!win && !win.isDestroyed() && win.isVisible() });
+
+// Every snapshot push also re-places the panel and refreshes its detail (spec 6.3: the same throttle).
 function pushNow() {
   if (!win || win.isDestroyed()) return;
-  try { win.webContents.send('snapshot', { ...store.snapshot(), collapsed }); } catch (err) { log('push', err); }
+  const snap = store.snapshot();
+  // Its agent left the list, or the HUD was hidden or collapsed: the panel closes.
+  if (selected && !panelTarget(selected.id, snap, hudState())) selected = null;
+  try { win.webContents.send('snapshot', { ...snap, collapsed, selected: selected?.id ?? null }); } catch (err) { log('push', err); }
+  placePanel(snap);
+  pushDetail();
 }
 const push = createThrottle(pushNow, PUSH_MS);
 queue.onChange(push);
+
+function pushDetailNow() {
+  if (!panelWin || panelWin.isDestroyed()) return;
+  const d = selected ? store.detail(selected.id) : null; // null empties a hidden panel
+  const json = JSON.stringify(d);
+  if (json === sentDetail) return;
+  try { panelWin.webContents.send('detail', d); sentDetail = json; } catch (err) { log('detail', err); }
+}
+const pushDetail = createThrottle(pushDetailNow, PUSH_MS);
+
+// The 1 s stage tick: stages and stuck hints move on with the clock alone (thinking -> silent, a long
+// step), so push when any agent's stage or stuck flag changed. The renderers tick their own clocks.
+let lastStageKey = null;
+function stageTick() {
+  const k = store.stageKey();
+  if (k === lastStageKey) return;
+  lastStageKey = k;
+  push();
+  pushDetail();
+}
 
 // ---------------------------------------------------------------- sessions
 
@@ -97,6 +134,7 @@ function dock() {
   docking = true;
   try { win.setBounds(b); } finally { docking = false; }
   debug('dock', JSON.stringify(b));
+  placePanel();
 }
 
 // 'moved' fires once when the user lets go of a drag (by the header bar, -webkit-app-region: drag).
@@ -121,14 +159,17 @@ function showWindow() {
   if (!win || win.isDestroyed()) return;
   dock();
   win.showInactive();
+  placePanel();
   refreshMenu();
 }
 // A hidden HUD can't be answered: let every held question go back to its own window (a release, not a
-// hand-back), and hold nothing new until it is shown again (canHold).
+// hand-back), and hold nothing new until it is shown again (canHold). Its panel closes with it.
 function hideWindow() {
   if (!win || win.isDestroyed()) return;
   win.hide();
   queue.releaseAll();
+  placePanel();
+  push();
   refreshMenu();
 }
 function toggleWindow() {
@@ -172,11 +213,7 @@ function createWindow() {
   wc.setWindowOpenHandler(() => ({ action: 'deny' }));
   wc.on('will-navigate', (e) => e.preventDefault());
   wc.on('did-finish-load', () => { rendererAlive = true; pushNow(); });
-  wc.on('console-message', (e, lvl, msg) => {
-    const level = e?.level ?? lvl;
-    const message = e?.message ?? msg;
-    if (DEBUG || level === 'error' || level === 3) log('renderer:', level, message);
-  });
+  wc.on('console-message', consoleLog('renderer:'));
   wc.on('render-process-gone', (_e, details) => {
     log('renderer gone', details?.reason);
     rendererAlive = false;
@@ -192,6 +229,68 @@ function createWindow() {
   win.on('close', (e) => { if (!quitting) { e.preventDefault(); hideWindow(); } });
   dock();
   win.loadFile(INDEX);
+}
+
+function consoleLog(tag) {
+  return (e, lvl, msg) => {
+    const level = e?.level ?? lvl;
+    const message = e?.message ?? msg;
+    if (DEBUG || level === 'error' || level === 3) log(tag, level, message);
+  };
+}
+
+// ---------------------------------------------------------------- detail panel
+
+// The panel: the HUD's window options (frameless, transparent, always on top, no taskbar button,
+// never focusable: SPIKES.md spike 6, PANEL_CLICK_MODE = plain), and not movable, since it follows
+// the HUD. Created the first time an agent is selected, then shown and hidden.
+function panelWindow() {
+  if (panelWin && !panelWin.isDestroyed()) return panelWin;
+  sentDetail = undefined;
+  panelWin = new BrowserWindow({
+    width: PANEL_WIDTH, height: panelHeight, frame: false, transparent: true, alwaysOnTop: true, skipTaskbar: true,
+    focusable: false, resizable: false, movable: false, show: false,
+    webPreferences: { preload: path.join(SRC, 'preload-panel.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  const pw = panelWin;
+  const wc = pw.webContents;
+  wc.setWindowOpenHandler(() => ({ action: 'deny' }));
+  wc.on('will-navigate', (e) => e.preventDefault());
+  wc.on('did-finish-load', () => { sentDetail = undefined; pushDetailNow(); }); // anything sent while loading was lost
+  wc.on('console-message', consoleLog('panel:'));
+  wc.on('render-process-gone', (_e, details) => {
+    log('panel renderer gone', details?.reason);
+    if (quitting) return;
+    setTimeout(() => {
+      if (quitting || pw.isDestroyed()) return;
+      pw.loadFile(PANEL).catch((err) => log('panel reload', err));
+    }, RELOAD_MS);
+  });
+  pw.on('close', (e) => { if (!quitting) { e.preventDefault(); select(null); } });
+  pw.on('closed', () => { if (panelWin === pw) panelWin = null; });
+  pw.loadFile(PANEL).catch((err) => log('panel load', err));
+  return pw;
+}
+
+// Beside the HUD at the selected row while there is something to show (panelTarget), hidden otherwise.
+function placePanel(snap) {
+  const id = selected && !quitting ? panelTarget(selected.id, snap ?? store.snapshot(), hudState()) : null;
+  if (!id) {
+    if (panelWin && !panelWin.isDestroyed() && panelWin.isVisible()) panelWin.hide();
+    return;
+  }
+  const pw = panelWindow();
+  const b = panelBounds(win.getBounds(), workArea(), { width: PANEL_WIDTH, height: panelHeight, rowY: selected.rowY });
+  pw.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
+  if (!pw.isVisible()) pw.showInactive();
+}
+
+// A new selection (or none): the HUD highlights the row, the panel moves and gets the agent's detail.
+function select(next) {
+  selected = next;
+  placePanel();
+  pushNow();
+  pushDetail();
 }
 
 // ---------------------------------------------------------------- opening a session's window
@@ -250,6 +349,36 @@ fromHud('hud:reportHeight', (px) => {
   if (!Number.isFinite(h) || h === contentHeight) return;
   contentHeight = h;
   dock();
+});
+// A click on a sprite or name toggles: the selected agent again closes the panel, another switches it.
+fromHud('hud:selectAgent', (id, rowY) => {
+  const sid = String(id);
+  select(selected?.id === sid ? null : { id: sid, rowY: Number(rowY) });
+});
+// The selected row moved inside the HUD (rows above it came or went): the panel's arrow follows it.
+fromHud('hud:rowOffset', (id, rowY) => {
+  const y = Number(rowY);
+  if (!selected || selected.id !== String(id) || !Number.isFinite(y)) return;
+  selected.rowY = y;
+  placePanel();
+});
+
+function fromPanel(channel, handler) {
+  ipcMain.on(channel, (e, ...args) => {
+    if (!panelWin || panelWin.isDestroyed() || e.sender !== panelWin.webContents) return;
+    if (channel !== 'panel:reportHeight') debug('ipc', channel, JSON.stringify(args).slice(0, 200));
+    try { handler(...args); } catch (err) { log('ipc', err); }
+  });
+}
+
+fromPanel('panel:close', () => select(null));
+fromPanel('panel:openWindow', () => { if (selected) openWindow(selected.id); });
+fromPanel('panel:reportHeight', (px) => {
+  const h = Number(px);
+  // An emptied panel (no detail) reports 0: keep the last height for the next one.
+  if (!Number.isFinite(h) || h <= 0 || h === panelHeight) return;
+  panelHeight = h;
+  placePanel();
 });
 
 // ---------------------------------------------------------------- tray
@@ -373,6 +502,9 @@ async function firstRun() {
 
 function quit() {
   if (!quitting) {
+    selected = null;
+    try { if (panelWin && !panelWin.isDestroyed()) panelWin.destroy(); } catch (err) { log('panel', err); }
+    panelWin = null;
     // close() releases every held question, so each waiting agent carries on in its own window.
     const closing = server ? server.close() : Promise.resolve();
     server = null;
@@ -396,6 +528,7 @@ async function start() {
   for (const ev of ['display-metrics-changed', 'display-added', 'display-removed']) screen.on(ev, dock);
   await poll();
   setInterval(poll, POLL_MS);
+  setInterval(stageTick, STAGE_TICK_MS);
   await startServer();
   await firstRun();
 }
