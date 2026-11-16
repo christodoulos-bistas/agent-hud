@@ -1,0 +1,73 @@
+/* Answer cards: shared by the HUD and the detail panel (cards.js). Uses the page's colour variables. */
+/* ---------- answer cards ---------- */
+.ans { background: rgba(24, 34, 31, .98); border: 1px solid rgba(224, 180, 92, .4); border-radius: 10px; padding: 10px 12px 11px; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
+.ans.parch { background: #efe6d3; color: #2a211a; border-color: #c9a86a; }
+.ans.parch .ans-q, .ans.parch .who-n { color: #2a211a; }
+.ans.parch .ans-sub { color: #6b5b47; }
+.ans-top { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; min-width: 0; }
+.ans-top .who-n { font-size: .92rem; }
+.open { font-size: .72rem; color: var(--sage); background: none; border: 0; border-bottom: 1px dotted rgba(169, 179, 166, .5); padding: 0; white-space: nowrap; cursor: pointer; }
+.open:hover { color: var(--parch); }
+.ans-top .open { margin-left: auto; }
+.ans.parch .open { color: #6b5b47; border-bottom-color: rgba(107, 91, 71, .5); }
+.ans.parch .open:hover { color: #2a211a; }
+.ans-seal {
+  width: 18px; height: 18px; flex: none; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #f6dc9a, var(--gold) 55%, #a77a35);
+  color: #1b120e; font-weight: 700; font-size: .72rem; display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 2px rgba(224, 180, 92, .25), 0 0 12px rgba(224, 180, 92, .55);
+}
+.ans-seal.q { font-family: 'IM Fell English', Georgia, serif; font-size: .78rem; }
+.ans-sub { font-size: .74rem; color: var(--sage); margin: 0 0 6px; }
+.ans-q { font-size: .9rem; color: var(--parch); margin: 0 0 8px; line-height: 1.3; }
+/* the full command stays visible (wraps, then scrolls) so nothing is allowed unseen */
+.cmd {
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: .78rem; background: #0f1513; color: #e9dfc8;
+  border: 1px solid rgba(240, 233, 218, .08); border-radius: 6px; padding: 6px 8px; margin: 0 0 9px;
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 7.2em; overflow-y: auto; user-select: text;
+}
+.btns { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.btn { font: 600 .8rem 'Alegreya Sans', system-ui, sans-serif; border-radius: 7px; padding: 5px 12px; border: 1px solid transparent; cursor: pointer; }
+.btn.gold { background: var(--gold); color: #1b120e; border-color: var(--gold-d); }
+.btn.gold:hover:not(:disabled) { background: var(--gold-l); }
+.btn.ghost { background: transparent; color: var(--parch); border-color: rgba(240, 233, 218, .28); }
+.btn.ghost:hover:not(:disabled) { border-color: rgba(240, 233, 218, .55); }
+.ans.parch .btn.ghost { color: #2a211a; border-color: rgba(42, 33, 26, .3); }
+.btn:disabled { opacity: .45; cursor: default; }
+/* For 500 ms after a card appears its answer buttons are inert (hud.js ARM_MS), so a click meant for
+   the card it replaced can't land on it. */
+.ans.arming :is([data-act="allow"], [data-act="deny"], [data-act="answer"], [data-act="send"], [data-act="noreply"]) { opacity: .45; cursor: default; pointer-events: none; }
+.chk { position: relative; font-size: .72rem; color: var(--sage); display: flex; align-items: center; gap: 5px; margin-top: 7px; cursor: pointer; }
+.chk input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.chk i { position: relative; width: 11px; height: 11px; flex: none; border: 1px solid rgba(169, 179, 166, .6); border-radius: 3px; display: inline-block; }
+.chk input:checked + i { background: var(--gold); border-color: var(--gold-d); }
+.chk input:focus-visible + i { outline: 2px solid var(--gold-l); outline-offset: 2px; }
+.chip { display: inline-block; font-size: .62rem; letter-spacing: .12em; text-transform: uppercase; color: var(--night); background: var(--gold-l); border-radius: 4px; padding: 1px 6px; margin-bottom: 5px; font-weight: 700; }
+.qn + .qn { margin-top: 4px; padding-top: 9px; border-top: 1px solid rgba(240, 233, 218, .08); }
+.opt {
+  display: flex; gap: 8px; align-items: flex-start; width: 100%; padding: 6px 8px; margin: 0 0 5px; text-align: left;
+  background: transparent; border: 1px solid rgba(240, 233, 218, .12); border-radius: 7px; cursor: pointer;
+}
+.opt:hover { border-color: rgba(224, 180, 92, .45); }
+.opt .dot { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--sage); margin-top: 3px; flex: none; }
+.opt.multi .dot { border-radius: 3px; }
+.opt[aria-checked="true"] { border-color: var(--gold); background: rgba(224, 180, 92, .08); }
+.opt[aria-checked="true"] .dot { border-color: var(--gold); background: radial-gradient(circle, var(--gold) 45%, transparent 50%); }
+.opt.multi[aria-checked="true"] .dot { background: var(--gold); box-shadow: inset 0 0 0 2px #18221f; }
+.opt .opt-t { min-width: 0; }
+.opt b { font-weight: 600; font-size: .82rem; display: block; color: var(--parch); }
+.opt .opt-d { display: block; font-size: .72rem; color: var(--sage); }
+.other {
+  width: 100%; font: .8rem 'Alegreya Sans', system-ui, sans-serif; background: #0f1513; border: 1px dashed rgba(240, 233, 218, .2);
+  color: var(--parch); border-radius: 7px; padding: 6px 8px; margin: 0 0 8px; user-select: text;
+}
+.other::placeholder { color: var(--sage); }
+.other:focus { outline: none; border-color: var(--gold); border-style: solid; }
+.said { font-family: 'IM Fell English', Georgia, serif; font-style: italic; font-size: .88rem; color: #3c3026; margin: 0 0 8px; line-height: 1.3; user-select: text; overflow-wrap: anywhere; }
+.reply { display: flex; gap: 6px; }
+.reply input { flex: 1; min-width: 0; font: .82rem 'Alegreya Sans', system-ui, sans-serif; background: #fbf5e6; border: 1px solid #c9a86a; border-radius: 7px; padding: 6px 8px; color: #2a211a; user-select: text; }
+.reply input:focus { outline: none; border-color: #8a6a32; }
+.timer { font-size: .7rem; color: #6b5b47; margin-top: 6px; display: flex; gap: 6px; align-items: center; }
+.timer .bar { flex: 1; height: 3px; background: rgba(107, 91, 71, .2); border-radius: 3px; overflow: hidden; }
+.timer .bar i { display: block; height: 100%; background: #b5442f; }
+.tick { color: #b9d98a; font-size: .9rem; }
+.ans.parch .tick { color: #5e7d45; }
