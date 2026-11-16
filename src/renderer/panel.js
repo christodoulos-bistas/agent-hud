@@ -148,6 +148,16 @@ export function arrowOf(place) {
   return { edge: side === 'left' ? 'right' : 'left', top: Math.max(0, Math.round(Number(y)) - 8) };
 }
 
+// The header's ✕ and the footer's "open window ↗" act on the agent on show (the detail rendered), never
+// on whatever main has selected by the time the click lands: a question can switch the panel while the
+// pointer is down (M1, M2). The card's own buttons are cards.js's.
+export function panelAction(act, detail) {
+  const id = detail?.id != null ? String(detail.id) : null;
+  if (act === 'close') return { call: 'close', id };
+  if (act === 'open') return { call: 'openWindow', id };
+  return null;
+}
+
 export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   const root = doc.getElementById('panel-root');
   const call = (name, ...args) => (typeof api?.[name] === 'function' ? api[name](...args) : undefined);
@@ -221,8 +231,8 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   root.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');
     if (!el || !root.contains(el)) return;
-    if (el.dataset.act === 'close') api.close?.();
-    else if (el.dataset.act === 'open') api.openWindow?.();
+    const a = panelAction(el.dataset.act, detail);
+    if (a) call(a.call, a.id);
   });
 
   let lastHeight = -1;

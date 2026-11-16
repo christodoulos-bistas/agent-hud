@@ -150,6 +150,13 @@ export function userSelect(state, sel) {
   return { selected: sel ?? null, auto: false, before: null, cardId: state?.cardId ?? null };
 }
 
+// The panel's ✕ names the agent it was showing; it closes the panel only if that agent is still the
+// selected one. A question can switch the panel to its own agent while the pointer is down on ✕, and
+// that close must not dismiss the new question (M2).
+export function closeApplies(id, selectedId) {
+  return id != null && selectedId != null && String(id) === String(selectedId);
+}
+
 // At most one call per `ms`; a call inside the window schedules one trailing call, so the last
 // change is always delivered. Monotonic clock by default; the wait is clamped to `ms` anyway, so a
 // clock that steps backwards can never freeze the trailing call.

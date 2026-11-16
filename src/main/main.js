@@ -14,7 +14,7 @@ import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor, resolveCodeCmd, canOpen } from './focus.js';
-import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli, guarded, releaseFocusOf } from './wiring.js';
+import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli, guarded, releaseFocusOf, closeApplies } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
@@ -417,9 +417,11 @@ function fromPanel(channel, handler) {
   });
 }
 
-fromPanel('panel:close', () => select(null));
-// No id: the selected agent (the footer). The card's "open window ↗" names its own session: it is
-// sent right after the card's release, which can already have put the previous selection back.
+// ✕ names the agent it was showing: a question that switched the panel mid-click is not closed (M2).
+fromPanel('panel:close', (id) => { if (closeApplies(id, pick.selected?.id)) select(null); });
+// The id given wins: the footer's is the agent on show (M1), and the card's "open window ↗" names its
+// own session, sent right after the card's release, which can already have put the previous selection
+// back. No id: the selected agent.
 fromPanel('panel:openWindow', (sessionId) => {
   const id = typeof sessionId === 'string' && sessionId ? sessionId : pick.selected?.id;
   if (id) openWindow(id);

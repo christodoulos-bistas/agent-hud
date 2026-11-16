@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { renderPanel, timeText, arrowOf, shouldScrollTop } from '../src/renderer/panel.js';
+import { renderPanel, timeText, arrowOf, shouldScrollTop, panelAction } from '../src/renderer/panel.js';
 import { ARM_MS } from '../src/renderer/cards.js';
 
 const NOW = 1_000_000_000;
@@ -194,4 +194,12 @@ test('R5: a fresh card id scrolls the panel to the top, the same card does not',
   assert.equal(shouldScrollTop('c1', { id: 'c2' }), true);
   assert.equal(shouldScrollTop('c1', { id: 'c1' }), false);
   assert.equal(shouldScrollTop('c1', null), false);
+});
+
+test('v1.2 M1/M2: the header ✕ and the footer "open window ↗" name the agent on show, not whatever main has selected by then', () => {
+  const d = detail({ id: 's7' });
+  assert.deepEqual(panelAction('close', d), { call: 'close', id: 's7' });
+  assert.deepEqual(panelAction('open', d), { call: 'openWindow', id: 's7' });
+  assert.deepEqual(panelAction('open', null), { call: 'openWindow', id: null });
+  assert.equal(panelAction('allow', d), null, "the card's own buttons are handled by cards.js");
 });

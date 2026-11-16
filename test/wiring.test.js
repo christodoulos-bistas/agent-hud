@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli, guarded, releaseFocusOf } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli, guarded, releaseFocusOf, closeApplies } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
 
@@ -398,4 +398,13 @@ test('v1.2 I1: releaseFocusOf leaves a window that never became focusable alone 
   releaseFocusOf(gone);
   assert.deepEqual(gone.calls, []);
   assert.doesNotThrow(() => releaseFocusOf(null));
+});
+
+test('v1.2 M2: a ✕ closes the panel only when it names the agent still selected (an auto-switch can land mid-click)', () => {
+  assert.equal(closeApplies('s1', 's1'), true);
+  assert.equal(closeApplies('s1', 's2'), false, 'a question switched the panel to s2: the ✕ meant for s1 does not close it');
+  assert.equal(closeApplies(null, 's2'), false);
+  assert.equal(closeApplies(undefined, 's2'), false);
+  assert.equal(closeApplies('s1', null), false, 'nothing selected: nothing to close');
+  assert.equal(closeApplies(7, '7'), true);
 });

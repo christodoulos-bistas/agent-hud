@@ -14,9 +14,10 @@ contextBridge.exposeInMainWorld('panel', {
     ipcRenderer.on('place', listener);
     return () => ipcRenderer.removeListener('place', listener);
   },
-  close: () => ipcRenderer.send('panel:close'),
-  // No id: the selected agent's window. The answer card passes its own session (the release that goes
-  // with it may already have moved the selection back).
+  // ✕ and "open window ↗" name the agent on show (the footer) or the card's own session (the card: the
+  // release that goes with it may already have moved the selection back). No id: the selected agent's
+  // window; a close without one is ignored.
+  close: (id) => ipcRenderer.send('panel:close', id == null ? null : String(id)),
   openWindow: (sessionId) => ipcRenderer.send('panel:openWindow', sessionId == null ? null : String(sessionId)),
   reportHeight: (px) => ipcRenderer.send('panel:reportHeight', Number(px)),
   // The answer card (cards.js): the same answers and releases as the HUD's v1 card.
