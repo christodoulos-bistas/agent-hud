@@ -253,7 +253,8 @@ async function confirmInstall({ firstRun }) {
     title: 'Agent HUD',
     message: 'Connect Agent HUD to Claude Code?',
     detail: `Agent HUD will add its hooks to this file:\n\n${SETTINGS_PATH}\n\n` +
-      `The file is backed up first (to ${path.resolve(SETTINGS_PATH)}.agent-hud.bak). Your other settings and hooks are left as they are. ` +
+      `The file is backed up first (to ${path.resolve(SETTINGS_PATH)}.agent-hud.bak; the very first original is also kept, once, as ` +
+      `${path.resolve(SETTINGS_PATH)}.agent-hud.orig). Your other settings and hooks are left as they are. ` +
       'You can remove the hooks at any time from the tray menu.',
   });
   return response === 0;
@@ -262,8 +263,9 @@ async function confirmInstall({ firstRun }) {
 function doInstall() {
   if (devBlocked()) return;
   const r = installHooks(SETTINGS_PATH, { port: cfg.port, secret: cfg.secret });
-  if (r.ok) notify('Agent HUD hooks installed', `Added to ${SETTINGS_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}`);
-  else notify('Could not install the hooks', `${SETTINGS_PATH}: ${r.error}`, true);
+  if (!r.ok) notify('Could not install the hooks', `${SETTINGS_PATH}: ${r.error}`, true);
+  else if (!r.changed) notify('Agent HUD hooks already installed', `${SETTINGS_PATH} was left as it is.`);
+  else notify('Agent HUD hooks installed', `Added to ${SETTINGS_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}`);
 }
 async function installFromTray() {
   if (devBlocked()) return;
@@ -272,8 +274,9 @@ async function installFromTray() {
 function doUninstall() {
   if (devBlocked()) return;
   const r = uninstallHooks(SETTINGS_PATH);
-  if (r.ok) notify('Agent HUD hooks removed', `Removed from ${SETTINGS_PATH}`);
-  else notify('Could not remove the hooks', `${SETTINGS_PATH}: ${r.error}`, true);
+  if (!r.ok) notify('Could not remove the hooks', `${SETTINGS_PATH}: ${r.error}`, true);
+  else if (!r.changed) notify('No Agent HUD hooks to remove', `${SETTINGS_PATH} was left as it is.`);
+  else notify('Agent HUD hooks removed', `Removed from ${SETTINGS_PATH}`);
 }
 
 function refreshMenu() {

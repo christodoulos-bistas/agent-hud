@@ -73,6 +73,7 @@ test('installHooks on unparseable file returns ok:false and leaves the file byte
     assert.equal(typeof r.error, 'string');
     assert.ok(fs.readFileSync(t.file).equals(bytes));
     assert.ok(!fs.existsSync(t.file + '.agent-hud.bak'));
+    assert.ok(!fs.existsSync(t.file + '.agent-hud.orig'));
     assert.equal(uninstallHooks(t.file).ok, false);
     assert.ok(fs.readFileSync(t.file).equals(bytes));
   } finally { t.done(); }
@@ -89,7 +90,53 @@ test('installHooks writes a .agent-hud.bak identical to the original', () => {
     assert.ok(fs.readFileSync(r.backup).equals(orig));
     const after = JSON.parse(fs.readFileSync(t.file, 'utf8'));
     assert.deepEqual(after, mergeHooks(load(), entries(4321, 'k')));
-    assert.deepEqual(fs.readdirSync(t.dir).sort(), ['settings.json', 'settings.json.agent-hud.bak']);
+    assert.deepEqual(fs.readdirSync(t.dir).sort(), ['settings.json', 'settings.json.agent-hud.bak', 'settings.json.agent-hud.orig']);
+    assert.ok(fs.readFileSync(t.file + '.agent-hud.orig').equals(orig));
+  } finally { t.done(); }
+});
+
+test('T5: installing again over identical hooks skips the backup and the write', () => {
+  const t = tmp();
+  try {
+    fs.copyFileSync(FIXTURE, t.file);
+    const orig = fs.readFileSync(t.file);
+    assert.equal(installHooks(t.file, { port: 4321, secret: 'k' }).changed, true);
+    const installed = fs.readFileSync(t.file);
+    const old = new Date(Date.now() - 60000);
+    fs.utimesSync(t.file, old, old);
+    const mtime = fs.statSync(t.file).mtimeMs;
+    const r = installHooks(t.file, { port: 4321, secret: 'k' });
+    assert.deepEqual(r, { ok: true, backup: null, changed: false });
+    assert.ok(fs.readFileSync(t.file).equals(installed));
+    assert.equal(fs.statSync(t.file).mtimeMs, mtime, 'file not rewritten');
+    assert.ok(fs.readFileSync(t.file + '.agent-hud.bak').equals(orig), 'backup did not roll over');
+  } finally { t.done(); }
+});
+
+test('T5: uninstall on a file without HUD hooks changes nothing and creates no backup', () => {
+  const t = tmp();
+  try {
+    fs.copyFileSync(FIXTURE, t.file);
+    const bytes = fs.readFileSync(t.file);
+    assert.deepEqual(uninstallHooks(t.file), { ok: true, backup: null, changed: false });
+    assert.ok(fs.readFileSync(t.file).equals(bytes));
+    assert.deepEqual(fs.readdirSync(t.dir), ['settings.json']);
+  } finally { t.done(); }
+});
+
+test('T5: the .agent-hud.orig copy is written on the first write and never overwritten', () => {
+  const t = tmp();
+  try {
+    fs.copyFileSync(FIXTURE, t.file);
+    const orig = fs.readFileSync(t.file);
+    const origFile = t.file + '.agent-hud.orig';
+    installHooks(t.file, { port: 1, secret: 'a' });
+    assert.ok(fs.readFileSync(origFile).equals(orig));
+    uninstallHooks(t.file);
+    installHooks(t.file, { port: 2, secret: 'b' });
+    fs.writeFileSync(t.file, JSON.stringify({ model: 'changed by the user' }, null, 2));
+    installHooks(t.file, { port: 3, secret: 'c' });
+    assert.ok(fs.readFileSync(origFile).equals(orig), 'still the very first original');
   } finally { t.done(); }
 });
 
@@ -126,7 +173,7 @@ test('missing file: install creates only hooks, backup null; uninstall then remo
   const t = tmp();
   try {
     const r = installHooks(t.file, { port: 9, secret: 's' });
-    assert.deepEqual(r, { ok: true, backup: null });
+    assert.deepEqual(r, { ok: true, backup: null, changed: true });
     assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(t.file, 'utf8'))), ['hooks']);
     assert.equal(uninstallHooks(t.file).ok, true);
     assert.deepEqual(JSON.parse(fs.readFileSync(t.file, 'utf8')), {});
@@ -149,7 +196,7 @@ test('uninstallHooks backs up and restores the original content', () => {
 test('uninstall on missing file is ok with no backup and creates nothing', () => {
   const t = tmp();
   try {
-    assert.deepEqual(uninstallHooks(t.file), { ok: true, backup: null });
+    assert.deepEqual(uninstallHooks(t.file), { ok: true, backup: null, changed: false });
     assert.ok(!fs.existsSync(t.file));
   } finally { t.done(); }
 });

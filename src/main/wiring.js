@@ -89,9 +89,8 @@ export function removeHooksCli({ target, uninstall }) {
   if (!target || target.blocked || !target.path) return { ok: false, message: 'dev build without AGENT_HUD_SETTINGS_PATH: hooks not changed' };
   let r;
   try { r = uninstall(target.path); } catch (err) { r = { ok: false, error: err?.message ?? String(err) }; }
-  return r?.ok
-    ? { ok: true, message: `hooks removed from ${target.path}` }
-    : { ok: false, message: `could not remove hooks from ${target.path}: ${r?.error}` };
+  if (!r?.ok) return { ok: false, message: `could not remove hooks from ${target.path}: ${r?.error}` };
+  return { ok: true, message: r.changed === false ? `no hooks to remove in ${target.path}` : `hooks removed from ${target.path}` };
 }
 
 // config.json: { port, secret, ...flags }. Missing or broken values are repaired and written back.

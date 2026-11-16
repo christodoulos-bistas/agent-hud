@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 
 export const HUD_EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest', 'Notification', 'Stop', 'SubagentStart', 'SubagentStop'];
 
@@ -78,21 +79,32 @@ function writeAtomic(file, content) {
   }
 }
 
+// The file as it was before Agent HUD ever wrote it: copied once, never overwritten.
+function keepOriginal(target) {
+  try { fs.copyFileSync(target, target + '.agent-hud.orig', fs.constants.COPYFILE_EXCL); } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
+  }
+}
+
+// Unchanged settings are neither backed up nor rewritten, so the .bak keeps the last real change.
 function rewrite(file, transform) {
   try {
     const target = path.resolve(file);
     const { exists, settings, eol, trailing } = readSettings(target);
-    if (!exists && transform.skipIfMissing) return { ok: true, backup: null };
+    if (!exists && transform.skipIfMissing) return { ok: true, backup: null, changed: false };
+    const next = transform(settings);
+    if (exists && isDeepStrictEqual(next, settings)) return { ok: true, backup: null, changed: false };
     let backup = null;
     if (exists) {
+      keepOriginal(target);
       backup = target + '.agent-hud.bak';
       fs.copyFileSync(target, backup);
     }
-    let text = JSON.stringify(transform(settings), null, 2);
+    let text = JSON.stringify(next, null, 2);
     if (eol === '\r\n') text = text.replace(/\n/g, '\r\n');
     if (trailing) text += eol;
     writeAtomic(target, text);
-    return { ok: true, backup };
+    return { ok: true, backup, changed: true };
   } catch (err) {
     return { ok: false, error: err.message };
   }

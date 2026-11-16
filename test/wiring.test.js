@@ -89,6 +89,7 @@ test('I10: removeHooksCli removes the HUD hooks from the target file and never t
     assert.equal(r.ok, true);
     assert.match(r.message, /removed/);
     assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), user);
+    assert.match(removeHooksCli({ target: { path: file, blocked: false }, uninstall: uninstallHooks }).message, /no hooks to remove/);
     const bad = removeHooksCli({ target: { path: file, blocked: false }, uninstall: () => { throw new Error('locked'); } });
     assert.equal(bad.ok, false); assert.match(bad.message, /locked/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
