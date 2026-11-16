@@ -156,3 +156,49 @@ test('stepLabel for each tool', () => {
   assert.equal(stepLabel('Task', { subagent_type: 'Plan' }), 'Sent a Plan helper');
   assert.equal(stepLabel('Mcp__x', {}), 'Mcp__x');
 });
+
+test('I3a: closeDenied closes the oldest open main-thread step of that tool as failed "Denied"; its late Post closes nothing else', () => {
+  const l = createStepLog();
+  l.push(ev('PreToolUse', 1, { tool: 'Bash', input: { command: 'rm -rf build' }, raw: { tool_use_id: 'b1' } }));
+  l.push(ev('PreToolUse', 2, { tool: 'Read', input: { file_path: 'a.js' }, raw: { tool_use_id: 'r1' } }));
+  l.push(ev('PreToolUse', 3, { tool: 'Bash', input: { command: 'ls' }, raw: { tool_use_id: 'b2' } }));
+  assert.equal(l.closeDenied('s1', 'Bash', 9), true);
+  let v = l.view('s1');
+  assert.deepEqual(v.open.map((s) => s.id), ['r1', 'b2']);
+  assert.equal(v.steps[0].id, 'b1');
+  assert.equal(v.steps[0].ok, false);
+  assert.equal(v.steps[0].error, 'Denied');
+  assert.equal(v.steps[0].endedAt, 9);
+  assert.equal(v.steps[0].interrupted, false);
+  // If Claude Code does send a Post for the denied call, it must not close b2 by the tool fallback.
+  l.push(ev('PostToolUseFailure', 10, { tool: 'Bash', raw: { tool_use_id: 'b1', error: 'denied' } }));
+  v = l.view('s1');
+  assert.deepEqual(v.open.map((s) => s.id), ['r1', 'b2']);
+  assert.equal(v.steps.length, 1);
+  assert.equal(l.closeDenied('s1', 'Write', 11), false, 'no open step of that tool: nothing changes');
+  assert.equal(l.closeDenied('nobody', 'Bash', 11), false);
+  assert.equal(l.view('s1').open.length, 2);
+});
+
+test('I3b: a new main-thread PreToolUse supersedes open non-Agent steps started over 10 s earlier (interrupted, not failed)', () => {
+  const l = createStepLog();
+  l.push(ev('PreToolUse', 0, { tool: 'Bash', input: { command: 'npm test' }, raw: { tool_use_id: 'b1' } }));
+  l.push(ev('PreToolUse', 1, { tool: 'Agent', input: { subagent_type: 'Explore' }, raw: { tool_use_id: 'a1' } }));
+  l.push(ev('PreToolUse', 5, { tool: 'Read', input: { file_path: 'x.js' }, raw: { tool_use_id: 'r1' } }));
+  assert.equal(l.view('s1').open.length, 3, 'parallel calls start within ms of each other: all stay open');
+  l.push(ev('PreToolUse', 10005, { tool: 'Grep', input: { pattern: 'q' }, raw: { tool_use_id: 'g1' } }));
+  let v = l.view('s1');
+  assert.deepEqual(v.open.map((s) => s.id), ['a1', 'r1', 'g1'], 'exactly 10 000 ms earlier is not "more than"');
+  assert.deepEqual(v.steps.map((s) => s.id), ['b1']);
+  assert.equal(v.steps[0].interrupted, true);
+  assert.equal(v.steps[0].ok, null);
+  assert.equal(v.steps[0].endedAt, 10005);
+  // A helper's PreToolUse supersedes nothing on the main thread.
+  l.push(ev('PreToolUse', 30000, { tool: 'Read', input: { file_path: 'y.js' }, raw: { agent_id: 'h1', tool_use_id: 'hr' } }));
+  assert.equal(l.view('s1').open.length, 3);
+  l.push(ev('PreToolUse', 30001, { tool: 'Bash', input: { command: 'ls' }, raw: { tool_use_id: 'b2' } }));
+  v = l.view('s1');
+  assert.deepEqual(v.open.map((s) => s.id), ['a1', 'b2'], 'the Agent step is never superseded');
+  assert.deepEqual(v.steps.map((s) => s.id), ['g1', 'r1', 'b1']);
+  assert.ok(v.steps.slice(0, 2).every((s) => s.interrupted && s.ok === null));
+});

@@ -362,3 +362,19 @@ test('I2: a stale open step on an idle session is not current: detail.current an
   assert.equal(store.detail('s1').current.label, 'npm test', 'busy again: the open step is current');
   assert.equal(store.snapshot().agents[0].currentStepStartedAt, 1000);
 });
+
+test('I3a: permissionDenied closes the denied main-thread step; a helper\'s denied permission leaves main-thread steps open', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1', { status: 'busy' })]);
+  store.onEvent(ev('s1', 'PreToolUse', 1000, { toolName: 'Bash', toolInput: { command: 'rm x' }, raw: { tool_use_id: 't1' } }));
+  set(2000);
+  store.permissionDenied({ id: 'p', sessionId: 's1', kind: 'permission', payload: { tool_name: 'Bash', agent_id: 'h1' } });
+  assert.equal(store.detail('s1').current.label, 'rm x');
+  store.permissionDenied({ id: 'p', sessionId: 's1', kind: 'permission', payload: { tool_name: 'Bash' } });
+  const d = store.detail('s1');
+  assert.equal(d.current, null);
+  assert.equal(d.steps[0].error, 'Denied');
+  assert.equal(d.steps[0].endedAt, 2000);
+  set(1000 + 400000);
+  assert.notEqual(store.snapshot().agents[0].stuck?.reason, 'long', 'no false "Stuck? long" on a denied call');
+});

@@ -355,6 +355,7 @@ fromHud('hud:answer', (id, response) => {
   // An answer that doesn't fit its card is handed back to the session's own window.
   const encoded = encodeAnswer(item, response);
   if (encoded && item.kind === 'reply') store.replySent(item.sessionId); // Claude carries on: not "finished"
+  if (encoded && item.kind === 'permission' && response.kind === 'deny') store.permissionDenied(item); // R8a
   queue.answer(id, encoded ?? RELEASE);
 });
 fromHud('hud:release', (id) => queue.answer(id, RELEASE));

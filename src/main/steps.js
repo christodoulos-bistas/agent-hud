@@ -49,7 +49,9 @@ function errorText(raw) {
   return null;
 }
 
-export function createStepLog({ cap = 20 } = {}) {
+const DELEGATES = new Set(['Agent', 'Task']);
+
+export function createStepLog({ cap = 20, supersedeMs = 10000 } = {}) {
   const sessions = new Map();
   const get = (id) => {
     let s = sessions.get(id);
@@ -57,10 +59,29 @@ export function createStepLog({ cap = 20 } = {}) {
     return s;
   };
 
-  function closeInterrupted(s, at) {
-    for (const st of s.open) { st.endedAt = at; st.ok = null; st.interrupted = true; s.closed.push(st); }
-    s.open = [];
+  const keep = (s, st) => {
+    s.closed.push(st);
     if (s.closed.length > cap) s.closed = s.closed.slice(-cap);
+  };
+
+  // Closes the given open steps as interrupted (– in the panel; never a failure for "repeating").
+  function interrupt(s, steps, at) {
+    if (!steps.length) return;
+    s.open = s.open.filter((x) => !steps.includes(x));
+    for (const st of steps) { st.endedAt = at; st.ok = null; st.interrupted = true; keep(s, st); }
+  }
+  const closeInterrupted = (s, at) => interrupt(s, s.open.slice(), at);
+
+  // A permission denied in the HUD may get no Post event (R8a): close the oldest open main-thread step
+  // of that tool as failed. True when a step was closed.
+  function closeDenied(sessionId, toolName, at) {
+    const s = sessions.get(sessionId);
+    const idx = s ? s.open.findIndex((x) => x.tool === toolName) : -1;
+    if (idx < 0) return false;
+    const [st] = s.open.splice(idx, 1);
+    st.endedAt = at; st.ok = false; st.error = 'Denied';
+    keep(s, st);
+    return true;
   }
 
   function push(ev) {
@@ -96,6 +117,9 @@ export function createStepLog({ cap = 20 } = {}) {
     } else if (e === 'PreToolUse') {
       const input = ev.toolInput || raw.tool_input || {};
       const tool = ev.toolName ?? raw.tool_name ?? null;
+      // Superseded (R8b): Claude runs main-thread tools one after another (parallel calls start within
+      // ms of each other), so a step still open >10 s before a new one will get no Post (denied, say).
+      interrupt(s, s.open.filter((x) => !DELEGATES.has(x.tool) && ev.at - x.startedAt > supersedeMs), ev.at);
       s.stepCount += 1;
       s.open.push({
         id: raw.tool_use_id ?? null, tool, label: stepLabel(tool, input), doing: activityLine(ev),
@@ -105,15 +129,17 @@ export function createStepLog({ cap = 20 } = {}) {
       });
     } else if (e === 'PostToolUse' || e === 'PostToolUseFailure') {
       const tool = ev.toolName ?? raw.tool_name ?? null;
-      let idx = raw.tool_use_id != null ? s.open.findIndex((x) => x.id === raw.tool_use_id) : -1;
+      const useId = raw.tool_use_id ?? null;
+      let idx = useId != null ? s.open.findIndex((x) => x.id === useId) : -1;
+      // The Post of a step already closed (denied in the HUD, superseded) must not close another one.
+      if (idx < 0 && useId != null && s.closed.some((x) => x.id === useId)) return;
       if (idx < 0) idx = s.open.findIndex((x) => x.tool === tool);
       if (idx < 0) return;
       const [st] = s.open.splice(idx, 1);
       st.endedAt = ev.at;
       if (e === 'PostToolUse') st.ok = true;
       else { st.ok = false; st.error = errorText(raw); }
-      s.closed.push(st);
-      if (s.closed.length > cap) s.closed = s.closed.slice(-cap);
+      keep(s, st);
     }
   }
 
@@ -131,5 +157,5 @@ export function createStepLog({ cap = 20 } = {}) {
     };
   }
 
-  return { push, forget: (id) => { sessions.delete(id); }, view };
+  return { push, closeDenied, forget: (id) => { sessions.delete(id); }, view };
 }

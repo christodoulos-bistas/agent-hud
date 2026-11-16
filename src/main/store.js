@@ -84,6 +84,14 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     s.activity = 'thinking';
   }
 
+  // A permission denied from the HUD may get no Post event (R8a): its step closes as "Denied" now, so
+  // it doesn't stay open all turn and trip "Stuck? long". A helper's tool has no main-thread step.
+  function permissionDenied(item) {
+    const p = item?.payload || {};
+    if ((p.agent_id ?? null) !== null) return;
+    steps.closeDenied(item.sessionId, p.tool_name ?? null, now());
+  }
+
   const displayOf = (id) => {
     const sess = sessions.find((x) => x.sessionId === id);
     if (sess) return displayName(sess);
@@ -151,5 +159,5 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     return computeAgents(now()).map((a) => `${a.id}:${a.stage}:${a.stuck ? a.stuck.reason : ''}`).join('|');
   }
 
-  return { onEvent, setSessions, setReplyOptIn, replySent, snapshot, detail, stageKey };
+  return { onEvent, setSessions, setReplyOptIn, replySent, permissionDenied, snapshot, detail, stageKey };
 }
