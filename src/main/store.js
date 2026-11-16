@@ -65,12 +65,22 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     if (e !== 'Notification') queue.clearHandedBack(ev.sessionId, agentId);
   }
 
+  // A session file can be caught half-written, so a session is forgotten only after it is missing from
+  // two polls in a row; while missing once it stays listed with its last known data (I8).
+  const missed = new Map();
   function setSessions(list) {
-    const keep = new Set(list.map((x) => x.sessionId));
+    const fresh = list.map((x) => ({ ...x }));
+    const keep = new Set(fresh.map((x) => x.sessionId));
+    const held = [];
     for (const old of sessions) {
-      if (!keep.has(old.sessionId)) { engine.forget(old.sessionId); state.delete(old.sessionId); optIn.delete(old.sessionId); }
+      if (keep.has(old.sessionId)) continue;
+      const n = (missed.get(old.sessionId) ?? 0) + 1;
+      if (n < 2) { missed.set(old.sessionId, n); held.push(old); continue; }
+      missed.delete(old.sessionId);
+      engine.forget(old.sessionId); state.delete(old.sessionId); optIn.delete(old.sessionId);
     }
-    sessions = list.map((x) => ({ ...x }));
+    for (const id of keep) missed.delete(id);
+    sessions = [...fresh, ...held];
   }
 
   function setReplyOptIn(id, on) { optIn.set(id, !!on); }

@@ -120,11 +120,13 @@ test('R10: synthetic task-notification prompt resumes work and keeps the previou
   assert.equal(store.snapshot().agents[0].activity, 'thinking');
 });
 
-test('R3: setSessions forgets sessions that disappeared and drops their state', () => {
+test('R3/I8: setSessions forgets a session missing from two polls in a row and drops its state', () => {
   const { store, engine } = setup();
   const forgot = []; const orig = engine.forget; engine.forget = (id) => { forgot.push(id); orig(id); };
   store.setSessions([S('s1'), S('s2')]);
   store.onEvent(ev('s1', 'PreToolUse', 1000, { toolName: 'Grep' }));
+  store.setSessions([S('s2')]);
+  assert.deepEqual(forgot, []);
   store.setSessions([S('s2')]);
   assert.deepEqual(forgot, ['s1']);
   assert.deepEqual(store.snapshot().agents.map((a) => a.id), ['s2']);
@@ -207,6 +209,28 @@ test('I3: subagent activity does not make a needs Notification stale; main-threa
   assert.equal(store.snapshot().agents[0].mood, 'needs');
   store.onEvent(ev('s1', 'PostToolUse', 1003, { toolName: 'Bash' }));
   assert.notEqual(store.snapshot().agents[0].mood, 'needs');
+});
+
+test('I8: a session missing from one poll (half-written file) keeps its row, data, activity and reply toggle', () => {
+  const { store, engine } = setup();
+  const forgot = []; const orig = engine.forget; engine.forget = (id) => { forgot.push(id); orig(id); };
+  store.setSessions([S('s1', { startedAt: 5, name: 'mine' , nameSource: 'user' }), S('s2', { startedAt: 9 })]);
+  store.onEvent(ev('s1', 'PreToolUse', 1000, { toolName: 'Grep' }));
+  store.setReplyOptIn('s1', true);
+  store.setSessions([S('s2', { startedAt: 9 })]);
+  const a = store.snapshot().agents;
+  assert.deepEqual(a.map((x) => x.id), ['s1', 's2']);
+  assert.equal(a[0].display, 's1 · mine');
+  assert.equal(a[0].activity, 'searching code');
+  assert.equal(a[0].replyOptIn, true);
+  assert.deepEqual(forgot, []);
+  store.setSessions([S('s1', { startedAt: 5 }), S('s2', { startedAt: 9 })]); // back: the miss count resets
+  store.setSessions([S('s2', { startedAt: 9 })]);
+  assert.deepEqual(forgot, []);
+  assert.equal(store.snapshot().agents[0].replyOptIn, true);
+  store.setSessions([S('s2', { startedAt: 9 })]);
+  assert.deepEqual(forgot, ['s1']);
+  assert.deepEqual(store.snapshot().agents.map((x) => x.id), ['s2']);
 });
 
 test('I2b: a needs-type Notification is cleared by Stop', () => {
