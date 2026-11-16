@@ -278,3 +278,70 @@ test('I2b: a needs-type Notification is cleared by SessionEnd', () => {
   store.onEvent(ev('s1', 'SessionEnd', 1000, { raw: { reason: 'other' } }));
   assert.notEqual(store.snapshot().agents[0].mood, 'needs');
 });
+
+test('AgentView carries stage, stuck, stageSince, currentStepStartedAt, lastActivityAt', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1', { status: 'busy' })]);
+  store.onEvent(ev('s1', 'UserPromptSubmit', 1000, { raw: { prompt: 'do it' } }));
+  let a = store.snapshot().agents[0];
+  assert.equal(a.stage, 'thinking'); assert.equal(a.mood, 'working'); assert.equal(a.stuck, null);
+  assert.equal(a.stageSince, 1000); assert.equal(a.currentStepStartedAt, null); assert.equal(a.lastActivityAt, 1000);
+  set(2000);
+  store.onEvent(ev('s1', 'PreToolUse', 2000, { toolName: 'Read', toolInput: { file_path: 'a.js' }, raw: { tool_use_id: 't1' } }));
+  a = store.snapshot().agents[0];
+  assert.equal(a.stage, 'working'); assert.equal(a.currentStepStartedAt, 2000); assert.equal(a.lastActivityAt, 2000);
+});
+
+test('stageSince only changes when the stage changes', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1', { status: 'busy' })]);
+  store.onEvent(ev('s1', 'UserPromptSubmit', 1000, { raw: { prompt: 'x' } }));
+  assert.equal(store.snapshot().agents[0].stageSince, 1000);
+  set(5000);
+  assert.equal(store.snapshot().agents[0].stageSince, 1000);
+  store.onEvent(ev('s1', 'PreToolUse', 5000, { toolName: 'Read', toolInput: { file_path: 'a.js' }, raw: { tool_use_id: 't1' } }));
+  assert.equal(store.snapshot().agents[0].stageSince, 5000);
+  set(6000);
+  store.onEvent(ev('s1', 'PostToolUse', 6000, { toolName: 'Read', raw: { tool_use_id: 't1' } }));
+  assert.equal(store.snapshot().agents[0].stage, 'working');
+  assert.equal(store.snapshot().agents[0].stageSince, 5000);
+});
+
+test('detail(id): task/current/steps/helpers from the log; session started before the HUD -> task null, startedAt from the session file', () => {
+  const { store } = setup(1000);
+  store.setSessions([S('s1', { status: 'busy', startedAt: 77 }), S('s2', { startedAt: 88 })]);
+  assert.equal(store.detail('nope'), null);
+  const d0 = store.detail('s2');
+  assert.equal(d0.task, null); assert.equal(d0.startedAt, 88);
+  store.onEvent(ev('s1', 'UserPromptSubmit', 1000, { raw: { prompt: 'fix the bug' } }));
+  store.onEvent(ev('s1', 'PreToolUse', 1000, { toolName: 'Read', toolInput: { file_path: 'a.js' }, raw: { tool_use_id: 't1' } }));
+  store.onEvent(ev('s1', 'PostToolUse', 1000, { toolName: 'Read', raw: { tool_use_id: 't1' } }));
+  store.onEvent(ev('s1', 'PreToolUse', 1000, { toolName: 'Bash', toolInput: { command: 'ls' }, raw: { tool_use_id: 't2' } }));
+  store.onEvent(ev('s1', 'SubagentStart', 1000, { raw: { agent_id: 'h1', agent_type: 'Explore' } }));
+  const d = store.detail('s1');
+  assert.equal(d.id, 's1'); assert.equal(d.task, 'fix the bug'); assert.equal(d.startedAt, 1000);
+  assert.equal(d.stepCount, 2); assert.equal(d.current.label, 'ls'); assert.equal(d.steps.length, 1);
+  assert.equal(d.helpers.length, 1); assert.equal(d.stage, 'working');
+  assert.equal(d.currentStepStartedAt, 1000); assert.equal(d.lastActivityAt, 1000); assert.equal(d.stageSince, 1000);
+});
+
+test('stageKey changes when a long step crosses 5 min with no new event (fake clock)', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1', { status: 'busy' })]);
+  store.onEvent(ev('s1', 'PreToolUse', 1000, { toolName: 'Bash', toolInput: { command: 'sleep' }, raw: { tool_use_id: 't1' } }));
+  set(1000 + 299000);
+  const k1 = store.stageKey();
+  assert.equal(k1, 's1:working:');
+  set(1000 + 301000);
+  assert.notEqual(store.stageKey(), k1);
+  assert.equal(store.stageKey(), 's1:working:long');
+});
+
+test('forgetting a session drops its step log', () => {
+  const { store } = setup(1000);
+  store.setSessions([S('s1')]);
+  store.onEvent(ev('s1', 'UserPromptSubmit', 1000, { raw: { prompt: 'hello' } }));
+  store.setSessions([]); store.setSessions([]);
+  store.setSessions([S('s1')]);
+  assert.equal(store.detail('s1').task, null);
+});

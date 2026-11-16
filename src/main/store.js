@@ -1,6 +1,7 @@
 import { moodOf } from './classes.js';
 import { displayName, baseOf } from './sessions.js';
-import { activityLine } from './steps.js';
+import { activityLine, createStepLog } from './steps.js';
+import { stageOf, stuckOf } from './stages.js';
 
 const NEEDS_NOTIFS = new Set(['permission_prompt', 'elicitation_dialog', 'agent_needs_input']);
 const isSynthetic = (ev) => String((ev.raw || {}).prompt || '').trim().startsWith('<task-notification>');
@@ -13,6 +14,8 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
   let sessions = [];
   const state = new Map();
   const optIn = new Map();
+  const steps = createStepLog({});
+  const stages = new Map(); // id -> { stage, since }
   const st = (id) => {
     let s = state.get(id);
     if (!s) { s = { lastActivityAt: null, lastMainActivityAt: null, stoppedAt: null, notif: null, activity: '', cwd: null }; state.set(id, s); }
@@ -21,6 +24,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
 
   function onEvent(ev) {
     engine.push(ev);
+    steps.push(ev);
     const s = st(ev.sessionId);
     if (ev.cwd) s.cwd = ev.cwd;
     const e = ev.event;
@@ -62,7 +66,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
       const n = (missed.get(old.sessionId) ?? 0) + 1;
       if (n < 2) { missed.set(old.sessionId, n); held.push(old); continue; }
       missed.delete(old.sessionId);
-      engine.forget(old.sessionId); state.delete(old.sessionId); optIn.delete(old.sessionId);
+      engine.forget(old.sessionId); steps.forget(old.sessionId); stages.delete(old.sessionId); state.delete(old.sessionId); optIn.delete(old.sessionId);
     }
     for (const id of keep) missed.delete(id);
     sessions = [...fresh, ...held];
@@ -86,8 +90,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     return baseOf(state.get(id)?.cwd) || 'unknown';
   };
 
-  function snapshot() {
-    const t = now();
+  function computeAgents(t) {
     const items = queue.list();
     const handed = queue.handedBack();
     const ordered = sessions.map((x, i) => ({ x, i }))
@@ -98,13 +101,29 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
       const handedBack = handed.some((h) => h.sessionId === id);
       const notifPending = !!s.notif && NEEDS_NOTIFS.has(s.notif.type) && s.notif.at >= (s.lastMainActivityAt ?? -Infinity);
       const pending = items.some((it) => it.sessionId === id) || handedBack || notifPending;
+      const view = steps.view(id);
+      const baseMood = moodOf({ pending, stoppedAt: s.stoppedAt, lastActivityAt: s.lastActivityAt, status: sess.status }, t);
+      const stage = stageOf({ mood: baseMood, view, status: sess.status, now: t });
+      const stuck = stuckOf({ stage, view, status: sess.status, now: t });
+      let rec = stages.get(id);
+      if (!rec || rec.stage !== stage) { rec = { stage, since: t }; stages.set(id, rec); }
       return {
         id, display: displayName(sess), cls: engine.classOf(id, t),
-        mood: moodOf({ pending, stoppedAt: s.stoppedAt, lastActivityAt: s.lastActivityAt, status: sess.status }, t),
+        mood: stage === 'thinking' || stage === 'working' ? 'working' : baseMood,
         activity: s.activity, familiars: Math.min(engine.activeSubagents(id), 3),
         replyOptIn: !!optIn.get(id), entrypoint: sess.entrypoint, cwd: sess.cwd, handedBack,
+        stage, stuck, stageSince: rec.since,
+        currentStepStartedAt: view.current ? view.current.startedAt : null,
+        lastActivityAt: s.lastActivityAt,
       };
     });
+    return agents;
+  }
+
+  function snapshot() {
+    const t = now();
+    const items = queue.list();
+    const agents = computeAgents(t);
     const a = queue.active();
     const card = a ? {
       id: a.id, kind: a.kind, sessionId: a.sessionId, display: displayOf(a.sessionId), cls: engine.classOf(a.sessionId, t), payload: a.payload,
@@ -115,5 +134,22 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     return { agents, card, next, counts: { total: agents.length, needs: agents.filter((x) => x.mood === 'needs').length } };
   }
 
-  return { onEvent, setSessions, setReplyOptIn, replySent, snapshot };
+  function detail(id) {
+    const sess = sessions.find((x) => x.sessionId === id);
+    if (!sess) return null;
+    const a = computeAgents(now()).find((x) => x.id === id);
+    const view = steps.view(id);
+    return {
+      id, display: a.display, cls: a.cls, stage: a.stage, stuck: a.stuck,
+      stageSince: a.stageSince, currentStepStartedAt: a.currentStepStartedAt, lastActivityAt: a.lastActivityAt,
+      task: view.task ?? null, startedAt: view.taskAt ?? sess.startedAt ?? null,
+      stepCount: view.stepCount, current: view.current, steps: view.steps, helpers: view.helpers,
+    };
+  }
+
+  function stageKey() {
+    return computeAgents(now()).map((a) => `${a.id}:${a.stage}:${a.stuck ? a.stuck.reason : ''}`).join('|');
+  }
+
+  return { onEvent, setSessions, setReplyOptIn, replySent, snapshot, detail, stageKey };
 }
