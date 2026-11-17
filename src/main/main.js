@@ -46,7 +46,7 @@ const CODEX_PATH = CODEX.path;
 // Dev (only reachable with AGENT_HUD_CODEX_HOOKS_PATH set): node runs the repo's bridge directly; SRC is <repo>/src.
 const CODEX_COMMAND = app.isPackaged ? codexHookCommand(process.resourcesPath) : `node "${path.join(path.dirname(SRC), 'resources', 'codex-bridge.cjs')}"`;
 const CODEX_APPROVE_BALLOON = 'Codex: open Settings → Hooks and click Trust on the Agent HUD hooks (in the Codex terminal: /hooks).';
-const CODEX_TRUSTED_BODY = 'Start a new Codex chat to use them.'; // provisional until a live test
+const CODEX_TRUSTED_BODY = 'Start a new Codex chat to use them.'; // live check: the open Codex app runs newly trusted hooks in a new chat, no restart
 const SKIP_FIRST_RUN = process.argv.includes('--no-first-run') || process.env.AGENT_HUD_NO_FIRST_RUN === '1';
 const DEBUG = process.env.AGENT_HUD_DEBUG === '1';
 
