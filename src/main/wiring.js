@@ -246,6 +246,11 @@ export function codexOfferDue({ cfg, target, installed }) {
   return !cfg?.offeredCodexHooks && !target?.blocked && !installed;
 }
 
+// Codex auto-trust is due: the user consented (codexAutoTrust), a usable target, and hooks still unapproved.
+export function codexTrustDue({ cfg, target, missing }) {
+  return cfg?.codexAutoTrust === true && !target?.blocked && missing?.length > 0;
+}
+
 // One target of `--remove-hooks`. Never throws; a blocked target touches nothing.
 function removeOne({ target, uninstall, label, blockedMessage }) {
   if (!target || target.blocked || !target.path) return { ok: false, message: blockedMessage };
@@ -296,5 +301,5 @@ export function codexStatus({ positions, hooksPath, configText, configCode, memo
 
 export function codexStatusLabel(st) {
   if (!st.installed) return 'Codex hooks: not installed';
-  return st.missing.length ? 'Codex hooks: approve in /hooks' : 'Codex hooks: installed';
+  return st.missing.length ? 'Codex hooks: approve in Codex Settings → Hooks' : 'Codex hooks: installed';
 }

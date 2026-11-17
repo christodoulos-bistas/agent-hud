@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, codexTarget, codexOfferDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { installCodexHooksFile, removeCodexHooksFile, codexHookCommand } from '../src/main/codex-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
@@ -490,9 +490,9 @@ test('Task 10 fix: codexStatus: missing config.toml -> approve; unreadable -> no
   const hooksPath = 'C:/h/.codex/hooks.json';
   const positions = [{ event: 'Stop', group: 0, hook: 0 }];
   const label = (o) => codexStatusLabel(codexStatus({ positions, hooksPath, ...o }));
-  assert.equal(label({ configCode: 'ENOENT' }), 'Codex hooks: approve in /hooks');
+  assert.equal(label({ configCode: 'ENOENT' }), 'Codex hooks: approve in Codex Settings → Hooks');
   assert.equal(label({ configCode: 'EACCES' }), 'Codex hooks: installed');
-  assert.equal(label({ configText: '' }), 'Codex hooks: approve in /hooks');
+  assert.equal(label({ configText: '' }), 'Codex hooks: approve in Codex Settings → Hooks');
   assert.equal(label({ configText: "[hooks.state.'C:/h/.codex/hooks.json:stop:0:0']\ntrusted_hash = 'x'\n" }), 'Codex hooks: installed');
   assert.equal(codexStatusLabel(codexStatus({ positions: [], hooksPath, configCode: 'ENOENT' })), 'Codex hooks: not installed');
 });
@@ -507,4 +507,13 @@ test('codexStatus returns the approval memory and keeps it across calls', () => 
   const moved = codexStatus({ positions: [{ event: 'Stop', group: 1, hook: 0 }], hooksPath, configText: "[hooks.state.'C:/h/.codex/hooks.json:stop:1:0']\ntrusted_hash = 'old'\n", memory: a.memory });
   assert.deepEqual(moved.missing, ['Stop']);
   assert.equal(codexStatus({ positions, hooksPath, configCode: 'EACCES', memory: a.memory }).memory, a.memory);
+});
+
+test('codexTrustDue is true only with consent, a usable target and unapproved hooks', () => {
+  const ok = { path: 'C:/h.json', blocked: false };
+  assert.equal(codexTrustDue({ cfg: {}, target: ok, missing: ['Stop'] }), false);
+  assert.equal(codexTrustDue({ cfg: { codexAutoTrust: true }, target: { path: null, blocked: true }, missing: ['Stop'] }), false);
+  assert.equal(codexTrustDue({ cfg: { codexAutoTrust: true }, target: ok, missing: [] }), false);
+  assert.equal(codexTrustDue({ cfg: { codexAutoTrust: true }, target: ok, missing: ['Stop'] }), true);
+  assert.equal(codexTrustDue({ cfg: null, target: ok, missing: ['Stop'] }), false);
 });
