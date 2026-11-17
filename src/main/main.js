@@ -11,7 +11,7 @@ import { createClassEngine } from './classes.js';
 import { createQueue } from './queue.js';
 import { isDeepStrictEqual } from 'node:util';
 import { installHooks, uninstallHooks, unmergeHooks } from './settings-hooks.js';
-import { codexHookCommand, installCodexHooksFile, removeCodexHooksFile, ourPositions } from './codex-hooks.js';
+import { codexHookCommand, installCodexHooksFile, removeCodexHooksFile, ourPositions, hasLegacyCodexHooks } from './codex-hooks.js';
 import { findCodexExe, trustCodexHooks } from './codex-trust.js';
 import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
@@ -720,6 +720,24 @@ async function startServer() {
   }
 }
 
+// Old installs hold the bare quoted command, which PowerShell prints instead of running: rewrite it in place.
+function upgradeCodexHooks() {
+  if (CODEX.blocked) return false;
+  const doc = readJson(CODEX_PATH);
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc) || !hasLegacyCodexHooks(doc, CODEX_COMMAND)) return false;
+  const r = installCodexHooksFile(CODEX_PATH, CODEX_COMMAND);
+  if (!r.ok) {
+    log(`codex hook upgrade failed: ${r.error}`);
+    notify('Could not update the Codex hooks', `${CODEX_PATH}: ${r.error}`, true);
+    return false;
+  }
+  if (!r.changed) return false;
+  if (cfg.codexAutoTrust === true) trustCodex({ reason: 'startup' });
+  else notify('Agent HUD updated its Codex hooks', CODEX_APPROVE_BALLOON);
+  refreshMenu();
+  return true;
+}
+
 async function firstRun() {
   if (SKIP_FIRST_RUN) return;
   if (!cfg.offeredHooks && !TARGET.blocked) {
@@ -771,7 +789,7 @@ async function start() {
   setInterval(refreshMenu, 30000); // hook status lines follow edits made outside the HUD (e.g. approval in Codex Settings → Hooks)
   await startServer();
   await firstRun();
-  if (codexTrustDue({ cfg, target: CODEX, missing: codexState().missing })) trustCodex({ reason: 'startup' });
+  if (!upgradeCodexHooks() && codexTrustDue({ cfg, target: CODEX, missing: codexState().missing })) trustCodex({ reason: 'startup' });
 }
 
 // A second launch shows the running HUD; `--quit` asks it to quit the normal way (holds released).

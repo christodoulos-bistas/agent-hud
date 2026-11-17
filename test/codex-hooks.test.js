@@ -209,8 +209,51 @@ test('removeCodexHooksFile on a missing file is a no-op and creates nothing', ()
   } finally { t.done(); }
 });
 
-test('codexHookCommand quotes the .cmd path', () => {
-  assert.equal(codexHookCommand('C:\\x\\resources'), '"C:\\x\\resources\\codex-hook.cmd"');
+const NEW = 'cmd /d /c "C:\P\Agent HUD\resources\codex-hook.cmd"';
+const LEGACY = '"C:\P\Agent HUD\resources\codex-hook.cmd"';
+
+test('codexHookCommand: cmd /d /c with the quoted script path', () => {
+  assert.equal(codexHookCommand('C:\P\Agent HUD\resources'), NEW);
+});
+
+test('legacyCodexCommand', () => {
+  assert.equal(legacyCodexCommand(NEW), LEGACY);
+  assert.equal(legacyCodexCommand('node "x.cjs"'), null);
+});
+
+function legacyDoc() {
+  const hooks = {};
+  for (const ev of CODEX_EVENTS) hooks[ev] = [px('node foreign ' + ev), { matcher: '', hooks: [{ type: 'command', command: LEGACY, timeout: 10 }] }];
+  return { hooks };
+}
+
+test('install upgrades the legacy command in place', () => {
+  const doc = legacyDoc();
+  const r = installCodexHooks(doc, NEW);
+  assert.equal(r.changed, true);
+  for (const ev of CODEX_EVENTS) {
+    assert.equal(r.doc.hooks[ev].length, 2);
+    assert.deepEqual(r.doc.hooks[ev][0], doc.hooks[ev][0]);
+    assert.equal(r.doc.hooks[ev][1].hooks[0].command, NEW);
+  }
+});
+
+test('ourPositions and remove see the legacy command', () => {
+  const doc = legacyDoc();
+  const posNew = ourPositions(installCodexHooks(doc, NEW).doc, NEW);
+  assert.equal(posNew.length, CODEX_EVENTS.length);
+  assert.deepEqual(ourPositions(doc, NEW), posNew);
+  const r = removeCodexHooks(doc, NEW);
+  assert.equal(r.changed, true);
+  assert.deepEqual(ourPositions(r.doc, NEW), []);
+});
+
+test('hasLegacyCodexHooks', () => {
+  const doc = legacyDoc();
+  assert.equal(hasLegacyCodexHooks(doc, NEW), true);
+  assert.equal(hasLegacyCodexHooks(installCodexHooks(doc, NEW).doc, NEW), false);
+  assert.equal(hasLegacyCodexHooks({ hooks: { Stop: [px(NEW)] } }, NEW), false);
+  assert.equal(hasLegacyCodexHooks({}, NEW), false);
 });
 
 test('remove shifted: surviving shared group does not shift later groups; a kept group after a deleted one does', () => {

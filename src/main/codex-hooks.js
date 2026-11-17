@@ -4,11 +4,22 @@ import { rewrite } from './settings-hooks.js';
 
 export const CODEX_EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'PreToolUse', 'PermissionRequest', 'PostToolUse', 'Stop', 'Interrupt', 'SubagentStart', 'SubagentStop'];
 
-export const codexHookCommand = (resourcesDir) => `"${path.win32.join(resourcesDir, 'codex-hook.cmd')}"`;
+// The Codex app runs hook commands through PowerShell, which would only print a bare quoted path.
+export const codexHookCommand = (resourcesDir) => `cmd /d /c "${path.win32.join(resourcesDir, 'codex-hook.cmd')}"`;
+
+// The pre-fix bare quoted form of a `cmd /d /c "<p>"` command, or null.
+export function legacyCodexCommand(command) {
+  const m = /^cmd \/d \/c ("[^"]*")$/.exec(typeof command === 'string' ? command : '');
+  return m ? m[1] : null;
+}
 
 const snake = (ev) => ev.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const isOurs = (h, command) => !!h && h.command === command;
+const isOurs = (h, command) => {
+  if (!h) return false;
+  const legacy = legacyCodexCommand(command);
+  return h.command === command || (legacy !== null && h.command === legacy);
+};
 const ourHook = (ev, command) => ({ type: 'command', command, timeout: ev === 'PermissionRequest' ? 600 : 10 });
 
 function hooksOf(doc) {
@@ -37,6 +48,12 @@ export function installCodexHooks(doc, command) {
     if (!found) hooks[ev].push({ matcher: '', hooks: [want] });
   }
   return { doc: out, changed: !isDeepStrictEqual(out, doc) };
+}
+
+export function hasLegacyCodexHooks(doc, command) {
+  const legacy = legacyCodexCommand(command);
+  if (legacy === null || !isObj(doc?.hooks)) return false;
+  return Object.values(doc.hooks).some((groups) => Array.isArray(groups) && groups.some((g) => Array.isArray(g?.hooks) && g.hooks.some((h) => h?.command === legacy)));
 }
 
 export function removeCodexHooks(doc, command) {

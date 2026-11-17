@@ -19,6 +19,12 @@ test('pickOurUntrusted: only our user-layer hooks', () => {
   assert.deepEqual(pickOurUntrusted(list, OPTS).map((h) => h.key), [`${HP}:stop:2:0`, `${HP}:session_end:1:0`]);
 });
 
+test('pickOurUntrusted: the legacy command is not ours', () => {
+  const NEW = 'cmd /d /c ' + CMD;
+  const list = { data: [{ hooks: [hook({ command: CMD })] }] };
+  assert.deepEqual(pickOurUntrusted(list, { hooksPath: HP, command: NEW }), []);
+});
+
 test('pickOurUntrusted: same hook under two cwds counts once', () => {
   assert.equal(pickOurUntrusted({ data: [{ hooks: [hook({})] }, { hooks: [hook({})] }] }, OPTS).length, 1);
 });
