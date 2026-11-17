@@ -1,7 +1,7 @@
 // Agent HUD renderer. The render* functions are pure (snapshot in, HTML string out) and run in Node
 // for the tests; boot() wires them to the DOM and to window.hud from the preload. Every string that
 // comes from the snapshot goes through esc() before it reaches markup.
-import { GR, CLASSES, MOODS_BADGE, MOODS_PENNANT, FAMILIAR, spriteSvg } from './sprites.js';
+import { GR, CLASSES, MOODS_BADGE, MOODS_PENNANT, FAMILIAR, CODEX_FAMILIAR, spriteSvg } from './sprites.js';
 import { fmtDuration } from './format.js';
 import { esc, className, int, sessionOf, renderCard, replyLeftMs, picksFrom, actionsArmed, clickAllowed } from './cards.js';
 
@@ -19,11 +19,15 @@ const cached = (key, make) => {
   return svgCache.get(key);
 };
 const classOf = (id) => (NAMES.has(id) ? id : 'pathfinder');
-const sprite = (cls) => cached(`class:${classOf(cls)}`, () => spriteSvg(classOf(cls), 2));
+// Anything that is not 'codex' is a Claude chat. The cache key carries the source: one class has two bodies.
+export const sourceOf = (a) => (a?.source === 'codex' ? 'codex' : 'claude');
+const sprite = (cls, source = 'claude') => cached(`class:${source}:${classOf(cls)}`, () => spriteSvg(classOf(cls), 2, { source }));
 const sealSvg = () => cached('seal', () => GR.svg(MOODS_BADGE, 2));
 // The pennant class lets its sparkle twinkle (hud.css .pennant .g-tw; static with reduced motion).
 const pennantSvg = () => cached('pennant', () => GR.svg(MOODS_PENNANT, 1, 'pennant'));
-const famSvg = () => cached('fam', () => GR.svg(FAMILIAR, 2));
+const famSvg = (source = 'claude') => cached(`fam:${source}`, () => GR.svg(source === 'codex' ? CODEX_FAMILIAR : FAMILIAR, 2));
+// The small "Codex" tag that starts a Codex chat's class line (nothing for Claude).
+export const srcTag = (source) => (source === 'codex' ? '<span class="src">Codex</span> · ' : '');
 
 const moodOf = (a) => (MOODS.has(a?.mood) ? a.mood : 'idle');
 
@@ -171,23 +175,24 @@ export function renderRow(agent, { ask, selected = false, tucked = false } = {})
   const mood = moodOf(a);
   const id = esc(a.id);
   const handed = mood === 'needs' && !!a.handedBack;
+  const source = sourceOf(a);
   const fams = Math.max(0, Math.min(3, int(a.familiars, 0)));
   let fam = '';
-  for (let i = 1; i <= fams; i++) fam += `<span class="fam f${i}">${famSvg()}</span>`;
+  for (let i = 1; i <= fams; i++) fam += `<span class="fam f${i}">${famSvg(source)}</span>`;
   const line = handed
     ? (a.canOpen === false
       ? '<span class="link">Waiting in its window</span>'
       : `<button type="button" class="link" data-act="open" data-session="${id}">Waiting in its window — open ↗</button>`)
-    : `<span class="cls">${esc(className(a.cls))}</span> · ${esc(doing(a, mood, ask))}${mood === 'working' ? '<span class="dots"></span>' : ''}`;
+    : `${srcTag(source)}<span class="cls">${esc(className(a.cls))}</span> · ${esc(doing(a, mood, ask))}${mood === 'working' ? '<span class="dots"></span>' : ''}`;
   // ✕ takes the chat off the HUD until it asks or starts a new turn; never on a row that is asking.
   const hide = mood === 'needs' || tucked ? ''
     : `<button type="button" class="hide" data-act="hide" data-session="${id}" title="Hide from the HUD" aria-label="Hide ${esc(a.display)} from the HUD">✕</button>`;
   return `<div class="row ${mood}${mood === 'needs' ? ' glow-ask' : ''}${handed ? ' handed' : ''}${selected ? ' selected' : ''}${tucked ? ' tucked' : ''}" data-key="row:${id}" style="--d:${bobDelay(a.id)}">` +
-    `<div class="sprite-box" data-act="select" data-session="${id}">${sprite(a.cls)}${fam}</div>` +
+    `<div class="sprite-box" data-act="select" data-session="${id}">${sprite(a.cls, source)}${fam}</div>` +
     '<div class="who">' +
       `<button type="button" class="who-n" data-act="select" data-session="${id}" aria-pressed="${selected ? 'true' : 'false'}" title="Show details">${esc(a.display)}</button>` +
       `<div class="who-d${handed ? ' handed' : ''}">${line}</div>` +
-      `<button type="button" class="wait" data-act="wait" data-session="${id}" aria-pressed="${a.replyOptIn ? 'true' : 'false'}"><i></i>wait for my reply</button>` +
+      (source === 'codex' ? '' : `<button type="button" class="wait" data-act="wait" data-session="${id}" aria-pressed="${a.replyOptIn ? 'true' : 'false'}"><i></i>wait for my reply</button>`) +
     '</div>' +
     `<span class="mark">${rowChip(a)}</span>` + hide +
   '</div>';
@@ -203,7 +208,7 @@ function face(a) {
   const mood = moodOf(a);
   return `<button type="button" class="face ${mood}" data-key="face:${esc(a.id)}" data-act="expand" style="--d:${bobDelay(a.id)}" ` +
     `title="${esc(a.display)}" aria-label="${esc(a.display)}, ${mood}">` +
-    `<span class="sprite-box">${sprite(a.cls)}${mood === 'needs' ? SEAL() : ''}</span></button>`;
+    `<span class="sprite-box">${sprite(a.cls, sourceOf(a))}${mood === 'needs' ? SEAL() : ''}</span></button>`;
 }
 
 // The party: rows (or, collapsed, a column of faces), the header and the "Next:" line. No answer card:

@@ -22,6 +22,7 @@ body[data-arrow="left"]::after { left: 0; border-right-color: rgba(224, 180, 92,
 .who-n { font-family: 'IM Fell English', Georgia, serif; font-size: 1.05rem; line-height: 1.1; color: var(--parch); }
 .who-d { font-size: .74rem; color: var(--sage); }
 .who-d .cls { color: var(--gold-l); text-transform: capitalize; }
+.who-d .src { padding: 0 .3rem; border-radius: 3px; background: rgba(138, 151, 164, .22); color: #c3ccd5; font-family: 'Alegreya Sans', system-ui, sans-serif; font-weight: 700; font-size: .68rem; }
 .x { flex: none; margin-left: auto; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--sage); font-size: .9rem; }
 .x:hover { color: var(--parch); background: rgba(240, 233, 218, .08); }
 

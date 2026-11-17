@@ -225,3 +225,12 @@ test('v1.2 M6: permission and choice cards show the countdown to the 60 s hand-b
   assert.match(renderPanel(detail({ card: choiceCard }), NOW), /Back to its window in <span data-left>0:30<\/span>/);
   assert.match(renderPanel(detail({ card: replyCard() }), NOW), /Reply open <span data-left>2:05<\/span>/,'the reply card keeps its own words');
 });
+
+test('Codex detail: class line starts with the Codex tag and the Codex sprite; Claude has neither', () => {
+  const cx = renderPanel(detail({ source: 'codex' }), NOW);
+  assert.ok(cx.includes('<div class="who-d"><span class="src">Codex</span> · <span class="cls">'));
+  assert.ok(cx.includes('#8ef5c6'));
+  const cl = renderPanel(detail(), NOW);
+  assert.ok(!cl.includes('class="src"'));
+  assert.ok(!cl.includes('#8ef5c6'));
+});

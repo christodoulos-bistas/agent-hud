@@ -464,3 +464,26 @@ test('v1.3: nothing visible but chats tucked → "All quiet — every chat is tu
   assert.match(renderParty({ agents: [], tucked: [agent({ id: 't' })], counts: { total: 0, needs: 0 } }), /All quiet — every chat is tucked away\./);
   assert.match(renderParty({ agents: [], tucked: [], counts: { total: 0, needs: 0 } }), /No agents are running\./);
 });
+
+test('Codex row: tag before the class, Codex sprite and familiars, no wait button; Claude row has none', () => {
+  const cx = renderRow(agent({ source: 'codex', familiars: 1 }));
+  assert.ok(cx.includes('<span class="src">Codex</span> · <span class="cls">'));
+  assert.ok(cx.includes('#8ef5c6'));
+  assert.ok(!cx.includes('data-act="wait"'));
+  const cl = renderRow(agent({ familiars: 1 }));
+  assert.ok(!cl.includes('class="src"'));
+  assert.ok(!cl.includes('#8ef5c6'));
+  assert.ok(cl.includes('data-act="wait"'));
+  assert.ok(!renderRow(agent({ source: 'bogus' })).includes('class="src"'));
+});
+
+test('a Claude and a Codex agent of one class render different sprites in one party (cache key has the source)', () => {
+  const html = renderParty({ agents: [agent({ id: 'a' }), agent({ id: 'b', source: 'codex' })], counts: { total: 2, needs: 0 } });
+  const [a, b] = html.split('data-key="row:b"');
+  assert.ok(!a.includes('#8ef5c6'));
+  assert.ok(b.includes('#8ef5c6'));
+  const faces = renderParty({ agents: [agent({ id: 'a' }), agent({ id: 'b', source: 'codex' })] }, { collapsed: true });
+  const [fa, fb] = faces.split('data-key="face:b"');
+  assert.ok(!fa.includes('#8ef5c6'));
+  assert.ok(fb.includes('#8ef5c6'));
+});

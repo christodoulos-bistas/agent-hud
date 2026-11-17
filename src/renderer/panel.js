@@ -2,7 +2,7 @@
 // the tests; bootPanel wires it to the DOM and to window.panel from the preload. Every string that
 // comes from the detail goes through esc() before it reaches markup.
 import { spriteSvg } from './sprites.js';
-import { esc, renderChip, chipOf, className, createRenderGate, patch } from './hud.js';
+import { esc, renderChip, chipOf, className, createRenderGate, patch, sourceOf, srcTag } from './hud.js';
 import { renderCard, cardLeftMs, mountCards } from './cards.js';
 import { fmtDuration } from './format.js';
 
@@ -123,8 +123,8 @@ export function renderPanel(detail, nowMs = Date.now(), cardOpts = {}) {
   // data-key / data-deep: bootPanel patches this in place (hud.js patch), never replacing the card slot.
   return '<div class="fly" data-key="fly" data-deep>' +
     '<div class="fly-top" data-key="top">' +
-      `<span class="spr">${spriteSvg(d.cls, 1.5)}</span>` +
-      `<div class="who"><div class="who-n">${esc(d.display)}</div><div class="who-d"><span class="cls">${esc(className(d.cls))}</span></div></div>` +
+      `<span class="spr">${spriteSvg(d.cls, 1.5, { source: sourceOf(d) })}</span>` +
+      `<div class="who"><div class="who-n">${esc(d.display)}</div><div class="who-d">${srcTag(sourceOf(d))}<span class="cls">${esc(className(d.cls))}</span></div></div>` +
       renderChip(d, nowMs) +
       '<button type="button" class="x" data-act="close" aria-label="Close">✕</button>' +
     '</div>' +
