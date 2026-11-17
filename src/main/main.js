@@ -563,9 +563,10 @@ function doCodexInstall() {
   const r = installCodexHooksFile(CODEX_PATH, CODEX_COMMAND);
   if (!r.ok) { notify('Could not install the Codex hooks', `${CODEX_PATH}: ${r.error}`, true); return; }
   if (r.changed) resetCodexApproval();
-  if (!r.changed) notify('Agent HUD Codex hooks already installed', `${CODEX_PATH} was left as it is.`);
-  else notify('Agent HUD Codex hooks installed', `Added to ${CODEX_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}`);
-  if (r.changed || codexState().missing.length) trustCodex({ reason: 'install' });
+  const note = r.changed ? `Added to ${CODEX_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}` : `${CODEX_PATH} was left as it is.`;
+  // One notification per install: trustCodex reports it when it is going to run, otherwise we do.
+  if ((r.changed || codexState().missing.length) && cfg?.codexAutoTrust === true) { trustCodex({ reason: 'install', note, changed: r.changed }); return; }
+  notify(r.changed ? 'Agent HUD Codex hooks installed' : 'Agent HUD Codex hooks already installed', note);
 }
 async function installFromTray() {
   if (devBlocked()) return;
@@ -628,8 +629,8 @@ function resetCodexApproval() {
 
 // Gets Codex to trust the HUD's own hooks (codex app-server). Never throws; one run at a time.
 let trustRun = null;
-function trustCodex({ reason }) {
-  if (CODEX.blocked) return Promise.resolve();
+function trustCodex({ reason, note, changed = true }) {
+  if (CODEX.blocked || cfg?.codexAutoTrust !== true) return Promise.resolve();
   if (trustRun) return trustRun;
   trustRun = (async () => {
     let r;
@@ -644,8 +645,10 @@ function trustCodex({ reason }) {
     try {
       const untrusted = Array.isArray(r.untrusted) ? r.untrusted : [];
       const trusted = Array.isArray(r.trusted) ? r.trusted : [];
-      if (!r.ok || untrusted.length) notify('Agent HUD Codex hooks need approval', CODEX_APPROVE_BALLOON, true);
-      else if (trusted.length) notify(reason === 'startup' ? 'Agent HUD re-trusted its Codex hooks' : 'Agent HUD Codex hooks installed and trusted', CODEX_TRUSTED_BODY);
+      const withNote = (body) => (note ? `${note}\n${body}` : body);
+      if (!r.ok || untrusted.length) notify('Agent HUD Codex hooks need approval', withNote(CODEX_APPROVE_BALLOON), true);
+      else if (trusted.length) notify(reason === 'startup' ? 'Agent HUD re-trusted its Codex hooks' : 'Agent HUD Codex hooks installed and trusted', withNote(CODEX_TRUSTED_BODY));
+      else if (reason === 'install') notify(changed ? 'Agent HUD Codex hooks installed' : 'Agent HUD Codex hooks already installed', note);
       refreshMenu();
     } catch (err) { log('codex trust', err); }
   })().finally(() => { trustRun = null; });
