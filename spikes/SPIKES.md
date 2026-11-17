@@ -233,4 +233,4 @@ Its window title is `ChatGPT`, and while it is closed-to-background its processe
 - `WScript.Shell.AppActivate('ChatGPT')` (by title): returned False, foreground unchanged.
 - `AppActivate(<pid of the process with MainWindowHandle != 0>)`: True, foreground became `ChatGPT` (VS Code in front first).
 - `explorer.exe shell:AppsFolder\OpenAI.Codex_2p2nqsd0c76g0!App`: brings the app to the front from VS Code, and also restores it when it had no visible window.
-**`CODEX_ACTIVATE = { cmd: 'explorer.exe', args: ['shell:AppsFolder\OpenAI.Codex_2p2nqsd0c76g0!App'] }`** (no window lookup, works hidden or not). Caveat: the package version is in the install path, not in the AUMID, so it survives updates.
+**`CODEX_ACTIVATE = { cmd: 'explorer.exe', args: ['shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App'] }` as a JS literal; the raw argument is `shell:AppsFolder\OpenAI.Codex_2p2nqsd0c76g0!App`** (no window lookup, works hidden or not). Caveat: the package version is in the install path, not in the AUMID, so it survives updates.
