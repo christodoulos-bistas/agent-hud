@@ -1,6 +1,6 @@
 // Agent HUD main process: the hook server, the session poll and the store, wired to an
 // always-on-top window docked bottom-right and a tray menu.
-import { app, BrowserWindow, Tray, Menu, ipcMain, screen, dialog, nativeImage } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, screen, dialog, nativeImage, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -16,7 +16,7 @@ import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createCodexSessions, readRolloutMeta } from './codex-sessions.js';
 import { createStore } from './store.js';
-import { openCommandFor, resolveCodeCmd, canOpen, CODEX_ACTIVATE } from './focus.js';
+import { openCommandFor, resolveCodeCmd, canOpen, CODEX_ACTIVATE, chatLinkFor } from './focus.js';
 import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, codexTarget, codexOfferDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -373,7 +373,16 @@ function openWindow(sessionId) {
   const s = sessionById(sessionId);
   const c = s && openCommandFor(s, OPEN_OPTS);
   if (!c) return; // the button is hidden for sessions we can't focus
-  spawnQuiet(c.cmd, c.args);
+  // The exact chat when its app has a chat link; a VS Code chat's own window comes forward first (focus.js).
+  const link = chatLinkFor(s, OPEN_OPTS);
+  if (!link) { spawnQuiet(c.cmd, c.args); return; }
+  if (link.first) spawnQuiet(link.first.cmd, link.first.args);
+  setTimeout(() => {
+    shell.openExternal(link.url).catch((err) => {
+      log('open link', err?.message ?? err);
+      if (!link.first) spawnQuiet(c.cmd, c.args); // fall back to bringing the app forward
+    });
+  }, link.waitMs ?? 0);
 }
 
 // ---------------------------------------------------------------- IPC from the renderer
