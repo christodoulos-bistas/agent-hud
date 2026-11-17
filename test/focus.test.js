@@ -105,3 +105,80 @@ test('Review Focus 2/3: non-UUID ids, terminal chats and missing sessions get no
   assert.equal(chatLinkFor(S({ sessionId: ID, entrypoint: 'cli' }), { codeCmd: CODE }), null);
   assert.equal(chatLinkFor(null), null);
 });
+
+// Review fixes (17 Nov): the VS Code link is sent only when a VS Code window shows the chat's folder and the
+// window step succeeded; one pending open at a time; the whole flow is testable through injected effects.
+import { vscodeHoldsFolder, createChatOpener } from '../src/main/focus.js';
+
+test('vscodeHoldsFolder: a title with the folder as its root name, case-insensitive; a worktree or subfolder does not count', () => {
+  const titles = ['Skill and agent model se. - arsenal - Visual Studio Code', 'mobi-monorepo - Visual Studio Code'];
+  assert.equal(vscodeHoldsFolder(titles, 'c:\\Consortis_projects\\arsenal'), true);
+  assert.equal(vscodeHoldsFolder(titles, 'C:\\Consortis_projects\\Mobi-Platform\\MOBI-MONOREPO\\'), true, 'no-editor title and trailing slash');
+  assert.equal(vscodeHoldsFolder(titles, 'c:\\Consortis_projects\\arsenal\\.claude\\worktrees\\improve-by-prompt'), false);
+  assert.equal(vscodeHoldsFolder(titles, ''), false);
+  assert.equal(vscodeHoldsFolder([], 'c:\\x\\arsenal'), false);
+});
+
+function harness({ titles = ['x - arsenal - Visual Studio Code'], spawnOk = true, openRejects = false } = {}) {
+  const calls = [];
+  const timers = [];
+  const deps = {
+    commandFor: (s) => (s ? { cmd: 'APP', args: [s.sessionId] } : null),
+    linkFor: (s) => s.link ?? null,
+    spawnQuiet: (cmd, args) => { calls.push(['spawn', cmd, ...args]); return Promise.resolve(spawnOk); },
+    windowTitles: async () => { calls.push(['titles']); return titles; },
+    openExternal: async (url) => { calls.push(['link', url]); if (openRejects) throw new Error('no handler'); },
+    setTimer: (fn, ms) => { const t = { fn, ms }; timers.push(t); calls.push(['wait', ms]); return t; },
+    clearTimer: (t) => { t.cleared = true; },
+    log: () => {},
+  };
+  const fire = () => { for (const t of timers.splice(0)) if (!t.cleared) t.fn(); };
+  return { open: createChatOpener(deps), calls, fire };
+}
+const flush = () => new Promise((r) => setImmediate(r));
+const VS = (id = 'A', cwd = 'c:\\p\\arsenal') => ({ sessionId: id, cwd, link: { first: { cmd: 'code.cmd', args: [cwd] }, waitMs: 1500, url: `vscode://x/open?session=${id}` } });
+
+test('opener: VS Code chat — titles checked first, then the window step, then the wait, then the link', async () => {
+  const h = harness();
+  const done = h.open(VS());
+  await flush(); h.fire(); const r = await done;
+  assert.equal(r, 'link');
+  assert.deepEqual(h.calls, [['titles'], ['spawn', 'code.cmd', 'c:\\p\\arsenal'], ['wait', 1500], ['link', 'vscode://x/open?session=A']]);
+});
+
+test('opener: no VS Code window shows the folder → today\'s behaviour only, no link', async () => {
+  const h = harness({ titles: ['x - other - Visual Studio Code'] });
+  assert.equal(await h.open(VS()), 'window-only');
+  assert.deepEqual(h.calls, [['titles'], ['spawn', 'APP', 'A']]);
+});
+
+test('opener: a failed window step → no link', async () => {
+  const h = harness({ spawnOk: false });
+  assert.equal(await h.open(VS()), 'window-failed');
+  assert.ok(!h.calls.some((c) => c[0] === 'link'));
+});
+
+test('opener: a second click cancels the first; only the second link opens', async () => {
+  const h = harness();
+  const first = h.open(VS('A'));
+  await flush();
+  const second = h.open(VS('B'));
+  await flush(); h.fire();
+  assert.equal(await first, 'cancelled');
+  assert.equal(await second, 'link');
+  assert.deepEqual(h.calls.filter((c) => c[0] === 'link'), [['link', 'vscode://x/open?session=B']]);
+});
+
+test('opener: app links open straight away; a rejected link falls back to the app command; no link → app command', async () => {
+  const ok = harness();
+  const p = ok.open({ sessionId: 'C', link: { url: 'claude://code/continue?session=C' } }); await flush(); ok.fire();
+  assert.equal(await p, 'link');
+  assert.deepEqual(ok.calls, [['wait', 0], ['link', 'claude://code/continue?session=C']]);
+  const bad = harness({ openRejects: true });
+  const q = bad.open({ sessionId: 'D', link: { url: 'codex://threads/D' } }); await flush(); bad.fire();
+  assert.equal(await q, 'fallback');
+  assert.deepEqual(bad.calls.at(-1), ['spawn', 'APP', 'D']);
+  const none = harness();
+  assert.equal(await none.open({ sessionId: 'E' }), 'app');
+  assert.equal(await none.open(null), 'none');
+});

@@ -4,7 +4,7 @@ import { app, BrowserWindow, Tray, Menu, ipcMain, screen, dialog, nativeImage, s
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { RELEASE } from './answers.js';
 import { createClassEngine } from './classes.js';
@@ -16,7 +16,7 @@ import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createCodexSessions, readRolloutMeta } from './codex-sessions.js';
 import { createStore } from './store.js';
-import { openCommandFor, resolveCodeCmd, canOpen, CODEX_ACTIVATE, chatLinkFor } from './focus.js';
+import { openCommandFor, resolveCodeCmd, canOpen, CODEX_ACTIVATE, chatLinkFor, createChatOpener, VSCODE_TITLES_PS } from './focus.js';
 import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, codexTarget, codexOfferDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -354,35 +354,48 @@ function select(next) {
 // ---------------------------------------------------------------- opening a session's window
 
 // Runs the focus command; a failure is only logged (no Explorer-folder fallback any more).
+// Resolves true when the command exits 0 (explorer.exe counts as success: it exits 1 when it works).
 function spawnQuiet(cmd, args) {
-  let child;
-  try {
-    if (process.platform === 'win32' && /\.cmd$/i.test(cmd)) {
-      // code.cmd is a batch shim: run it through cmd.exe by its full path, every argument quoted.
-      const line = [cmd, ...args].map((a) => `"${String(a).replace(/"/g, '')}"`).join(' ');
-      child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${line}"`], { windowsVerbatimArguments: true, windowsHide: true, stdio: 'ignore' });
-    } else {
-      child = spawn(cmd, args, { windowsHide: true, stdio: 'ignore' });
-    }
-  } catch (err) { log('open', err); return; }
-  child.on('error', (err) => log('open', err.message));
-  child.on('exit', (code) => { if (code && !/(^|[\\/])explorer\.exe$/i.test(cmd)) log('open', `${cmd} exited ${code}`); });
+  return new Promise((resolve) => {
+    let child;
+    try {
+      if (process.platform === 'win32' && /\.cmd$/i.test(cmd)) {
+        // code.cmd is a batch shim: run it through cmd.exe by its full path, every argument quoted.
+        const line = [cmd, ...args].map((a) => `"${String(a).replace(/"/g, '')}"`).join(' ');
+        child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${line}"`], { windowsVerbatimArguments: true, windowsHide: true, stdio: 'ignore' });
+      } else {
+        child = spawn(cmd, args, { windowsHide: true, stdio: 'ignore' });
+      }
+    } catch (err) { log('open', err); resolve(false); return; }
+    const explorer = /(^|[\\/])explorer\.exe$/i.test(cmd);
+    child.on('error', (err) => { log('open', err.message); resolve(false); });
+    child.on('exit', (code) => {
+      if (code && !explorer) log('open', `${cmd} exited ${code}`);
+      resolve(!code || explorer);
+    });
+  });
 }
+
+// Titles of the visible VS Code windows (empty on any failure: then no chat link is sent).
+function vscodeWindowTitles() {
+  return new Promise((resolve) => {
+    execFile('powershell', ['-NoProfile', '-NonInteractive', '-Command', VSCODE_TITLES_PS], { windowsHide: true, timeout: 5000 }, (err, stdout) => {
+      if (err) { log('open titles', err.message); resolve([]); return; }
+      resolve(String(stdout).split(/\r?\n/).map((l) => l.trim()).filter(Boolean));
+    });
+  });
+}
+
+// "Open window": the exact chat when its app has a chat link (focus.js), else the app or window as before.
+const openChat = createChatOpener({
+  commandFor: openCommandFor, linkFor: chatLinkFor, spawnQuiet, windowTitles: vscodeWindowTitles,
+  openExternal: (url) => shell.openExternal(url), log,
+});
 
 function openWindow(sessionId) {
   const s = sessionById(sessionId);
-  const c = s && openCommandFor(s, OPEN_OPTS);
-  if (!c) return; // the button is hidden for sessions we can't focus
-  // The exact chat when its app has a chat link; a VS Code chat's own window comes forward first (focus.js).
-  const link = chatLinkFor(s, OPEN_OPTS);
-  if (!link) { spawnQuiet(c.cmd, c.args); return; }
-  if (link.first) spawnQuiet(link.first.cmd, link.first.args);
-  setTimeout(() => {
-    shell.openExternal(link.url).catch((err) => {
-      log('open link', err?.message ?? err);
-      if (!link.first) spawnQuiet(c.cmd, c.args); // fall back to bringing the app forward
-    });
-  }, link.waitMs ?? 0);
+  if (!s || !openCommandFor(s, OPEN_OPTS)) return; // the button is hidden for sessions we can't focus
+  openChat(s, OPEN_OPTS).catch((err) => log('open', err));
 }
 
 // ---------------------------------------------------------------- IPC from the renderer
