@@ -84,8 +84,8 @@ async function main() {
       out = await forward(input, { ...cfg, timeoutMs: timeoutFor(eventName) });
     }
   } catch { out = ''; }
-  if (out) process.stdout.write(out);
-  process.exit(0);
+  if (out) process.stdout.write(out, () => process.exit(0));
+  else process.exit(0);
 }
 
 module.exports = { readConfig, timeoutFor, forward };

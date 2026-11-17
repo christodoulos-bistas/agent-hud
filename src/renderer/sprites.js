@@ -543,11 +543,7 @@ CLASSES.push({
 });
 
 // ---- Codex agents: same twelve costumes, a different body underneath ----------------------------
-// Proposal for src/renderer/sprites.js (design brainstorm, 2026-11-17). Not wired into the app.
-//
-// WHERE TO PASTE: in sprites.js, directly after the last CLASSES.push(...) (the Summoner) and before
-// "// ---- HUD mood marks". It uses only what sprites.js already has in scope there: GR, L, CLASSES.
-//
+// Used by the Codex rows: codexOf() swaps a costume's body and palette for these (CODEX_CLASSES at the end).
 // HOW A CLASS SELECTS IT: rasterize() already draws `def.body || BODY` and merges `def.pal` over PAL,
 // so a Codex costume is the Claude costume with three fields swapped and nothing else touched:
 //
