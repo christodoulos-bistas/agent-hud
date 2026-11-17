@@ -48,8 +48,9 @@ so one glance covers all running work. The user's words on the look: "same class
 3. **Codex tag** at the start of the class line: `Codex · Gunslinger · running npm test` (option B of the
    roster; the name line stays untouched so long names don't truncate). Same on the panel's class line.
 4. **Approve from the HUD:** Codex `PermissionRequest` events become the same permission card (Allow,
-   Deny, countdown). Unanswered, released, or HUD not running → Codex shows its own prompt. **Hold length
-   for Codex cards: open — the user's decision (Codex shows nothing to click while we hold, §5).**
+   Deny, countdown). Unanswered, released, or HUD not running → Codex shows its own prompt. **Hold: the
+   same 60 s as Claude's (the user's decision, 17 Nov).** Codex shows nothing to click while we hold
+   (§5); the card's "open window ↗" hands the question straight back so Codex prompts at once.
 5. **Install with the Claude hooks:** "Install hooks" (tray) and the first-run offer also install the
    Codex hooks when Codex is on the PC (`~/.codex` exists); "Remove hooks" and the uninstaller remove both.
    After installing, the HUD tells the user to approve the hook once in Codex (`/hooks`).
