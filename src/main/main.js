@@ -12,12 +12,13 @@ import { createQueue } from './queue.js';
 import { isDeepStrictEqual } from 'node:util';
 import { installHooks, uninstallHooks, unmergeHooks } from './settings-hooks.js';
 import { codexHookCommand, installCodexHooksFile, removeCodexHooksFile, ourPositions } from './codex-hooks.js';
+import { findCodexExe, trustCodexHooks } from './codex-trust.js';
 import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createCodexSessions, readRolloutMeta } from './codex-sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor, resolveCodeCmd, canOpen, CODEX_ACTIVATE, chatLinkFor, createChatOpener, VSCODE_TITLES_PS } from './focus.js';
-import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, codexTarget, codexOfferDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from './wiring.js';
+import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
@@ -44,7 +45,8 @@ const CODEX = codexTarget({ isPackaged: app.isPackaged, envPath: process.env.AGE
 const CODEX_PATH = CODEX.path;
 // Dev (only reachable with AGENT_HUD_CODEX_HOOKS_PATH set): node runs the repo's bridge directly; SRC is <repo>/src.
 const CODEX_COMMAND = app.isPackaged ? codexHookCommand(process.resourcesPath) : `node "${path.join(path.dirname(SRC), 'resources', 'codex-bridge.cjs')}"`;
-const CODEX_APPROVE_BALLOON = 'Codex: open a Codex chat, type /hooks and approve Agent HUD.';
+const CODEX_APPROVE_BALLOON = 'Codex: open Settings → Hooks and click Trust on the Agent HUD hooks (in the Codex terminal: /hooks).';
+const CODEX_TRUSTED_BODY = 'Start a new Codex chat to use them.'; // provisional until a live test
 const SKIP_FIRST_RUN = process.argv.includes('--no-first-run') || process.env.AGENT_HUD_NO_FIRST_RUN === '1';
 const DEBUG = process.env.AGENT_HUD_DEBUG === '1';
 
@@ -539,9 +541,13 @@ async function confirmCodexInstall({ firstRun }) {
     detail: `Agent HUD will add its hooks to this file:\n\n${CODEX_PATH}\n\n` +
       `The file is backed up first (to ${path.resolve(CODEX_PATH)}.agent-hud.bak; the very first original is also kept, once, as ` +
       `${path.resolve(CODEX_PATH)}.agent-hud.orig). Your other hooks are left as they are. ` +
-      'Codex asks you to approve new hooks once: open a Codex chat and type /hooks. ' +
+      'Agent HUD will also mark its own hooks as trusted in Codex, so you won\'t need to approve them there. ' +
       'You can remove the hooks at any time from the tray menu.',
   });
+  if (response === 0 && cfg) {
+    cfg.codexAutoTrust = true;
+    try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
+  }
   return response === 0;
 }
 
@@ -550,16 +556,16 @@ function doInstall() {
   const r = installHooks(SETTINGS_PATH, { port: cfg.port, secret: cfg.secret });
   if (!r.ok) notify('Could not install the hooks', `${SETTINGS_PATH}: ${r.error}`, true);
   else if (!r.changed) notify('Agent HUD hooks already installed', `${SETTINGS_PATH} was left as it is.`);
-  else notify('Agent HUD hooks installed', `Added to ${SETTINGS_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}`);
+  else notify('Agent HUD hooks installed', `Added to ${SETTINGS_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}\nChats you already have open start reporting after a restart.`);
 }
 function doCodexInstall() {
   if (CODEX.blocked) return;
   const r = installCodexHooksFile(CODEX_PATH, CODEX_COMMAND);
   if (!r.ok) { notify('Could not install the Codex hooks', `${CODEX_PATH}: ${r.error}`, true); return; }
   if (r.changed) resetCodexApproval();
-  const need = codexState().missing.length ? `\n${CODEX_APPROVE_BALLOON}` : ''; // unchanged: only if approval is actually missing
-  if (!r.changed) notify('Agent HUD Codex hooks already installed', `${CODEX_PATH} was left as it is.${need}`);
-  else notify('Agent HUD Codex hooks installed', `Added to ${CODEX_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}\n${CODEX_APPROVE_BALLOON}`);
+  if (!r.changed) notify('Agent HUD Codex hooks already installed', `${CODEX_PATH} was left as it is.`);
+  else notify('Agent HUD Codex hooks installed', `Added to ${CODEX_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}`);
+  if (r.changed || codexState().missing.length) trustCodex({ reason: 'install' });
 }
 async function installFromTray() {
   if (devBlocked()) return;
@@ -583,7 +589,7 @@ function doUninstall() {
     else if (!r.changed) notify('No Agent HUD Codex hooks to remove', `${CODEX_PATH} was left as it is.`);
     else {
       resetCodexApproval();
-      const again =r.shifted?.length ? `\nCodex may ask you to re-approve hooks for: ${r.shifted.join(', ')} (/hooks)` : '';
+      const again =r.shifted?.length ? `\nCodex may ask you to re-approve hooks for: ${r.shifted.join(', ')} (Codex Settings → Hooks)` : '';
       notify('Agent HUD Codex hooks removed', `Removed from ${CODEX_PATH}${again}`);
     }
   }
@@ -599,7 +605,7 @@ function claudeInstalled() {
 }
 
 // Codex hooks file state: { installed, missing } where missing lists the events that still need approval in
-// /hooks. config.toml unreadable -> missing [] (no approval line rather than a guess).
+// Codex's hook approval (Settings → Hooks; /hooks in the terminal). config.toml unreadable -> missing [] (no approval line rather than a guess).
 function codexState() {
   if (CODEX.blocked) return { installed: false, missing: [] };
   const doc = readJson(CODEX_PATH);
@@ -620,20 +626,53 @@ function resetCodexApproval() {
   try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
 }
 
-const codexLabel = () => codexStatusLabel(codexState());
+// Gets Codex to trust the HUD's own hooks (codex app-server). Never throws; one run at a time.
+let trustRun = null;
+function trustCodex({ reason }) {
+  if (CODEX.blocked) return Promise.resolve();
+  if (trustRun) return trustRun;
+  trustRun = (async () => {
+    let r;
+    try {
+      const exe = await findCodexExe();
+      r = await trustCodexHooks({ exe, hooksPath: CODEX_PATH, command: CODEX_COMMAND, cwd: os.homedir() });
+      log('codex trust', reason, r);
+    } catch (err) {
+      log('codex trust', err);
+      r = { ok: false, trusted: [], already: [], untrusted: [], error: String(err?.message ?? err) };
+    }
+    try {
+      const untrusted = Array.isArray(r.untrusted) ? r.untrusted : [];
+      const trusted = Array.isArray(r.trusted) ? r.trusted : [];
+      if (!r.ok || untrusted.length) notify('Agent HUD Codex hooks need approval', CODEX_APPROVE_BALLOON, true);
+      else if (trusted.length) notify(reason === 'startup' ? 'Agent HUD re-trusted its Codex hooks' : 'Agent HUD Codex hooks installed and trusted', CODEX_TRUSTED_BODY);
+      refreshMenu();
+    } catch (err) { log('codex trust', err); }
+  })().finally(() => { trustRun = null; });
+  return trustRun;
+}
+function trustFromTray() {
+  if (cfg) {
+    cfg.codexAutoTrust = true;
+    try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
+  }
+  trustCodex({ reason: 'tray' });
+}
 
 function refreshMenu() {
   if (!tray || tray.isDestroyed()) return;
   const visible = !!win && !win.isDestroyed() && win.isVisible();
   let atLogin = false;
   try { atLogin = app.getLoginItemSettings(loginOptions()).openAtLogin; } catch (err) { log('login item', err); }
+  const codex = codexState();
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: visible ? 'Hide' : 'Show', click: toggleWindow },
     { label: 'Collapse', type: 'checkbox', checked: collapsed, click: (mi) => setCollapsed(mi.checked) },
     { label: 'Move back to the corner', enabled: isAnchor(cfg?.position), click: resetPosition },
     { type: 'separator' },
     ...(TARGET.blocked ? [] : [{ label: `Claude hooks: ${claudeInstalled() ? 'installed' : 'not installed'}`, enabled: false }]),
-    ...(CODEX.blocked ? [] : [{ label: codexLabel(), enabled: false }]),
+    ...(CODEX.blocked ? [] : [{ label: codexStatusLabel(codex), enabled: false }]),
+    ...(!CODEX.blocked && codex.missing.length ? [{ label: 'Trust Agent HUD hooks in Codex', click: trustFromTray }] : []),
     { label: 'Install hooks', click: installFromTray },
     { label: 'Remove hooks', click: doUninstall },
     { type: 'separator' },
@@ -722,9 +761,10 @@ async function start() {
   await poll();
   setInterval(poll, POLL_MS);
   setInterval(stageTick, STAGE_TICK_MS);
-  setInterval(refreshMenu, 30000); // hook status lines follow edits made outside the HUD (e.g. /hooks approval)
+  setInterval(refreshMenu, 30000); // hook status lines follow edits made outside the HUD (e.g. approval in Codex Settings → Hooks)
   await startServer();
   await firstRun();
+  if (codexTrustDue({ cfg, target: CODEX, missing: codexState().missing })) trustCodex({ reason: 'startup' });
 }
 
 // A second launch shows the running HUD; `--quit` asks it to quit the normal way (holds released).
