@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { approvalMissing } from './codex-hooks.js';
+import { approvalState } from './codex-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from './answers.js';
 
 export const DEFAULT_PORT = 47821;
@@ -287,10 +287,11 @@ export function saveConfig(file, cfg) {
 // The Codex hooks file's state for the tray. `positions` = ourPositions(...); the config.toml read is
 // reported as configText, or configCode (the fs error code) when it failed. A missing config.toml
 // (ENOENT) means nothing is approved yet; any other read error says nothing about approval.
-export function codexStatus({ positions, hooksPath, configText, configCode }) {
-  if (!positions?.length) return { installed: false, missing: [] };
-  if (configCode && configCode !== 'ENOENT') return { installed: true, missing: [] };
-  return { installed: true, missing: approvalMissing(configCode ? '' : configText, hooksPath, positions) };
+export function codexStatus({ positions, hooksPath, configText, configCode, memory = {} }) {
+  if (!positions?.length) return { installed: false, missing: [], memory };
+  if (configCode && configCode !== 'ENOENT') return { installed: true, missing: [], memory };
+  const r = approvalState(configCode ? '' : configText, hooksPath, positions, memory);
+  return { installed: true, missing: r.missing, memory: r.memory };
 }
 
 export function codexStatusLabel(st) {

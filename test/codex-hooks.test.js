@@ -1,7 +1,7 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import {
-  CODEX_EVENTS, codexHookCommand, installCodexHooks, removeCodexHooks, ourPositions, approvalMissing,
+  CODEX_EVENTS, codexHookCommand, installCodexHooks, removeCodexHooks, ourPositions, approvalMissing, approvalState,
   installCodexHooksFile, removeCodexHooksFile,
 } from '../src/main/codex-hooks.js';
 
@@ -226,10 +226,11 @@ test('remove shifted: surviving shared group does not shift later groups; a kept
   assert.deepEqual(b.doc, { hooks: { Stop: [{ matcher: '', hooks: [f1] }] } });
 });
 
+const SNAKE = { SessionStart: 'session_start', SessionEnd: 'session_end', UserPromptSubmit: 'user_prompt_submit', PreToolUse: 'pre_tool_use', PermissionRequest: 'permission_request', PostToolUse: 'post_tool_use', Stop: 'stop', Interrupt: 'interrupt', SubagentStart: 'subagent_start', SubagentStop: 'subagent_stop' };
 test('approvalMissing: approved foreign positions do not hide our unapproved position', () => {
   const hooksPath = 'C:\Users\someone\.codex\hooks.json';
   const doc = installCodexHooks(foreignDoc(), OURS).doc;
-  const foreignOnly = ourPositions(doc, OURS).map((p) => `[hooks.state.'${hooksPath}:${p.event === 'PreToolUse' ? 'pre_tool_use' : p.event.toLowerCase()}:0:0']\ntrusted_hash = "x"\n`).join('\n');
+  const foreignOnly = ourPositions(doc, OURS).map((p) => `[hooks.state.'${hooksPath}:${SNAKE[p.event]}:0:0']\ntrusted_hash = "x"\n`).join('\n');
   const missing = approvalMissing(foreignOnly, hooksPath, ourPositions(doc, OURS));
   assert.ok(missing.includes('PostToolUse') && missing.includes('Stop') && missing.includes('PreToolUse'));
 });
@@ -253,4 +254,46 @@ test('file: indentation of the original is kept and foreign text is untouched by
     installCodexHooksFile(t.file, OURS);
     assert.ok(/\n\t"hooks": \{\n\t\t"/.test(fs.readFileSync(t.file, 'utf8')));
   } finally { t.done(); }
+});
+
+const HP = 'C:\\Users\\someone\\.codex\\hooks.json';
+const hdr = (ev, g, h, hash) => `[hooks.state.'${HP}:${SNAKE[ev]}:${g}:${h}']\ntrusted_hash = "${hash}"\n`;
+const cfgOf = (rows) => rows.map(([ev, g, h, hash]) => hdr(ev, g, h, hash)).join('\n');
+const posKeys = (pos) => pos.map((p) => [p.event, p.group, p.hook]);
+
+test('approvalState: fresh install is missing until a header appears, then approved', () => {
+  const pos = ourPositions(installCodexHooks({}, OURS).doc, OURS);
+  const a = approvalState('', HP, pos, {});
+  assert.deepEqual(a.missing, CODEX_EVENTS);
+  const b = approvalState(cfgOf(posKeys(pos).map((k) => [...k, 'O'])), HP, pos, a.memory);
+  assert.deepEqual(b.missing, []);
+  assert.deepEqual(approvalState('[[[ not toml', HP, pos, {}).missing, CODEX_EVENTS);
+  assert.deepEqual(approvalState(undefined, HP, pos, {}).missing, CODEX_EVENTS);
+});
+
+test('approvalState: our group moving into a slot approved for another hook is missing until re-approved', () => {
+  const doc = installCodexHooks(foreignDoc(), OURS).doc; // PostToolUse: foreign 0..2, ours at 3
+  const pos = ourPositions(doc, OURS);
+  const rows = [];
+  for (const p of pos) {
+    if (p.event === 'PostToolUse') { for (let g = 0; g < 3; g++) rows.push(['PostToolUse', g, 0, 'F' + g]); rows.push(['PostToolUse', 3, 0, 'O']); }
+    else rows.push([p.event, p.group, p.hook, 'O']);
+  }
+  const cfg = cfgOf(rows);
+  const a = approvalState(cfg, HP, pos, {});
+  assert.deepEqual(a.missing, []);
+  // (c) unchanged positions stay approved
+  const again = approvalState(cfg, HP, pos, a.memory);
+  assert.deepEqual(again.missing, []);
+  // a foreign group before ours is removed: ours moves to 2, whose header still has the foreign hash
+  const moved = clone(doc); moved.hooks.PostToolUse.shift();
+  const mpos = ourPositions(moved, OURS);
+  const m1 = approvalState(cfg, HP, mpos, again.memory);
+  assert.deepEqual(m1.missing, ['PostToolUse']);
+  assert.deepEqual(approvalState(cfg, HP, mpos, m1.memory).missing, ['PostToolUse']); // still pending
+  // Codex re-approves: the header at 2 changes
+  const cfg2 = cfgOf(rows.map((r) => (r[0] === 'PostToolUse' && r[1] === 2 ? ['PostToolUse', 2, 0, 'O'] : r)));
+  const m2 = approvalState(cfg2, HP, mpos, m1.memory);
+  assert.deepEqual(m2.missing, []);
+  assert.deepEqual(approvalState(cfg2, HP, mpos, m2.memory).missing, []);
 });

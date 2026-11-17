@@ -496,3 +496,15 @@ test('Task 10 fix: codexStatus: missing config.toml -> approve; unreadable -> no
   assert.equal(label({ configText: "[hooks.state.'C:/h/.codex/hooks.json:stop:0:0']\ntrusted_hash = 'x'\n" }), 'Codex hooks: installed');
   assert.equal(codexStatusLabel(codexStatus({ positions: [], hooksPath, configCode: 'ENOENT' })), 'Codex hooks: not installed');
 });
+
+test('codexStatus returns the approval memory and keeps it across calls', () => {
+  const hooksPath = 'C:/h/.codex/hooks.json';
+  const positions = [{ event: 'Stop', group: 0, hook: 0 }];
+  const text = "[hooks.state.'C:/h/.codex/hooks.json:stop:0:0']\ntrusted_hash = 'x'\n";
+  const a = codexStatus({ positions, hooksPath, configText: text, memory: {} });
+  assert.deepEqual(a.missing, []);
+  assert.deepEqual(a.memory, { Stop: { pos: '0:0', hash: 'x', pending: false } });
+  const moved = codexStatus({ positions: [{ event: 'Stop', group: 1, hook: 0 }], hooksPath, configText: "[hooks.state.'C:/h/.codex/hooks.json:stop:1:0']\ntrusted_hash = 'old'\n", memory: a.memory });
+  assert.deepEqual(moved.missing, ['Stop']);
+  assert.equal(codexStatus({ positions, hooksPath, configCode: 'EACCES', memory: a.memory }).memory, a.memory);
+});

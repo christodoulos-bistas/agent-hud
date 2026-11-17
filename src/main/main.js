@@ -11,7 +11,7 @@ import { createClassEngine } from './classes.js';
 import { createQueue } from './queue.js';
 import { isDeepStrictEqual } from 'node:util';
 import { installHooks, uninstallHooks, unmergeHooks } from './settings-hooks.js';
-import { codexHookCommand, installCodexHooksFile, removeCodexHooksFile, ourPositions, approvalMissing } from './codex-hooks.js';
+import { codexHookCommand, installCodexHooksFile, removeCodexHooksFile, ourPositions } from './codex-hooks.js';
 import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createCodexSessions, readRolloutMeta } from './codex-sessions.js';
@@ -534,6 +534,7 @@ function doCodexInstall() {
   if (CODEX.blocked) return;
   const r = installCodexHooksFile(CODEX_PATH, CODEX_COMMAND);
   if (!r.ok) { notify('Could not install the Codex hooks', `${CODEX_PATH}: ${r.error}`, true); return; }
+  if (r.changed) resetCodexApproval();
   const need = codexState().missing.length ? `\n${CODEX_APPROVE_BALLOON}` : ''; // unchanged: only if approval is actually missing
   if (!r.changed) notify('Agent HUD Codex hooks already installed', `${CODEX_PATH} was left as it is.${need}`);
   else notify('Agent HUD Codex hooks installed', `Added to ${CODEX_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}\n${CODEX_APPROVE_BALLOON}`);
@@ -559,7 +560,8 @@ function doUninstall() {
     if (!r.ok) notify('Could not remove the Codex hooks', `${CODEX_PATH}: ${r.error}`, true);
     else if (!r.changed) notify('No Agent HUD Codex hooks to remove', `${CODEX_PATH} was left as it is.`);
     else {
-      const again = r.shifted?.length ? `\nCodex may ask you to re-approve hooks for: ${r.shifted.join(', ')} (/hooks)` : '';
+      resetCodexApproval();
+      const again =r.shifted?.length ? `\nCodex may ask you to re-approve hooks for: ${r.shifted.join(', ')} (/hooks)` : '';
       notify('Agent HUD Codex hooks removed', `Removed from ${CODEX_PATH}${again}`);
     }
   }
@@ -584,7 +586,16 @@ function codexState() {
   if (positions.length) {
     try { configText = fs.readFileSync(path.join(path.dirname(CODEX_PATH), 'config.toml'), 'utf8'); } catch (err) { configCode = err?.code || 'EUNKNOWN'; }
   }
-  return codexStatus({ positions, hooksPath: CODEX_PATH, configText, configCode });
+  const memory = cfg?.codexApproval && typeof cfg.codexApproval === 'object' ? cfg.codexApproval : {};
+  const st = codexStatus({ positions, hooksPath: CODEX_PATH, configText, configCode, memory });
+  if (cfg && !isDeepStrictEqual(st.memory, memory)) { cfg.codexApproval = st.memory; try { saveConfig(configFile, cfg); } catch (err) { log('config', err); } }
+  return st;
+}
+// Our positions may have moved after an install or removal: start learning the approval hashes afresh.
+function resetCodexApproval() {
+  if (!cfg || !cfg.codexApproval || !Object.keys(cfg.codexApproval).length) return;
+  cfg.codexApproval = {};
+  try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
 }
 
 const codexLabel = () => codexStatusLabel(codexState());
@@ -648,6 +659,7 @@ async function firstRun() {
     cfg.offeredHooks = true;
     try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
     if (yes) doInstall();
+    refreshMenu();
   }
   // The Codex-only offer, independent of the Claude one; asked once whether the user accepts or declines.
   if (codexOfferDue({ cfg, target: CODEX, installed: codexState().installed })) {

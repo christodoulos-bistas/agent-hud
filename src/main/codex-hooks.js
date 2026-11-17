@@ -101,6 +101,50 @@ export function approvalMissing(configToml, hooksPath, positions) {
   return [...missing].sort((a, b) => order(a) - order(b));
 }
 
+// trusted_hash per `[hooks.state.'<path>:<event>:<group>:<hook>']` header, keyed like "<normPath>:<event>:<g>:<h>".
+function trustedHashes(configToml) {
+  const out = new Map();
+  const text = typeof configToml === 'string' ? configToml : '';
+  const header = /^[ \t]*\[hooks\.state\.(?:'([^'\r\n]*)'|"([^"\r\n]*)")\][ \t]*(?:#.*)?$/;
+  let cur = null;
+  for (const line of text.split(/\r?\n/)) {
+    const h = header.exec(line);
+    if (h) {
+      const k = /^(.*):([a-z_]+):(\d+):(\d+)$/.exec(h[1] ?? h[2]);
+      cur = k ? `${normPath(k[1])}:${k[2]}:${k[3]}:${k[4]}` : null;
+      if (cur && !out.has(cur)) out.set(cur, null);
+      continue;
+    }
+    if (/^[ \t]*\[/.test(line)) { cur = null; continue; }
+    const t = cur && /^[ \t]*trusted_hash[ \t]*=[ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)')/.exec(line);
+    if (t) out.set(cur, t[1] ?? t[2]);
+  }
+  return out;
+}
+
+// Approval with memory: a hash at a slot that changed under us means Codex has not approved our hook there yet.
+// Pure: returns the events still needing approval and the updated per-event memory { pos, hash, pending }.
+export function approvalState(configToml, hooksPath, positions, memory = {}) {
+  const hashes = trustedHashes(configToml);
+  const base = normPath(hooksPath);
+  const next = { ...(memory || {}) };
+  const missing = new Set();
+  for (const p of positions) {
+    const pos = `${p.group}:${p.hook}`;
+    const H = hashes.get(`${base}:${snake(p.event)}:${p.group}:${p.hook}`) ?? null;
+    const m = next[p.event];
+    let ok;
+    if (!m) { next[p.event] = { pos, hash: H, pending: false }; ok = H !== null; }
+    else if (m.pos !== pos) { next[p.event] = { pos, hash: H, pending: true }; ok = false; }
+    else if (m.pending) {
+      if (H !== m.hash) { next[p.event] = { pos, hash: H, pending: false }; ok = H !== null; } else ok = false;
+    } else { next[p.event] = { ...m, hash: H }; ok = H !== null; }
+    if (!ok) missing.add(p.event);
+  }
+  const order = (e) => { const i = CODEX_EVENTS.indexOf(e); return i < 0 ? CODEX_EVENTS.length : i; };
+  return { missing: [...missing].sort((a, b) => order(a) - order(b)), memory: next };
+}
+
 export function installCodexHooksFile(file, command) {
   const t = (doc) => installCodexHooks(doc, command).doc;
   t.keepIndent = true;
