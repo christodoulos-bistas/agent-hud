@@ -46,15 +46,16 @@ export function removeCodexHooks(doc, command) {
   if (!hooks) return { doc: out, changed: false, shifted };
   for (const ev of Object.keys(hooks)) {
     if (!Array.isArray(hooks[ev])) continue;
-    const kept = []; let removed = false; let moved = false;
+    const kept = []; let removed = false; let moved = false; let groupDeleted = false;
     for (const g of hooks[ev]) {
-      if (!Array.isArray(g?.hooks) || !g.hooks.some((h) => isOurs(h, command))) { if (removed) moved = true; kept.push(g); continue; }
+      if (!Array.isArray(g?.hooks) || !g.hooks.some((h) => isOurs(h, command))) { if (groupDeleted) moved = true; kept.push(g); continue; }
       removed = true;
+      if (groupDeleted) moved = true;
       const rest = []; let hookRemoved = false;
       for (const h of g.hooks) {
         if (isOurs(h, command)) hookRemoved = true; else { if (hookRemoved) moved = true; rest.push(h); }
       }
-      if (rest.length) kept.push({ ...g, hooks: rest });
+      if (rest.length) kept.push({ ...g, hooks: rest }); else groupDeleted = true;
     }
     if (!removed) continue;
     if (moved) shifted.push(ev);
@@ -79,6 +80,8 @@ export function ourPositions(doc, command) {
 
 const normPath = (p) => p.replace(/\//g, '\\').toLowerCase();
 
+// Best effort: a header at our position may belong to a foreign hook that used to sit there;
+// Codex still asks for re-approval in /hooks.
 // Events with at least one of our positions that has no `[hooks.state.'<path>:<event>:<group>:<hook>']` header.
 export function approvalMissing(configToml, hooksPath, positions) {
   const approved = new Set();
@@ -99,13 +102,16 @@ export function approvalMissing(configToml, hooksPath, positions) {
 }
 
 export function installCodexHooksFile(file, command) {
-  return rewrite(file, (doc) => installCodexHooks(doc, command).doc);
+  const t = (doc) => installCodexHooks(doc, command).doc;
+  t.keepIndent = true;
+  return rewrite(file, t);
 }
 
 export function removeCodexHooksFile(file, command) {
   let shifted = [];
   const t = (doc) => { const r = removeCodexHooks(doc, command); shifted = r.shifted; return r.doc; };
   t.skipIfMissing = true;
+  t.keepIndent = true;
   const res = rewrite(file, t);
   return res.ok ? { ...res, shifted } : res;
 }

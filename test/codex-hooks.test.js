@@ -212,3 +212,45 @@ test('removeCodexHooksFile on a missing file is a no-op and creates nothing', ()
 test('codexHookCommand quotes the .cmd path', () => {
   assert.equal(codexHookCommand('C:\\x\\resources'), '"C:\\x\\resources\\codex-hook.cmd"');
 });
+
+test('remove shifted: surviving shared group does not shift later groups; a kept group after a deleted one does', () => {
+  const ours = { type: 'command', command: OURS };
+  const f1 = { type: 'command', command: 'node f1.js' };
+  const f2 = { type: 'command', command: 'node f2.js' };
+  // A: ours shares group 0 with a foreign hook that sits before it; group 1 stays at index 1
+  const a = removeCodexHooks({ hooks: { Stop: [{ matcher: '', hooks: [f1, ours] }, { matcher: '', hooks: [f2] }] } }, OURS);
+  assert.deepEqual(a.shifted, []);
+  // B: group 0 (ours only) is deleted, so the foreign hook in the next group moves from 1:0 to 0:0
+  const b = removeCodexHooks({ hooks: { Stop: [{ matcher: '', hooks: [ours] }, { matcher: '', hooks: [f1, ours] }] } }, OURS);
+  assert.deepEqual(b.shifted, ['Stop']);
+  assert.deepEqual(b.doc, { hooks: { Stop: [{ matcher: '', hooks: [f1] }] } });
+});
+
+test('approvalMissing: approved foreign positions do not hide our unapproved position', () => {
+  const hooksPath = 'C:\Users\someone\.codex\hooks.json';
+  const doc = installCodexHooks(foreignDoc(), OURS).doc;
+  const foreignOnly = ourPositions(doc, OURS).map((p) => `[hooks.state.'${hooksPath}:${p.event === 'PreToolUse' ? 'pre_tool_use' : p.event.toLowerCase()}:0:0']\ntrusted_hash = "x"\n`).join('\n');
+  const missing = approvalMissing(foreignOnly, hooksPath, ourPositions(doc, OURS));
+  assert.ok(missing.includes('PostToolUse') && missing.includes('Stop') && missing.includes('PreToolUse'));
+});
+
+test('file: indentation of the original is kept and foreign text is untouched by install and remove', () => {
+  const t = tmp();
+  try {
+    const orig = JSON.stringify(foreignDoc(), null, 4) + '\n';
+    fs.writeFileSync(t.file, orig);
+    const start = orig.indexOf('"PostToolUse"');
+    const block = orig.slice(start, orig.indexOf('"statusMessage"', start) + 30);
+    assert.equal(installCodexHooksFile(t.file, OURS).ok, true);
+    const text = fs.readFileSync(t.file, 'utf8');
+    assert.ok(text.includes(block));
+    assert.ok(/\n {4}"hooks": \{\n {8}"/.test(text));
+    assert.equal(removeCodexHooksFile(t.file, OURS).ok, true);
+    assert.equal(fs.readFileSync(t.file, 'utf8'), orig);
+
+    const tabs = JSON.stringify(foreignDoc(), null, '\t');
+    fs.writeFileSync(t.file, tabs);
+    installCodexHooksFile(t.file, OURS);
+    assert.ok(/\n\t"hooks": \{\n\t\t"/.test(fs.readFileSync(t.file, 'utf8')));
+  } finally { t.done(); }
+});

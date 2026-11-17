@@ -65,7 +65,8 @@ function readSettings(file) {
   const settings = JSON.parse(text);
   if (settings === null || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('settings file is not a JSON object');
   if ('hooks' in settings && (settings.hooks === null || typeof settings.hooks !== 'object' || Array.isArray(settings.hooks))) throw new Error('"hooks" is not an object');
-  return { exists: true, settings, eol: text.includes('\r\n') ? '\r\n' : '\n', trailing: /\n$/.test(text) };
+  const ind = /\n([ \t]+)\S/.exec(text);
+  return { exists: true, settings, indent: ind ? ind[1] : 2, eol: text.includes('\r\n') ? '\r\n' : '\n', trailing: /\n$/.test(text) };
 }
 
 function writeAtomic(file, content) {
@@ -90,7 +91,7 @@ function keepOriginal(target) {
 export function rewrite(file, transform) {
   try {
     const target = path.resolve(file);
-    const { exists, settings, eol, trailing } = readSettings(target);
+    const { exists, settings, indent, eol, trailing } = readSettings(target);
     if (!exists && transform.skipIfMissing) return { ok: true, backup: null, changed: false };
     const next = transform(settings);
     if (exists && isDeepStrictEqual(next, settings)) return { ok: true, backup: null, changed: false };
@@ -100,7 +101,7 @@ export function rewrite(file, transform) {
       backup = target + '.agent-hud.bak';
       fs.copyFileSync(target, backup);
     }
-    let text = JSON.stringify(next, null, 2);
+    let text = JSON.stringify(next, null, transform.keepIndent ? indent : 2);
     if (eol === '\r\n') text = text.replace(/\n/g, '\r\n');
     if (trailing) text += eol;
     writeAtomic(target, text);
