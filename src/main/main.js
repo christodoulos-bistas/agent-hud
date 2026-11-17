@@ -625,7 +625,7 @@ async function startServer() {
     replyOptIn: (id) => store.wantsReply(id),
     onEvent: (ev) => {
       // A Codex chat exists only through its events: track it and list it before the store sees the event.
-      if (ev.source === 'codex') { codexSessions.onEvent(ev); store.setSessions(merged()); }
+      if (ev.source === 'codex') { codexSessions.onEvent(ev); store.setSessions(merged(), { poll: false }); }
       store.onEvent(ev);
       push();
     },

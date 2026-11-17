@@ -568,3 +568,24 @@ test('store: a codex session view and detail carry source codex; a Claude one ca
   assert.equal(store.detail('c1').source, 'claude');
   assert.equal(store.detail('x1').source, 'codex');
 });
+
+test('I1: an event-driven setSessions never counts as a missed poll', () => {
+  const { store } = setup();
+  store.setSessions([S('a')]);
+  store.onEvent(ev('a', 'UserPromptSubmit', 1100, { raw: { prompt: 'do it' } }));
+  store.setReplyOptIn('a', true);
+  store.setSessions([]); // one real poll catches the file half-written
+  store.setSessions([], { poll: false }); // a Codex event arrives before the next poll
+  store.setSessions([S('a')]); // it is back
+  assert.equal(store.wantsReply('a'), true);
+  assert.equal(store.detail('a').task, 'do it');
+});
+
+test('I1 control: two real polls missing a session forget it', () => {
+  const { store } = setup();
+  store.setSessions([S('a')]);
+  store.setReplyOptIn('a', true);
+  store.setSessions([]); store.setSessions([]);
+  store.setSessions([S('a')]);
+  assert.equal(store.wantsReply('a'), false);
+});

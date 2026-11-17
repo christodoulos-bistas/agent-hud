@@ -63,19 +63,21 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
   // A session file can be caught half-written, so a session is forgotten only after it is missing from
   // two polls in a row; while missing once it stays listed with its last known data (I8).
   const missed = new Map();
-  function setSessions(list) {
+  // `poll: false` is an event-driven refresh (a Codex event): it neither counts nor resets misses and never forgets.
+  function setSessions(list, { poll = true } = {}) {
     const fresh = list.map((x) => ({ ...x }));
     const keep = new Set(fresh.map((x) => x.sessionId));
     const held = [];
     for (const old of sessions) {
       if (keep.has(old.sessionId)) continue;
+      if (!poll) { held.push(old); continue; }
       const n = (missed.get(old.sessionId) ?? 0) + 1;
       if (n < 2) { missed.set(old.sessionId, n); held.push(old); continue; }
       missed.delete(old.sessionId);
       engine.forget(old.sessionId); steps.forget(old.sessionId); stages.delete(old.sessionId); state.delete(old.sessionId); optIn.delete(old.sessionId);
       hidden.delete(old.sessionId);
     }
-    for (const id of keep) missed.delete(id);
+    if (poll) for (const id of keep) missed.delete(id);
     // A chat without hooks starts a new turn when its file turns busy: that wakes a ✕-hidden one. A chat
     // with hooks wakes only on a real prompt (onEvent): its file also turns busy for <task-notification>
     // turns and on the poll after the prompt that came before the ✕ (final review I1).
