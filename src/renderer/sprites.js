@@ -542,6 +542,92 @@ CLASSES.push({
   ]
 });
 
+// ---- Codex agents: same twelve costumes, a different body underneath ----------------------------
+// Proposal for src/renderer/sprites.js (design brainstorm, 2026-11-17). Not wired into the app.
+//
+// WHERE TO PASTE: in sprites.js, directly after the last CLASSES.push(...) (the Summoner) and before
+// "// ---- HUD mood marks". It uses only what sprites.js already has in scope there: GR, L, CLASSES.
+//
+// HOW A CLASS SELECTS IT: rasterize() already draws `def.body || BODY` and merges `def.pal` over PAL,
+// so a Codex costume is the Claude costume with three fields swapped and nothing else touched:
+//
+//     codexOf(def) === { ...def, body: CODEX_BODY, pal: { ...def.pal, ...CODEX_PAL }, fx: <see below> }
+//
+// The Codex body is drawn with the SAME body keys as Claude's critter (h / o / O) and CODEX_PAL
+// re-points them at slate. That matters: Star-Reader, Hexbreaker, Loremaster and Herald paint the
+// shadow under their brims with 'O' at y13, x6-17; with h/o/O re-pointed, that band becomes slate
+// shade on a Codex face instead of an orange stripe. Three new keys (J, M, G) are free in PAL and in
+// every class palette (class keys in use: 0-9 a-e c C i r R), so the merge can never clobber a costume.
+//
+// ANCHORS (unchanged from Claude's critter, so every hat, held item and back item lines up):
+//   body box x5-18 · head-top y12 · eyes x8 & x15, y14-15 · arms y16 at x3-4 / x19-20 ·
+//   ground contact y20-21 over x6-8 / x15-17 (covers the old leg columns 6, 8, 15, 17) · shadow y22.
+// What changes is the silhouette inside that frame: a top-heavy terminal head (x5-18, y12-16, with
+// chamfered top corners and a dark glass visor), a narrower torso (x7-16, y17-19) with a prompt
+// chevron, jointed arms, and two booted legs instead of four thin ones.
+//
+// Ruler for the 24-px grid:  0123456789abcdefghijklmn   (a=10 ... n=23)
+
+export const CODEX_PAL = {
+  h: '#bcc7d1', o: '#8a97a4', O: '#5c6875',   // slate shell: highlight / base / shade (same value as Claude's o)
+  J: '#10181e',                               // visor glass
+  M: '#8ef5c6',                               // phosphor mint: eyes and the prompt chevron (the only accent)
+  G: '#3f4954'                                // graphite trim: arm joints and boots
+};
+
+// Same four eye cells as GR.EYES, lit instead of dark.
+export const CODEX_EYES = [[8, 14, 'M'], [8, 15, 'M'], [15, 14, 'M'], [15, 15, 'M']];
+
+export const CODEX_BODY = [GR.patch(L(0, 12, [
+  '......hhhhhhhhhhho......',   // y12 head-top, corners chamfered (most hats cover this row)
+  '.....hhhhhhhhhhhhhO.....',   // y13 lit brow: a light line between any hat and the dark visor (UX review:
+                                //     Runesmith's steel helm and Cartographer's slate hat merged into the head
+                                //     without it). Star-Reader / Hexbreaker / Loremaster / Herald shade it with 'O'.
+  '.....hoJJJJJJJJJJoO.....',   // y14 visor x7-16, eyes patched in at x8 and x15
+  '.....hoJJJJJJJJJJoO.....',   // y15
+  '...oGhOOOOOOOOOOOOOGO...',   // y16 chin + arms: hand x3 / x20, joint x4 / x19
+  '.......hoMooooooO.......',   // y17 torso x7-16, chevron x9-10 (Runesmith's apron covers it exactly)
+  '.......hooMooooOO.......',   // y18
+  '.......oOMOOOOOOO.......',   // y19
+  '.......oO......oO.......',   // y20 legs x7-8 / x15-16
+  '......GGG......GGG......',   // y21 boots x6-8 / x15-17
+  '....::::::::::::::::....'    // y22 ground shadow, as Claude's
+]), CODEX_EYES)];
+
+// The sub-agent familiar (hud.js famSvg) and the Summoner's two floating helpers: a pocket-size
+// Codex, top-heavy like the big one (Claude's familiar widens at the bottom, this one narrows).
+// Its whole visor is lit mint (no separate eyes at this size) so a grey familiar never vanishes
+// against a steel prop such as Runesmith's hammer head (UX review finding).
+const CODEX_FAMILIAR_ROWS = [
+  '.hhhhhO.',
+  '.hMMMMO.',
+  '..hooO..',
+  '..G..G..'
+];
+export const CODEX_FAMILIAR = { w: 8, h: 4, noBody: true, pal: CODEX_PAL, front: [L(0, 0, CODEX_FAMILIAR_ROWS)] };
+
+// The one costume tweak. The Summoner's fx familiars are Claude critters drawn in h/o/O/k; under
+// CODEX_PAL they would turn into grey Claude critters. Same groups, same positions, Codex rows:
+//   fam-a  L(0, 2)  ['.hhhhho.', '.hkookO.', 'oooooOOO', '..O..O..']  ->  CODEX_FAMILIAR_ROWS
+//   fam-b  L(16, 0) ['.hhhhho.', '.hkookO.', 'oooooOOO', '..O..O..']  ->  CODEX_FAMILIAR_ROWS
+// No other class is edited.
+const CODEX_FX = {
+  summoner: [
+    { cls: 'fam-a', layers: [L(0, 2, CODEX_FAMILIAR_ROWS)] },
+    { cls: 'fam-b', layers: [L(16, 0, CODEX_FAMILIAR_ROWS)] }
+  ]
+};
+
+export function codexOf(def) {
+  return Object.assign({}, def, {
+    body: CODEX_BODY,
+    pal: Object.assign({}, def.pal || {}, CODEX_PAL),
+    fx: CODEX_FX[def.id] || def.fx
+  });
+}
+
+export const CODEX_CLASSES = CLASSES.map(codexOf);
+
 // ---- HUD mood marks. Badge and zee are copied from the roster's MOODS block (lines 1243-1252). ----
 export const MOODS_BADGE = { w: 7, h: 7, noBody: true, front: [L(0, 0, [
   '..YYy..',
@@ -576,8 +662,11 @@ export const MOODS_PENNANT = {
 export const FAMILIAR = { w: 8, h: 4, noBody: true, front: [L(0, 0, ['.hhhhho.', '.hkookO.', 'oooooOOO', '..O..O..'])] };
 
 const BY_ID = new Map(CLASSES.map((c) => [c.id, c]));
+const CODEX_BY_ID = new Map(CODEX_CLASSES.map((c) => [c.id, c]));
 
 // The class sprite as an SVG string; an unknown id draws the Pathfinder (every session starts as one).
-export function spriteSvg(classId, scale = 2) {
-  return GR.svg(BY_ID.get(classId) || BY_ID.get('pathfinder'), scale);
+// `source` is the chat's agent: 'claude' (default, so the app icon and old callers are unchanged) or 'codex'.
+export function spriteSvg(classId, scale = 2, { source = 'claude' } = {}) {
+  const ids = source === 'codex' ? CODEX_BY_ID : BY_ID;
+  return GR.svg(ids.get(classId) || ids.get('pathfinder'), scale);
 }
