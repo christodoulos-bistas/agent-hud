@@ -16,5 +16,7 @@ contextBridge.exposeInMainWorld('hud', {
   rowOffset: (sessionId, rowY) => ipcRenderer.send('hud:rowOffset', String(sessionId), Number(rowY)),
   setInteractive: (on) => ipcRenderer.send('hud:setInteractive', !!on),
   collapse: (on) => ipcRenderer.send('hud:collapse', !!on),
+  hideAgent: (sessionId) => ipcRenderer.send('hud:hideAgent', String(sessionId)),
+  showTucked: (on) => ipcRenderer.send('hud:showTucked', !!on),
   reportHeight: (px) => ipcRenderer.send('hud:reportHeight', Number(px)),
 });

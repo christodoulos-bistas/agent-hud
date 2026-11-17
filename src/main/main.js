@@ -52,6 +52,7 @@ let cfg = null;
 let configFile = null;
 let sessions = [];
 let collapsed = false;
+let tuckOpen = false; // v1.3: the HUD's "N tucked away" list is unfolded
 let contentHeight = 120;
 let quitting = null;
 // The detail panel: main owns which agent is selected (pick.selected = { id, rowY }: rowY is the row's
@@ -76,7 +77,7 @@ const store = createStore({ engine, queue, holdMs: HOLD_MS, replyMs: REPLY_MS, o
 
 // ---------------------------------------------------------------- snapshot
 
-const hudState = () => ({ collapsed, visible: !!win && !win.isDestroyed() && win.isVisible() });
+const hudState = () => ({ collapsed, tuckOpen, visible: !!win && !win.isDestroyed() && win.isVisible() });
 // panelTarget's view of the HUD for agent `id`: hasCard when that agent owns the active question.
 const panelHud = (id, snap) => ({ ...hudState(), hasCard: !!snap?.card && String(snap.card.sessionId) === String(id) });
 
@@ -91,7 +92,7 @@ const pushNow = guarded('push', () => {
   // One the question made stays until the question goes (its agent can be missing from the list for a
   // poll or two; placePanel keeps the panel hidden meanwhile).
   if (pick.selected && !pick.auto && !panelTarget(pick.selected.id, snap, panelHud(pick.selected.id, snap))) pick = { ...pick, selected: null };
-  try { win.webContents.send('snapshot', { ...snap, card: hudCard(snap.card), collapsed, selected: pick.selected?.id ?? null }); } catch (err) { log('push', err); }
+  try { win.webContents.send('snapshot', { ...snap, card: hudCard(snap.card), collapsed, tuckOpen, selected: pick.selected?.id ?? null }); } catch (err) { log('push', err); }
   placePanel(snap);
   pushDetail();
 }, log);
@@ -386,6 +387,14 @@ const releaseCard = (id) => queue.answer(id, RELEASE);
 fromHud('hud:answer', answerCard);
 fromHud('hud:release', releaseCard);
 fromHud('hud:setReplyOptIn', (sessionId, on) => { store.setReplyOptIn(sessionId, !!on); push(); });
+// v1.3: ✕ takes a chat off the HUD until it asks something or starts a new turn; its open panel closes.
+fromHud('hud:hideAgent', (sessionId) => {
+  const id = String(sessionId);
+  store.hide(id);
+  if (pick.selected?.id === id) select(null); else push();
+});
+// v1.3: unfold or fold the "N tucked away" list (folding closes a tucked chat's panel: panelTarget).
+fromHud('hud:showTucked', (on) => { tuckOpen = !!on; push(); });
 fromHud('hud:openWindow', (sessionId) => openWindow(sessionId));
 fromHud('hud:setInteractive', (on) => setInteractive(!!on));
 fromHud('hud:collapse', (on) => setCollapsed(on));

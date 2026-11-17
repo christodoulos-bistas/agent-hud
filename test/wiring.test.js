@@ -432,3 +432,12 @@ test('v1.2 M7: the HUD gets only the id, kind and session of the active card (th
   assert.equal(hudCard(null), null);
   assert.equal(hudCard(undefined), null);
 });
+
+test('v1.3: a tucked chat is a panel target only while the tucked list is open', () => {
+  const snap = { agents: [{ id: 'a' }], tucked: [{ id: 't' }] };
+  const hud = { collapsed: false, visible: true, hasCard: false };
+  assert.equal(panelTarget('t', snap, { ...hud, tuckOpen: true }), 't');
+  assert.equal(panelTarget('t', snap, { ...hud, tuckOpen: false }), null, 'folding the list closes its panel');
+  assert.equal(panelTarget('a', snap, { ...hud, tuckOpen: false }), 'a');
+  assert.equal(panelTarget('gone', snap, { ...hud, tuckOpen: true }), null, 'a ✕-hidden chat with the list folded, or one that left');
+});
