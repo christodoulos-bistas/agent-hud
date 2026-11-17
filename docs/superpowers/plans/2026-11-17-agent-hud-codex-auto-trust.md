@@ -228,3 +228,34 @@ Each candidate from 2–3 must pass `exists`; a throw or a miss moves to the nex
 - [ ] **Step 3: Fallback path.** Quit the HUD; delete one HUD `hooks.state` block; start `Agent HUD.exe` from a shell with `AGENT_HUD_CODEX_EXE=C:\nope.exe`. Expect exactly one `Agent HUD Codex hooks need approval` balloon with the Settings → Hooks text, the tray label `Codex hooks: approve in Codex Settings → Hooks` plus the `Trust Agent HUD hooks in Codex` item, and no second balloon after 60 s.
 - [ ] **Step 4: Other tools untouched.** Diff the backup `config.toml` against the current one: only `hooks.state` entries for HUD keys differ. `hooks.json` matches the post-install file.
 - [ ] **Step 5: Report** results to the user; commit any doc touch-ups.
+
+### Task 7: A hook command PowerShell runs (live-check fix)
+
+Spec: "Addendum — the hook command must survive PowerShell".
+
+**Files:**
+- Modify: `src/main/codex-hooks.js` (`codexHookCommand`, `isOurs`, new export `hasLegacyCodexHooks`)
+- Modify: `src/main/main.js` (startup upgrade)
+- Test: `test/codex-hooks.test.js`, `test/codex-trust.test.js`
+
+**Interfaces:**
+- Produces:
+  - `codexHookCommand(resourcesDir) -> string` = `` `cmd /d /c "${path.win32.join(resourcesDir, 'codex-hook.cmd')}"` ``
+  - `legacyCodexCommand(command) -> string | null` — for a command of the form `cmd /d /c "<p>"` returns `"<p>"` (the pre-fix bare quoted form); otherwise `null`.
+  - `hasLegacyCodexHooks(doc, command) -> boolean` — true when any hook in `doc.hooks` has `command === legacyCodexCommand(command)`.
+  - `isOurs(h, command)` (internal) — true for `command` or its legacy form; used by `installCodexHooks`, `removeCodexHooks`, `ourPositions`.
+
+- [ ] **Step 1: Failing tests** in `test/codex-hooks.test.js`:
+  - `codexHookCommand: cmd /d /c with the quoted script path` — `codexHookCommand('C:\P\Agent HUD\resources')` → `cmd /d /c "C:\P\Agent HUD\resources\codex-hook.cmd"`.
+  - `legacyCodexCommand` — returns `"C:\P\Agent HUD\resources\codex-hook.cmd"` for that command; `null` for `node "x.cjs"`.
+  - `install upgrades the legacy command in place` — a doc where `Stop` is `[foreign group, { hooks: [{ type:'command', command: LEGACY, timeout: 10 }] }]` and every other HUD event likewise sits after a foreign group: after `installCodexHooks(doc, NEW)` every HUD hook is at the same group/hook index with `command === NEW`, no group was appended, foreign groups are byte-identical, `changed === true`.
+  - `ourPositions and remove see the legacy command` — `ourPositions(legacyDoc, NEW)` returns the same positions as for a NEW doc; `removeCodexHooks(legacyDoc, NEW)` removes them.
+  - `hasLegacyCodexHooks` — true for the legacy doc, false after install, false for a doc with only NEW.
+  - Update any existing assertion that hard-codes the old bare-quoted command format.
+  In `test/codex-trust.test.js`: `pickOurUntrusted: the legacy command is not ours` — a hook with `command: LEGACY` (else ours, untrusted) is not picked when `command: NEW`.
+- [ ] **Step 2: Run** `node --test test/codex-hooks.test.js test/codex-trust.test.js` → new tests FAIL.
+- [ ] **Step 3: Implement** in `codex-hooks.js`. Do not change `codex-trust.js` (its exact-match `isOurs` already gives the legacy test).
+- [ ] **Step 4: Startup upgrade in `main.js`.** New `function upgradeCodexHooks()` called in `start()` right after `await firstRun()` and before the `codexTrustDue` check: returns unless `!CODEX.blocked`, `readJson(CODEX_PATH)` is an object and `hasLegacyCodexHooks(doc, CODEX_COMMAND)`. Then `installCodexHooksFile(CODEX_PATH, CODEX_COMMAND)`; on `!ok` → `log` + `notify('Could not update the Codex hooks', \`${CODEX_PATH}: ${r.error}\`, true)`; on `changed`: if `cfg.codexAutoTrust === true` → `trustCodex({ reason: 'startup' })`, else `notify('Agent HUD updated its Codex hooks', CODEX_APPROVE_BALLOON)`; then `refreshMenu()`. Returns `true` when it upgraded, so `start()` skips the `codexTrustDue` call that run.
+- [ ] **Step 5: Run** `node --check src/main/main.js` and `npm test` → all PASS.
+- [ ] **Step 6: Commit** `fix: Codex hook command that PowerShell runs; upgrade old installs in place`.
+- [ ] **Step 7 (controller, user present): live check.** Build, install; start the HUD: `hooks.json` holds the new command at the same positions; HUD log shows the re-trust; a new local Codex chat appears in the HUD with the `Codex ·` tag; its rollout no longer holds the `codex-hook.cmd` path as additional context.

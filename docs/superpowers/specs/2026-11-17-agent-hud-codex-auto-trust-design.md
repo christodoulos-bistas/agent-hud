@@ -122,3 +122,23 @@ Within A, *Claude's call*: ask Codex for the hash (`hooks/list`) rather than rec
   says "Start a new Codex chat to use them." and switches to "Restart Codex to use them." if the test needs it.
 - *Answered (spike 10):* a second `codex.exe app-server` leaves only a temp `~/.codex/tmp/arg0-windows/codex-arg0*`
   folder; no session files. The app alias `chatgpt-desktop.exe` resolves with `fs.readlinkSync`.
+
+## Addendum — the hook command must survive PowerShell (17 Nov, live check)
+
+**Found in the live check:** the Codex app runs a hook's `command` through PowerShell on Windows. The HUD
+installed `"<resources>\codex-hook.cmd"` (a bare quoted path), which PowerShell evaluates as a string and
+prints — the bridge never ran, no Codex chat ever reached the HUD, and the path was injected into every Codex
+chat as `hooks.additional_context` (seen in rollouts at 15:27 and 15:48). Reproduced with
+`powershell -Command '"<path>"'`. Trust itself works: the trusted hooks ran in the open app without a restart.
+
+**Decided with the user:** fix it on this branch.
+
+- New command: `cmd /d /c "<resources>\codex-hook.cmd"` — tested to run (stdin passed) under both PowerShell
+  and cmd, from a path with a space.
+- The old bare-quoted form still counts as the HUD's own in `codex-hooks.js` (install / remove / positions),
+  so install rewrites it **in place** — positions never move. `codex-trust.js` keeps trusting only the exact
+  new command (the old one cannot run).
+- **Upgrade at startup** *(Claude's call)*: when the hooks file holds the old form, the HUD rewrites it.
+  Codex now sees a changed hook (new hash) while the HUD's own approval check still sees the old
+  `trusted_hash` entry, so the HUD asks Codex directly: with `codexAutoTrust` it runs the trust step
+  (startup wording); without it, it shows `Agent HUD updated its Codex hooks` + `CODEX_APPROVE_BALLOON`.
