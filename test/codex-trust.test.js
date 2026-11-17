@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { pickOurUntrusted, trustEdits, trustSummary, isOurs } from '../src/main/codex-trust.js';
+import { pickOurUntrusted, trustEdits, trustSummary, isOurs, findCodexExe } from '../src/main/codex-trust.js';
 
 const HP = 'C:\\Users\\u\\.codex\\hooks.json';
 const CMD = '"C:\\Users\\u\\AppData\\Local\\Programs\\Agent HUD\\resources\\codex-hook.cmd"';
@@ -115,4 +115,66 @@ test('exe null -> not-found', async () => {
   const r = await trustCodexHooks({ exe: null, hooksPath: HP, command: CMD, cwd: os.tmpdir(), spawnFn: () => { called = true; } });
   assert.deepEqual(r, { ok: false, trusted: [], already: [], untrusted: [], error: 'not-found' });
   assert.equal(called, false);
+});
+
+// findCodexExe: every lookup is injected, so no real PowerShell or filesystem is touched.
+const LA = 'C:\\Users\\u\\AppData\\Local';
+const ALIAS = `${LA}\\Microsoft\\WindowsApps\\chatgpt-desktop.exe`;
+const APP = 'C:\\PF\\WindowsApps\\OpenAI.Codex_1\\app';
+const ALIAS_EXE = `${APP}\\resources\\codex.exe`;
+const APPX_ROOT = 'C:\\PF\\WindowsApps\\OpenAI.Codex_2';
+const APPX_EXE = `${APPX_ROOT}\\app\\resources\\codex.exe`;
+const finder = ({ env = { LOCALAPPDATA: LA }, readlink, present = [], ps = '' } = {}) => {
+  const calls = { readlink: [], ps: [] };
+  return {
+    calls,
+    run: () => findCodexExe({
+      env,
+      readlink: (p) => { calls.readlink.push(p); return readlink(p); },
+      exists: (p) => present.includes(p),
+      runPs: async (s) => { calls.ps.push(s); return ps; },
+    }),
+  };
+};
+const throwing = () => { throw new Error('nope'); };
+
+test('findCodexExe: env override wins', async () => {
+  const f = finder({ env: { AGENT_HUD_CODEX_EXE: 'D:\\x\\codex.exe', LOCALAPPDATA: LA }, readlink: () => `${APP}\\ChatGPT.exe`, present: ['D:\\x\\codex.exe', ALIAS_EXE] });
+  assert.deepEqual(await f.run(), { file: 'D:\\x\\codex.exe', args: [] });
+});
+
+test('findCodexExe: env override missing on disk -> null, no other lookups', async () => {
+  const f = finder({ env: { AGENT_HUD_CODEX_EXE: 'D:\\x\\codex.exe', LOCALAPPDATA: LA }, readlink: () => `${APP}\\ChatGPT.exe`, present: [ALIAS_EXE, APPX_EXE], ps: APPX_ROOT });
+  assert.equal(await f.run(), null);
+  assert.equal(f.calls.readlink.length, 0);
+  assert.equal(f.calls.ps.length, 0);
+});
+
+test('findCodexExe: alias link -> resources\\codex.exe', async () => {
+  const f = finder({ readlink: () => `${APP}\\ChatGPT.exe`, present: [ALIAS_EXE] });
+  assert.deepEqual(await f.run(), { file: ALIAS_EXE, args: [] });
+  assert.deepEqual(f.calls.readlink, [ALIAS]);
+  assert.equal(f.calls.ps.length, 0);
+});
+
+test('findCodexExe: alias throws -> Appx location', async () => {
+  const f = finder({ readlink: throwing, present: [APPX_EXE], ps: APPX_ROOT });
+  assert.deepEqual(await f.run(), { file: APPX_EXE, args: [] });
+  assert.match(f.calls.ps[0], /Get-AppxPackage -Name OpenAI\.Codex/);
+});
+
+test('findCodexExe: alias result missing on disk -> Appx location', async () => {
+  const f = finder({ readlink: () => `${APP}\\ChatGPT.exe`, present: [APPX_EXE], ps: APPX_ROOT });
+  assert.deepEqual(await f.run(), { file: APPX_EXE, args: [] });
+});
+
+test('findCodexExe: nothing found -> null', async () => {
+  const f = finder({ readlink: throwing, ps: '' });
+  assert.equal(await f.run(), null);
+});
+
+test('findCodexExe: no LOCALAPPDATA skips the alias step', async () => {
+  const f = finder({ env: {}, readlink: () => `${APP}\\ChatGPT.exe`, present: [ALIAS_EXE] });
+  assert.equal(await f.run(), null);
+  assert.equal(f.calls.readlink.length, 0);
 });

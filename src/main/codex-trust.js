@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import { spawn, execFile } from 'node:child_process';
 import readline from 'node:readline';
 
 const normPath = (p) => path.win32.normalize(p).toLowerCase();
@@ -133,4 +134,37 @@ export function trustCodexHooks({ exe, hooksPath, command, cwd, timeoutMs = 1500
       }
     })();
   });
+}
+
+const defaultRunPs = (script) => new Promise((resolve) => {
+  try {
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 10000 },
+      (err, stdout) => resolve(err ? '' : String(stdout ?? '').trim()));
+  } catch { resolve(''); }
+});
+
+// Locates the Codex desktop app's bundled codex.exe. Never rejects; null when not found.
+// AGENT_HUD_CODEX_EXE is the only candidate when set. Otherwise: the chatgpt-desktop.exe alias link, then Get-AppxPackage.
+export async function findCodexExe({ env = process.env, readlink = fs.readlinkSync, exists = fs.existsSync, runPs = defaultRunPs } = {}) {
+  const ok = (p) => { try { return !!exists(p); } catch { return false; } };
+  const hit = (file) => ({ file, args: [] });
+
+  if (env.AGENT_HUD_CODEX_EXE) return ok(env.AGENT_HUD_CODEX_EXE) ? hit(env.AGENT_HUD_CODEX_EXE) : null;
+
+  if (env.LOCALAPPDATA) {
+    try {
+      const target = readlink(path.win32.join(env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', 'chatgpt-desktop.exe'));
+      const candidate = path.win32.join(path.win32.dirname(target), 'resources', 'codex.exe');
+      if (ok(candidate)) return hit(candidate);
+    } catch {}
+  }
+
+  try {
+    const location = String(await runPs('(Get-AppxPackage -Name OpenAI.Codex).InstallLocation') ?? '').trim();
+    if (location) {
+      const candidate = path.win32.join(location, 'app', 'resources', 'codex.exe');
+      if (ok(candidate)) return hit(candidate);
+    }
+  } catch {}
+  return null;
 }
