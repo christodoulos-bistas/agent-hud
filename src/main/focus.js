@@ -37,3 +37,24 @@ export function openCommandFor(session, { codeCmd, codexActivate } = {}) {
 }
 
 export const canOpen = (session, opts = {}) => !!session && openCommandFor(session, opts) !== null;
+
+// The chat itself, not just its app: each app's own chat link (tested 17 Nov for the Claude and Codex apps).
+// A VS Code link goes to the window used last, and a window that doesn't hold the chat opens a second copy
+// of it, so the chat's own window comes forward first (code.cmd <cwd>) and the link follows after a wait.
+// Only a real session id (a UUID) goes into a link; anything else gets null and today's behaviour.
+export const VSCODE_LINK_WAIT_MS = 1500;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function chatLinkFor(session, { codeCmd } = {}) {
+  const id = String(session?.sessionId ?? '');
+  if (!UUID.test(id)) return null;
+  const sid = encodeURIComponent(id);
+  if (session.entrypoint === 'claude-desktop') return { url: `claude://code/continue?session=${sid}` };
+  if (session.entrypoint === 'codex') return session.host === 'desktop' ? { url: `codex://threads/${sid}` } : null;
+  if (session.entrypoint === 'claude-vscode') {
+    const cwd = String(session.cwd || '');
+    if (!codeCmd || !cwd) return null;
+    return { first: { cmd: codeCmd, args: [cwd] }, waitMs: VSCODE_LINK_WAIT_MS, url: `vscode://anthropic.claude-code/open?session=${sid}` };
+  }
+  return null;
+}

@@ -74,3 +74,34 @@ test('codex desktop with codexActivate null/absent -> null, and canOpen follows'
   assert.equal(canOpen(X('desktop'), {}), false);
   assert.equal(canOpen(X('cli'), { codexActivate: CODEX_ACTIVATE }), false);
 });
+
+// Open window to the exact chat (17 Nov): chatLinkFor builds each app's own chat link.
+import { chatLinkFor, VSCODE_LINK_WAIT_MS } from '../src/main/focus.js';
+const ID = '4256fdae-9f5d-4442-a000-98dbdd29a2c9';
+
+test('chatLinkFor: Claude app chat → claude://code/continue with its session id', () => {
+  assert.deepEqual(chatLinkFor(S({ sessionId: ID, entrypoint: 'claude-desktop' })), { url: `claude://code/continue?session=${ID}` });
+});
+
+test('chatLinkFor: Codex app chat → codex://threads/<id>; Codex in VS Code, CLI or unknown → null', () => {
+  assert.deepEqual(chatLinkFor(S({ sessionId: ID, entrypoint: 'codex', host: 'desktop' })), { url: `codex://threads/${ID}` });
+  for (const host of ['vscode', 'cli', 'unknown', undefined]) assert.equal(chatLinkFor(S({ sessionId: ID, entrypoint: 'codex', host })), null, String(host));
+});
+
+test('Review Focus 1: a VS Code chat brings its window forward first, waits 1500 ms, then opens the chat', () => {
+  assert.equal(VSCODE_LINK_WAIT_MS, 1500);
+  assert.deepEqual(chatLinkFor(S({ sessionId: ID, entrypoint: 'claude-vscode' }), { codeCmd: CODE }), {
+    first: { cmd: CODE, args: [S().cwd] }, waitMs: 1500, url: `vscode://anthropic.claude-code/open?session=${ID}`,
+  });
+  assert.equal(chatLinkFor(S({ sessionId: ID, entrypoint: 'claude-vscode' })), null, 'no code.cmd → no link (no window step possible)');
+  assert.equal(chatLinkFor(S({ sessionId: ID, entrypoint: 'claude-vscode', cwd: '' }), { codeCmd: CODE }), null, 'no cwd');
+});
+
+test('Review Focus 2/3: non-UUID ids, terminal chats and missing sessions get no link', () => {
+  for (const bad of ['abc', `${ID}&x=1`, `${ID}/x`, '', undefined]) {
+    for (const entrypoint of ['claude-desktop', 'claude-vscode']) assert.equal(chatLinkFor(S({ sessionId: bad, entrypoint }), { codeCmd: CODE }), null, `${entrypoint} ${bad}`);
+    assert.equal(chatLinkFor(S({ sessionId: bad, entrypoint: 'codex', host: 'desktop' })), null, `codex ${bad}`);
+  }
+  assert.equal(chatLinkFor(S({ sessionId: ID, entrypoint: 'cli' }), { codeCmd: CODE }), null);
+  assert.equal(chatLinkFor(null), null);
+});
