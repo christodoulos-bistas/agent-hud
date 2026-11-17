@@ -2,6 +2,7 @@ import { moodOf } from './classes.js';
 import { displayName, baseOf, knownTime } from './sessions.js';
 import { activityLine, createStepLog } from './steps.js';
 import { stageOf, stuckOf, currentOf } from './stages.js';
+import { quietSince, tuckOf } from './tuck.js';
 
 const NEEDS_NOTIFS = new Set(['permission_prompt', 'elicitation_dialog', 'agent_needs_input']);
 const isSynthetic = (ev) => String((ev.raw || {}).prompt || '').trim().startsWith('<task-notification>');
@@ -16,6 +17,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
   let sessions = [];
   const state = new Map();
   const optIn = new Map();
+  const hidden = new Map(); // id -> when the user hid it with ✕ (v1.3; memory only)
   const steps = stepLog ?? createStepLog({});
   const stages = new Map(); // id -> { stage, since }
   const st = (id) => {
@@ -38,7 +40,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     };
     if (e === 'UserPromptSubmit') {
       active();
-      if (!isSynthetic(ev)) s.activity = activityLine(ev);
+      if (!isSynthetic(ev)) { s.activity = activityLine(ev); s.wakeAt = ev.at; } // a new turn wakes a ✕-hidden chat
     } else if (e === 'PreToolUse') {
       active();
       s.activity = activityLine(ev);
@@ -71,8 +73,14 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
       if (n < 2) { missed.set(old.sessionId, n); held.push(old); continue; }
       missed.delete(old.sessionId);
       engine.forget(old.sessionId); steps.forget(old.sessionId); stages.delete(old.sessionId); state.delete(old.sessionId); optIn.delete(old.sessionId);
+      hidden.delete(old.sessionId);
     }
     for (const id of keep) missed.delete(id);
+    // A chat without hooks starts a new turn when its file turns busy: that wakes a ✕-hidden one.
+    for (const x of fresh) {
+      const old = sessions.find((o) => o.sessionId === x.sessionId);
+      if (old && old.status !== 'busy' && x.status === 'busy') st(x.sessionId).wakeAt = now();
+    }
     sessions = [...fresh, ...held];
   }
 
@@ -119,6 +127,12 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
       const stuck = stuckOf({ stage, view, status: sess.status, now: t });
       let rec = stages.get(id);
       if (!rec || rec.stage !== stage) { rec = { stage, since: t }; stages.set(id, rec); }
+      // A ✕ hide ends for good when the chat asks something or wakes after it (v1.3).
+      if (hidden.has(id) && (stage === 'needs' || (s.wakeAt != null && s.wakeAt > hidden.get(id)))) hidden.delete(id);
+      const tuck = tuckOf({
+        stage, status: sess.status, hiddenAt: hidden.get(id) ?? null, wakeAt: s.wakeAt ?? null,
+        quietSince: quietSince({ lastActivityAt: s.lastActivityAt, stoppedAt: s.stoppedAt, statusSince: sess.statusSince, startedAt: sess.startedAt }),
+      }, t);
       return {
         id, display: displayName(sess), cls: engine.classOf(id, t),
         mood: stage === 'thinking' || stage === 'working' ? 'working' : baseMood,
@@ -127,9 +141,17 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
         stage, stuck, stageSince: rec.since,
         currentStepStartedAt: currentOf(view, sess.status)?.startedAt ?? null,
         lastActivityAt: s.lastActivityAt,
+        tuck,
       };
     });
     return agents;
+  }
+
+  // ✕ on a row: off the HUD until the chat asks something or starts a new turn. Not while it asks.
+  function hide(id) {
+    const a = computeAgents(now()).find((x) => x.id === id);
+    if (!a || a.stage === 'needs') return;
+    hidden.set(id, now());
   }
 
   function activeCard(t) {
@@ -144,11 +166,13 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
   function snapshot() {
     const t = now();
     const items = queue.list();
-    const agents = computeAgents(t);
+    const all = computeAgents(t);
+    const agents = all.filter((x) => !x.tuck);
+    const tucked = all.filter((x) => x.tuck);
     const card = activeCard(t);
     const second = items[1];
     const next = second ? `Next: ${displayOf(second.sessionId)} ${ASKS[second.kind] ?? 'asks a question'}` : null;
-    return { agents, card, next, counts: { total: agents.length, needs: agents.filter((x) => x.mood === 'needs').length } };
+    return { agents, tucked, card, next, counts: { total: agents.length, needs: agents.filter((x) => x.mood === 'needs').length } };
   }
 
   function detail(id) {
@@ -172,8 +196,8 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
   }
 
   function stageKey() {
-    return computeAgents(now()).map((a) => `${a.id}:${a.stage}:${a.stuck ? a.stuck.reason : ''}`).join('|');
+    return computeAgents(now()).map((a) => `${a.id}:${a.stage}:${a.stuck ? a.stuck.reason : ''}${a.tuck ? `:${a.tuck}` : ''}`).join('|');
   }
 
-  return { onEvent, setSessions, setReplyOptIn, replySent, permissionDenied, snapshot, detail, stageKey };
+  return { onEvent, setSessions, setReplyOptIn, replySent, permissionDenied, hide, snapshot, detail, stageKey };
 }

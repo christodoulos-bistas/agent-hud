@@ -479,3 +479,57 @@ test('detail.connected: false for a session known only from its session file, tr
   assert.equal(store.detail('s1').connected, true);
   assert.equal(store.detail('s2').connected, false);
 });
+
+// v1.3: quiet chats tuck away; a ✕ hides one until it wakes (a new turn) or asks.
+test('v1.3: a session idle for an hour moves to tucked; counts cover visible rows only', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1', { status: 'idle', statusSince: 1000 }), S('s2', { status: 'busy', statusSince: 1000 })]);
+  set(1000 + 3_600_000);
+  const snap = store.snapshot();
+  assert.deepEqual(snap.agents.map((a) => a.id), ['s2']);
+  assert.deepEqual(snap.tucked.map((a) => [a.id, a.tuck]), [['s1', 'idle']]);
+  assert.equal(snap.counts.total, 1);
+});
+
+test('v1.3: a ✕-hidden working chat stays hidden through tool events; a real prompt brings it back, a task-notification does not', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1', { status: 'busy' })]);
+  store.onEvent(ev('s1', 'PreToolUse', 1000, { toolName: 'Read', toolInput: { file_path: 'a.js' } }));
+  store.hide('s1');
+  set(2000); store.onEvent(ev('s1', 'PreToolUse', 2000, { toolName: 'Read', toolInput: { file_path: 'b.js' } }));
+  assert.equal(store.snapshot().tucked[0].tuck, 'hidden');
+  set(3000); store.onEvent(ev('s1', 'UserPromptSubmit', 3000, { raw: { prompt: '<task-notification>done</task-notification>' } }));
+  assert.equal(store.snapshot().tucked.length, 1);
+  set(4000); store.onEvent(ev('s1', 'UserPromptSubmit', 4000, { raw: { prompt: 'next thing' } }));
+  assert.deepEqual(store.snapshot().agents.map((a) => a.id), ['s1']);
+});
+
+test('v1.3: a hidden chat that asks comes back and stays back after the question goes; hide is ignored while it asks', () => {
+  const { queue, store } = setup();
+  store.setSessions([S('s1')]);
+  store.hide('s1');
+  assert.equal(store.snapshot().tucked.length, 1);
+  queue.add({ id: 'a', sessionId: 's1', kind: 'permission', payload: { tool_name: 'Bash' } });
+  assert.deepEqual(store.snapshot().agents.map((a) => a.id), ['s1']);
+  store.hide('s1');
+  assert.equal(store.snapshot().tucked.length, 0, 'no hiding a chat that is asking');
+  queue.answer('a', { decision: 'allow' });
+  assert.equal(store.snapshot().tucked.length, 0, 'the old hide is gone for good');
+});
+
+test('v1.3: a hidden chat without hooks wakes when its session file turns busy', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1', { status: 'idle' })]);
+  store.hide('s1');
+  assert.equal(store.snapshot().tucked.length, 1);
+  set(2000); store.setSessions([S('s1', { status: 'busy' })]);
+  assert.deepEqual(store.snapshot().agents.map((a) => a.id), ['s1']);
+});
+
+test('v1.3: stageKey changes when a chat crosses the one-hour line with no event', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1', { status: 'idle', statusSince: 1000 })]);
+  const before = store.stageKey();
+  set(1000 + 3_600_000);
+  assert.notEqual(store.stageKey(), before);
+});
