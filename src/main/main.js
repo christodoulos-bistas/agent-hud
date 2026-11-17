@@ -17,7 +17,7 @@ import { readSessionFiles, listSessions } from './sessions.js';
 import { createCodexSessions, readRolloutMeta } from './codex-sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor, resolveCodeCmd, canOpen, CODEX_ACTIVATE } from './focus.js';
-import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, codexTarget, codexOfferDue, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from './wiring.js';
+import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, codexTarget, codexOfferDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
@@ -42,7 +42,8 @@ const SETTINGS_PATH = TARGET.path;
 // nothing into Codex; AGENT_HUD_CODEX_HOOKS_PATH exists for tests and manual use only.
 const CODEX = codexTarget({ isPackaged: app.isPackaged, envPath: process.env.AGENT_HUD_CODEX_HOOKS_PATH, home: os.homedir(), exists: fs.existsSync });
 const CODEX_PATH = CODEX.path;
-const CODEX_COMMAND = codexHookCommand(app.isPackaged ? process.resourcesPath : path.join(SRC, 'resources'));
+// Dev (only reachable with AGENT_HUD_CODEX_HOOKS_PATH set): node runs the repo's bridge directly; SRC is <repo>/src.
+const CODEX_COMMAND = app.isPackaged ? codexHookCommand(process.resourcesPath) : `node "${path.join(path.dirname(SRC), 'resources', 'codex-bridge.cjs')}"`;
 const CODEX_APPROVE_BALLOON = 'Codex: open a Codex chat, type /hooks and approve Agent HUD.';
 const SKIP_FIRST_RUN = process.argv.includes('--no-first-run') || process.env.AGENT_HUD_NO_FIRST_RUN === '1';
 const DEBUG = process.env.AGENT_HUD_DEBUG === '1';
@@ -533,9 +534,9 @@ function doCodexInstall() {
   if (CODEX.blocked) return;
   const r = installCodexHooksFile(CODEX_PATH, CODEX_COMMAND);
   if (!r.ok) { notify('Could not install the Codex hooks', `${CODEX_PATH}: ${r.error}`, true); return; }
-  const need = codexState().missing.length ? `\n${CODEX_APPROVE_BALLOON}` : '';
+  const need = codexState().missing.length ? `\n${CODEX_APPROVE_BALLOON}` : ''; // unchanged: only if approval is actually missing
   if (!r.changed) notify('Agent HUD Codex hooks already installed', `${CODEX_PATH} was left as it is.${need}`);
-  else notify('Agent HUD Codex hooks installed', `Added to ${CODEX_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}${need}`);
+  else notify('Agent HUD Codex hooks installed', `Added to ${CODEX_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}\n${CODEX_APPROVE_BALLOON}`);
 }
 async function installFromTray() {
   if (devBlocked()) return;
@@ -579,16 +580,14 @@ function codexState() {
   if (CODEX.blocked) return { installed: false, missing: [] };
   const doc = readJson(CODEX_PATH);
   const positions = doc && typeof doc === 'object' ? ourPositions(doc, CODEX_COMMAND) : [];
-  if (!positions.length) return { installed: false, missing: [] };
-  let missing = [];
-  try { missing = approvalMissing(fs.readFileSync(path.join(path.dirname(CODEX_PATH), 'config.toml'), 'utf8'), CODEX_PATH, positions); } catch { /* unreadable: say nothing */ }
-  return { installed: true, missing };
+  let configText, configCode;
+  if (positions.length) {
+    try { configText = fs.readFileSync(path.join(path.dirname(CODEX_PATH), 'config.toml'), 'utf8'); } catch (err) { configCode = err?.code || 'EUNKNOWN'; }
+  }
+  return codexStatus({ positions, hooksPath: CODEX_PATH, configText, configCode });
 }
 
-function codexStatusLabel() {
-  const st = codexState();
-  return st.installed ? (st.missing.length ? 'Codex hooks: approve in /hooks' : 'Codex hooks: installed') : 'Codex hooks: not installed';
-}
+const codexLabel = () => codexStatusLabel(codexState());
 
 function refreshMenu() {
   if (!tray || tray.isDestroyed()) return;
@@ -601,7 +600,7 @@ function refreshMenu() {
     { label: 'Move back to the corner', enabled: isAnchor(cfg?.position), click: resetPosition },
     { type: 'separator' },
     ...(TARGET.blocked ? [] : [{ label: `Claude hooks: ${claudeInstalled() ? 'installed' : 'not installed'}`, enabled: false }]),
-    ...(CODEX.blocked ? [] : [{ label: codexStatusLabel(), enabled: false }]),
+    ...(CODEX.blocked ? [] : [{ label: codexLabel(), enabled: false }]),
     { label: 'Install hooks', click: installFromTray },
     { label: 'Remove hooks', click: doUninstall },
     { type: 'separator' },

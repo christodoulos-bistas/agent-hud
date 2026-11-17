@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, codexTarget, codexOfferDue, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, codexTarget, codexOfferDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { installCodexHooksFile, removeCodexHooksFile, codexHookCommand } from '../src/main/codex-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
@@ -484,4 +484,15 @@ test('Task 10: removeHooksCli with a Codex target removes from both and reports 
     assert.match(blocked.messages[1], /Codex hooks not changed/);
     assert.equal(removeHooksCli({ target: { path: claude, blocked: false }, uninstall: uninstallHooks }).messages.length, 1);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Task 10 fix: codexStatus: missing config.toml -> approve; unreadable -> no approval line; approved -> installed', () => {
+  const hooksPath = 'C:/h/.codex/hooks.json';
+  const positions = [{ event: 'Stop', group: 0, hook: 0 }];
+  const label = (o) => codexStatusLabel(codexStatus({ positions, hooksPath, ...o }));
+  assert.equal(label({ configCode: 'ENOENT' }), 'Codex hooks: approve in /hooks');
+  assert.equal(label({ configCode: 'EACCES' }), 'Codex hooks: installed');
+  assert.equal(label({ configText: '' }), 'Codex hooks: approve in /hooks');
+  assert.equal(label({ configText: "[hooks.state.'C:/h/.codex/hooks.json:stop:0:0']\ntrusted_hash = 'x'\n" }), 'Codex hooks: installed');
+  assert.equal(codexStatusLabel(codexStatus({ positions: [], hooksPath, configCode: 'ENOENT' })), 'Codex hooks: not installed');
 });
