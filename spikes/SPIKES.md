@@ -188,7 +188,7 @@ under automation: a real mouse click is the final check.
 
 ## Spike 8 - Codex hooks through the HUD's own exe (2026-11-17, Codex 0.167.0-alpha.4.1)
 
-Scripts in `spikes/codex/` (`bridge.js`/`bridge.cmd`: the installed `Agent HUD.exe` with `ELECTRON_RUN_AS_NODE=1`
+Scripts in `spikes/codex/` (`bridge.cjs`/`bridge.cmd`: the installed `Agent HUD.exe` with `ELECTRON_RUN_AS_NODE=1`
 forwards one hook event over HTTP; `receiver.mjs`: a scratch endpoint that answers allow/deny; `tui.mjs`/`run.mjs`:
 interactive / exec Codex in a scratch folder with the hooks passed as `-c hooks.*` overrides, nothing written to `~/.codex`).
 
@@ -199,3 +199,38 @@ interactive / exec Codex in a scratch folder with the hooks passed as `-c hooks.
 - `codex exec` never asks for approval, so no PermissionRequest there.
 - 8b: with the answer held 25 s, Codex showed only "Working · Running hooks" — no prompt of its own while a hook is pending.
 - Codex keeps hook approvals by position (`hooks.state.'<file>:<event>:<group>:<hook>'` in config.toml).
+
+## Spike 9 - Codex open items: apply_patch payload, project-layer hooks, hosts, app activation (2026-11-17, Codex 0.167.0-alpha.4.1)
+
+Scripts: `spikes/codex/` (`tui.mjs <word> [overrides|project] [shell|patch]`; `bridge.js` renamed `bridge.cjs` because the repo's `package.json` is now `"type": "module"` and the CommonJS bridge failed with exit 1 - "Hook failed" in Codex).
+`receiver.mjs` now also logs the keys of `tool_input`.
+
+**1. apply_patch payload** (interactive Codex, read-only sandbox, hooks via `-c hooks.*`): `PreToolUse`, `PermissionRequest` and `PostToolUse`
+all carry `tool_name: "apply_patch"` and `tool_input` with the single key `command`, whose value is the patch text (starts `*** Begin Patch`, `*** Add File: <name>`).
+**`APPLY_PATCH_FIELD = 'command'`**. `PermissionRequest` has no `tool_use_id` (as for shell); an `allow` reply was honoured (patch applied).
+In this run Codex applied the patch with the hook answer (PermissionRequest fired before PostToolUse).
+
+**2. Project-layer hooks**: `C:\Consortis_projects\agent-hud-spike\hooks-proj\.codex\hooks.json` (the six events, `{"hooks":{<Event>:[{matcher,hooks:[{type,command,timeout}]}]}}`),
+interactive Codex there with `--dangerously-bypass-hook-trust` and no `-c hooks.*`. Codex stops at a **"Folder access ... Trust this folder?"** prompt
+("Folder settings can run code automatically", decision is saved to config) before the session starts; with a `.codex` folder present the prompt appears, without it
+(the `codex-proj` runs) it does not. No event reached the receiver. Per the rules the trust was not granted and not forced (a session-only
+`projects.<path>.trust_level` override was tried and refused by the harness, so it is untested). The file was deleted afterwards.
+**`DEV_CODEX_TARGET = null`**: a project-layer hooks.json is not loaded in an untrusted folder, and trusting is a user decision. Untested: whether it loads once the folder is trusted.
+
+**3. Host values** (first line of each of 53 rollouts under `~/.codex/sessions`, no content read), `session_meta.payload.originator` / `.source`:
+
+| originator | source | rollouts | host |
+| --- | --- | --- | --- |
+| `Codex Desktop` | `vscode` | 47 | `desktop` |
+| `codex_exec` | `exec` | 3 | `cli` |
+| `codex-tui` | `cli` | 3 | `cli` |
+
+`CODEX_HOSTS = { 'Codex Desktop': 'desktop', 'codex-tui': 'cli', 'codex_exec': 'cli' }` (by originator; the desktop app reports source `vscode`, so source alone is ambiguous;
+no rollout from the VS Code extension itself was seen, so its originator is unknown -> `'unknown'`/`'vscode'` is unmapped).
+
+**4. Bring the Codex app forward**: the app is `ChatGPT.exe` from `OpenAI.Codex_26.1106.6628.0_x64__2p2nqsd0c76g0` (package family `OpenAI.Codex_2p2nqsd0c76g0`, AppUserModelId `OpenAI.Codex_2p2nqsd0c76g0!App`).
+Its window title is `ChatGPT`, and while it is closed-to-background its processes have no visible window (`MainWindowHandle` 0 for all but a hidden `ChatGPT` window).
+- `WScript.Shell.AppActivate('ChatGPT')` (by title): returned False, foreground unchanged.
+- `AppActivate(<pid of the process with MainWindowHandle != 0>)`: True, foreground became `ChatGPT` (VS Code in front first).
+- `explorer.exe shell:AppsFolder\OpenAI.Codex_2p2nqsd0c76g0!App`: brings the app to the front from VS Code, and also restores it when it had no visible window.
+**`CODEX_ACTIVATE = { cmd: 'explorer.exe', args: ['shell:AppsFolder\OpenAI.Codex_2p2nqsd0c76g0!App'] }`** (no window lookup, works hidden or not). Caveat: the package version is in the install path, not in the AUMID, so it survives updates.

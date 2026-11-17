@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BRIDGE = join(HERE, 'bridge.js');
+const BRIDGE = join(HERE, 'bridge.cjs');
 const HUD = process.env.LOCALAPPDATA + '\\Programs\\Agent HUD\\Agent HUD.exe';
 const URL_ = 'http://127.0.0.1:47998/agent-hud/hook';
 const payload = JSON.stringify({ session_id: 'spike', hook_event_name: 'PreToolUse', tool_name: 'shell', tool_input: { command: ['echo', 'hi'] }, cwd: 'C:\\x' });

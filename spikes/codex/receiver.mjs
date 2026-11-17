@@ -18,7 +18,7 @@ http.createServer((req, res) => {
       const behavior = cmd.includes('deny-me') ? 'deny' : cmd.includes('allow-me') ? 'allow' : null;
       if (behavior) reply = JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior, ...(behavior === 'deny' ? { message: 'Denied from the HUD spike' } : {}) } } });
     }
-    appendFileSync(LOG, JSON.stringify({ at: new Date().toISOString(), source: req.headers['x-agent-hud-source'], event: ev.hook_event_name, keys: Object.keys(ev), tool: ev.tool_name, input: cmd.slice(0, 160), session: ev.session_id, reply: reply || null }) + '\n');
+    appendFileSync(LOG, JSON.stringify({ at: new Date().toISOString(), source: req.headers['x-agent-hud-source'], event: ev.hook_event_name, keys: Object.keys(ev), tool: ev.tool_name, inputKeys: ev.tool_input && typeof ev.tool_input==='object' ? Object.keys(ev.tool_input) : typeof ev.tool_input, input: cmd.slice(0, 160), session: ev.session_id, reply: reply || null }) + '\n');
     const wait = ev.hook_event_name === 'PermissionRequest' ? Number(process.env.DELAY_MS || 0) : 0; // spike 7b: hold like the HUD would
     setTimeout(() => res.writeHead(200, { 'content-type': 'application/json' }).end(reply), wait);
   });
