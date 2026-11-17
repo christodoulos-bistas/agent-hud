@@ -439,3 +439,28 @@ test('v1.2 M4: the breathing question glow animates only the opacity of its own 
   assert.match(css, /\.row\.needs::before\s*\{/, 'the rail stays');
   assert.match(css, /\.row\.selected\s*\{[^}]*box-shadow/, 'the selected style stays');
 });
+
+// v1.3: ✕ to hide a row; quiet chats under a "tucked away" line.
+test('v1.3: rows carry a ✕ except when asking or tucked; it is escaped and names the chat', () => {
+  assert.match(renderRow(agent({ id: 'x"1', display: 'arsenal · e0' })), /data-act="hide" data-session="x&quot;1"[^>]*aria-label="Hide arsenal · e0 from the HUD"/);
+  assert.doesNotMatch(renderRow(agent({ mood: 'needs' })), /data-act="hide"/);
+  const t = renderRow(agent(), { tucked: true });
+  assert.doesNotMatch(t, /data-act="hide"/);
+  assert.match(t, /class="row [^"]*\btucked\b/);
+});
+
+test('v1.3: the tucked line shows the count and folds/unfolds; tucked rows only when open', () => {
+  const snap = { agents: [agent({ id: 'a' })], tucked: [agent({ id: 't1' }), agent({ id: 't2' })], counts: { total: 1, needs: 0 } };
+  const folded = renderParty({ ...snap, tuckOpen: false });
+  assert.match(folded, /data-act="tucked" aria-expanded="false">── 2 tucked away · show ──/);
+  assert.doesNotMatch(folded, /row:t1/);
+  const open = renderParty({ ...snap, tuckOpen: true });
+  assert.match(open, /aria-expanded="true">── 2 tucked away · hide ──/);
+  assert.match(open, /data-key="row:t1"/);
+  assert.doesNotMatch(renderParty({ ...snap, tucked: [] }), /tuck-line/);
+});
+
+test('v1.3: nothing visible but chats tucked → "All quiet — every chat is tucked away."', () => {
+  assert.match(renderParty({ agents: [], tucked: [agent({ id: 't' })], counts: { total: 0, needs: 0 } }), /All quiet — every chat is tucked away\./);
+  assert.match(renderParty({ agents: [], tucked: [], counts: { total: 0, needs: 0 } }), /No agents are running\./);
+});

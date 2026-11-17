@@ -84,6 +84,14 @@ button.who-n:hover { text-decoration: underline dotted rgba(240, 233, 218, .5); 
 .queue { font-size: .72rem; color: var(--gold-l); padding: 6px 12px 8px; border-top: 1px solid rgba(224, 180, 92, .16); background: rgba(224, 180, 92, .05); }
 .queue b { font-weight: 700; }
 .empty { margin: 0; padding: 10px 12px 12px; font-size: .78rem; font-style: italic; color: var(--sage); }
+/* v1.3: ✕ to hide a row (shown on hover or keyboard focus), and the "N tucked away" line with its dimmed rows. */
+.row .hide { position: absolute; top: 3px; right: 4px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--sage); font-size: .7rem; line-height: 18px; text-align: center; cursor: pointer; opacity: 0; }
+.row:hover .hide, .row:focus-within .hide { opacity: .75; }
+.row .hide:hover, .row .hide:focus-visible { opacity: 1; color: var(--parch); background: rgba(240, 233, 218, .1); }
+.row.tucked { opacity: .55; }
+.row.tucked:hover, .row.tucked.selected { opacity: .85; }
+.tuck-line { display: block; width: 100%; margin: 0; padding: 5px 12px 7px; border: 0; border-top: 1px solid rgba(240, 233, 218, .05); background: none; color: var(--sage); font: italic .72rem/1.2 'Alegreya Sans', system-ui, sans-serif; text-align: center; white-space: nowrap; cursor: pointer; }
+.tuck-line:hover, .tuck-line[aria-expanded="true"] { color: var(--parch); }
 
 /* collapsed: a column of faces; a waiting agent keeps its seal */
 .party.collapsed { width: auto; }

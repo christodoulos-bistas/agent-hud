@@ -165,7 +165,8 @@ export function newlyFinished(agents, prev = null) {
   return prev == null ? { now: r.now, fresh: new Set() } : r;
 }
 
-export function renderRow(agent, { ask, selected = false } = {}) {
+// `tucked` (v1.3): a row in the unfolded "tucked away" list, dimmed and without the ✕.
+export function renderRow(agent, { ask, selected = false, tucked = false } = {}) {
   const a = agent || {};
   const mood = moodOf(a);
   const id = esc(a.id);
@@ -178,14 +179,17 @@ export function renderRow(agent, { ask, selected = false } = {}) {
       ? '<span class="link">Waiting in its window</span>'
       : `<button type="button" class="link" data-act="open" data-session="${id}">Waiting in its window — open ↗</button>`)
     : `<span class="cls">${esc(className(a.cls))}</span> · ${esc(doing(a, mood, ask))}${mood === 'working' ? '<span class="dots"></span>' : ''}`;
-  return `<div class="row ${mood}${mood === 'needs' ? ' glow-ask' : ''}${handed ? ' handed' : ''}${selected ? ' selected' : ''}" data-key="row:${id}" style="--d:${bobDelay(a.id)}">` +
+  // ✕ takes the chat off the HUD until it asks or starts a new turn; never on a row that is asking.
+  const hide = mood === 'needs' || tucked ? ''
+    : `<button type="button" class="hide" data-act="hide" data-session="${id}" title="Hide from the HUD" aria-label="Hide ${esc(a.display)} from the HUD">✕</button>`;
+  return `<div class="row ${mood}${mood === 'needs' ? ' glow-ask' : ''}${handed ? ' handed' : ''}${selected ? ' selected' : ''}${tucked ? ' tucked' : ''}" data-key="row:${id}" style="--d:${bobDelay(a.id)}">` +
     `<div class="sprite-box" data-act="select" data-session="${id}">${sprite(a.cls)}${fam}</div>` +
     '<div class="who">' +
       `<button type="button" class="who-n" data-act="select" data-session="${id}" aria-pressed="${selected ? 'true' : 'false'}" title="Show details">${esc(a.display)}</button>` +
       `<div class="who-d${handed ? ' handed' : ''}">${line}</div>` +
       `<button type="button" class="wait" data-act="wait" data-session="${id}" aria-pressed="${a.replyOptIn ? 'true' : 'false'}"><i></i>wait for my reply</button>` +
     '</div>' +
-    `<span class="mark">${rowChip(a)}</span>` +
+    `<span class="mark">${rowChip(a)}</span>` + hide +
   '</div>';
 }
 
@@ -222,7 +226,19 @@ export function renderParty(snapshot, { collapsed = false } = {}) {
     parts.push(renderRow(a, { ...(mine ? { ask: card.kind } : {}), selected: selectedId != null && String(a.id) === selectedId }));
     if (mine) asked = true;
   }
-  if (!agents.length) parts.push('<p class="empty" data-key="empty">No agents are running.</p>');
+  // v1.3: chats tucked away (quiet an hour, or hidden with ✕) sit under one line; unfolded, they list dimmed.
+  const tucked = Array.isArray(snapshot?.tucked) ? snapshot.tucked : [];
+  const tuckOpen = !!snapshot?.tuckOpen;
+  if (!agents.length) {
+    parts.push(`<p class="empty" data-key="empty">${tucked.length ? 'All quiet — every chat is tucked away.' : 'No agents are running.'}</p>`);
+  }
+  if (tucked.length) {
+    parts.push(`<button type="button" class="tuck-line" data-key="tuck" data-act="tucked" aria-expanded="${tuckOpen}">── ${tucked.length} tucked away · ${tuckOpen ? 'hide' : 'show'} ──</button>`);
+    if (tuckOpen) {
+      parts.push('<div class="tucked-rows" data-key="tucked" data-deep>' +
+        tucked.map((a) => renderRow(a, { tucked: true, selected: selectedId != null && String(a.id) === selectedId })).join('') + '</div>');
+    }
+  }
 
   const total = int(snapshot?.counts?.total, agents.length);
   const needs = int(snapshot?.counts?.needs, agents.filter((a) => moodOf(a) === 'needs').length);
@@ -363,6 +379,10 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
       }
       case 'open':
         call('openWindow', el.dataset.session); break;
+      case 'hide':
+        call('hideAgent', el.dataset.session); break;
+      case 'tucked':
+        call('showTucked', el.getAttribute('aria-expanded') !== 'true'); break;
       case 'wait': {
         const on = el.getAttribute('aria-pressed') !== 'true';
         el.setAttribute('aria-pressed', String(on));
