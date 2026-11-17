@@ -51,3 +51,14 @@ test('M9: a startedAt that is missing, zero, negative or not a finite number is 
   const by = Object.fromEntries(readSessionFiles(dir).map((s) => [s.pid, s.startedAt]));
   assert.deepEqual(by, { 21: null, 22: null, 23: null, 24: null, 25: 1794810688780 });
 });
+
+// v1.3: the file's statusUpdatedAt is when its busy/idle status last changed (the idle clock for chats without hooks).
+test('readSessionFiles keeps statusUpdatedAt as statusSince; zero or missing is unknown', () => {
+  const dir = mk();
+  const file = (name, extra) => fs.writeFileSync(path.join(dir, name), JSON.stringify({ sessionId: name, pid: 1, cwd: 'c:\p', status: 'idle', ...extra }));
+  file('a.json', { statusUpdatedAt: 1794810712245 });
+  file('b.json', { statusUpdatedAt: 0 });
+  const byId = Object.fromEntries(readSessionFiles(dir).map((s) => [s.sessionId, s]));
+  assert.equal(byId['a.json'].statusSince, 1794810712245);
+  assert.equal(byId['b.json'].statusSince, null);
+});

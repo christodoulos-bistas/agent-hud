@@ -14,6 +14,7 @@ function toSession(o) {
   return {
     sessionId: o.sessionId, pid: o.pid, cwd: o.cwd || '', kind: o.kind, entrypoint: o.entrypoint,
     name: o.name || '', nameSource: o.nameSource, status: o.status, startedAt: knownTime(o.startedAt),
+    statusSince: knownTime(o.statusUpdatedAt), // when status last changed: the idle clock for chats without hooks (v1.3)
   };
 }
 
