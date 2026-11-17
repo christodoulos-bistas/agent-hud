@@ -249,3 +249,18 @@ Its window title is `ChatGPT`, and while it is closed-to-background its processe
   though the same setup ran in the morning; `codex exec` runs them. Not the product path (the app reads `~/.codex/hooks.json`);
   verify after the user installs: a Codex Desktop chat should appear in the HUD and its permission prompts should card.
 - Still to confirm in Codex Desktop after install: closing a chat removes its row (SessionEnd); Esc mid-turn idles it (Interrupt).
+
+## Spike 10 - Codex hook trust via app-server (2026-11-17, Codex app 26.1106.6628.0)
+
+Probe: `node spikes/codex/trust-probe.mjs <codex.exe> list|trust <key>`.
+
+- `codex.exe app-server` (newline JSON-RPC: `initialize` → `initialized` → requests) answers `hooks/list { cwds: [home] }`
+  with all 21 hooks of `~/.codex/hooks.json`, each with `key`, `command`, `sourcePath`, `source`, `isManaged`, `currentHash`,
+  `trustStatus`. The app's Trust button saves through `config/batchWrite` (`hooks.state."<key>".trusted_hash`, upsert).
+- Side effects of one `list` run next to the running app: a temp folder `~/.codex/tmp/arg0-windows/codex-arg0*`
+  (apply_patch shims + lock); the sqlite logs and sandbox log also changed, but the running app writes those anyway.
+  Nothing in `~/.codex/sessions`. Acceptable for a run on install / startup / tray click.
+- `fs.readlinkSync(%LOCALAPPDATA%\Microsoft\WindowsApps\chatgpt-desktop.exe)` returns
+  `C:\Program Files\WindowsApps\OpenAI.Codex_26.1106.6628.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe` → keep the alias step.
+- Not yet tested: whether the running app runs a newly trusted hook in a new chat without a restart. Moved into the live
+  check (plan Task 6), where trust is removed and re-added with the user present.
