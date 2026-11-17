@@ -231,14 +231,37 @@ export function settingsTarget({ isPackaged, envPath, home }) {
   return { path: path.join(home, '.claude', 'settings.json'), blocked: false };
 }
 
-// `--remove-hooks` (run by the uninstaller): take the HUD's hooks out of the target settings file.
-// Never throws; a blocked dev build touches nothing. Returns { ok, message } for the log.
-export function removeHooksCli({ target, uninstall }) {
-  if (!target || target.blocked || !target.path) return { ok: false, message: 'dev build without AGENT_HUD_SETTINGS_PATH: hooks not changed' };
+// Which Codex hooks file install/uninstall may touch. AGENT_HUD_CODEX_HOOKS_PATH wins (tests and manual
+// use only: `npm run dev` never sets it); otherwise only the packaged app, and only when ~/.codex exists,
+// targets ~/.codex/hooks.json. A dev build is blocked. `exists` is injected.
+export function codexTarget({ isPackaged, envPath, home, exists }) {
+  if (envPath) return { path: envPath, blocked: false };
+  if (isPackaged && exists(path.join(home, '.codex'))) return { path: path.join(home, '.codex', 'hooks.json'), blocked: false };
+  return { path: null, blocked: true };
+}
+
+// The one-time Codex-only first-run offer: never offered, a usable target, and our hooks not already there.
+export function codexOfferDue({ cfg, target, installed }) {
+  return !cfg?.offeredCodexHooks && !target?.blocked && !installed;
+}
+
+// One target of `--remove-hooks`. Never throws; a blocked target touches nothing.
+function removeOne({ target, uninstall, label, blockedMessage }) {
+  if (!target || target.blocked || !target.path) return { ok: false, message: blockedMessage };
   let r;
   try { r = uninstall(target.path); } catch (err) { r = { ok: false, error: err?.message ?? String(err) }; }
-  if (!r?.ok) return { ok: false, message: `could not remove hooks from ${target.path}: ${r?.error}` };
-  return { ok: true, message: r.changed === false ? `no hooks to remove in ${target.path}` : `hooks removed from ${target.path}` };
+  if (!r?.ok) return { ok: false, message: `could not remove ${label}hooks from ${target.path}: ${r?.error}` };
+  return { ok: true, message: r.changed === false ? `no ${label}hooks to remove in ${target.path}` : `${label}hooks removed from ${target.path}` };
+}
+
+// `--remove-hooks` (run by the uninstaller): take the HUD's hooks out of the target settings file and,
+// when `codex` ({ target, uninstall }) is given, out of the Codex hooks file too. Never throws.
+// Returns { ok, message, messages } for the log: one message per target, `ok` only if every target is.
+export function removeHooksCli({ target, uninstall, codex }) {
+  const results = [removeOne({ target, uninstall, label: '', blockedMessage: 'dev build without AGENT_HUD_SETTINGS_PATH: hooks not changed' })];
+  if (codex) results.push(removeOne({ ...codex, label: 'Codex ', blockedMessage: 'Codex hooks not changed (no Codex folder, or a dev build)' }));
+  const messages = results.map((r) => r.message);
+  return { ok: results.every((r) => r.ok), message: messages.join('; '), messages };
 }
 
 // config.json: { port, secret, ...flags }. Missing or broken values are repaired and written back.

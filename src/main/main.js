@@ -9,13 +9,15 @@ import { fileURLToPath } from 'node:url';
 import { RELEASE } from './answers.js';
 import { createClassEngine } from './classes.js';
 import { createQueue } from './queue.js';
-import { installHooks, uninstallHooks } from './settings-hooks.js';
+import { isDeepStrictEqual } from 'node:util';
+import { installHooks, uninstallHooks, unmergeHooks } from './settings-hooks.js';
+import { codexHookCommand, installCodexHooksFile, removeCodexHooksFile, ourPositions, approvalMissing } from './codex-hooks.js';
 import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createCodexSessions, readRolloutMeta } from './codex-sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor, resolveCodeCmd, canOpen, CODEX_ACTIVATE } from './focus.js';
-import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from './wiring.js';
+import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, codexTarget, codexOfferDue, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
@@ -35,6 +37,13 @@ const SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions');
 // without it never touches the user's settings (I1): no first-run offer, install/remove refuse.
 const TARGET = settingsTarget({ isPackaged: app.isPackaged, envPath: process.env.AGENT_HUD_SETTINGS_PATH, home: os.homedir() });
 const SETTINGS_PATH = TARGET.path;
+// Codex (design 7.2): packaged -> ~/.codex/hooks.json when ~/.codex exists. A dev build never targets it
+// (spike 9: Codex does not load project-layer hooks in an untrusted folder), so `npm run dev` installs
+// nothing into Codex; AGENT_HUD_CODEX_HOOKS_PATH exists for tests and manual use only.
+const CODEX = codexTarget({ isPackaged: app.isPackaged, envPath: process.env.AGENT_HUD_CODEX_HOOKS_PATH, home: os.homedir(), exists: fs.existsSync });
+const CODEX_PATH = CODEX.path;
+const CODEX_COMMAND = codexHookCommand(app.isPackaged ? process.resourcesPath : path.join(SRC, 'resources'));
+const CODEX_APPROVE_BALLOON = 'Codex: open a Codex chat, type /hooks and approve Agent HUD.';
 const SKIP_FIRST_RUN = process.argv.includes('--no-first-run') || process.env.AGENT_HUD_NO_FIRST_RUN === '1';
 const DEBUG = process.env.AGENT_HUD_DEBUG === '1';
 
@@ -476,8 +485,9 @@ function notify(title, content, error = false) {
 
 const loginOptions = () => (app.isPackaged ? {} : { path: process.execPath, args: [path.resolve(app.getAppPath())] });
 
+// Both targets blocked (a dev build without the override variables, or no Codex folder): nothing to do.
 function devBlocked() {
-  if (!TARGET.blocked) return false;
+  if (!TARGET.blocked || !CODEX.blocked) return false;
   notify('Dev build: set AGENT_HUD_SETTINGS_PATH', 'Hooks were not changed. Start the dev build with "npm run dev", which points it at the spike settings file.', true);
   return true;
 }
@@ -497,23 +507,87 @@ async function confirmInstall({ firstRun }) {
   return response === 0;
 }
 
+async function confirmCodexInstall({ firstRun }) {
+  const { response } = await dialog.showMessageBox({
+    type: 'question', buttons: [firstRun ? 'Yes, add the hooks' : 'Add the hooks', firstRun ? 'No' : 'Cancel'],
+    defaultId: firstRun ? 0 : 1, cancelId: 1, noLink: true,
+    title: 'Agent HUD',
+    message: 'Connect Agent HUD to Codex?',
+    detail: `Agent HUD will add its hooks to this file:\n\n${CODEX_PATH}\n\n` +
+      `The file is backed up first (to ${path.resolve(CODEX_PATH)}.agent-hud.bak; the very first original is also kept, once, as ` +
+      `${path.resolve(CODEX_PATH)}.agent-hud.orig). Your other hooks are left as they are. ` +
+      'Codex asks you to approve new hooks once: open a Codex chat and type /hooks. ' +
+      'You can remove the hooks at any time from the tray menu.',
+  });
+  return response === 0;
+}
+
 function doInstall() {
-  if (devBlocked()) return;
+  if (TARGET.blocked) return;
   const r = installHooks(SETTINGS_PATH, { port: cfg.port, secret: cfg.secret });
   if (!r.ok) notify('Could not install the hooks', `${SETTINGS_PATH}: ${r.error}`, true);
   else if (!r.changed) notify('Agent HUD hooks already installed', `${SETTINGS_PATH} was left as it is.`);
   else notify('Agent HUD hooks installed', `Added to ${SETTINGS_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}`);
 }
+function doCodexInstall() {
+  if (CODEX.blocked) return;
+  const r = installCodexHooksFile(CODEX_PATH, CODEX_COMMAND);
+  if (!r.ok) { notify('Could not install the Codex hooks', `${CODEX_PATH}: ${r.error}`, true); return; }
+  const need = codexState().missing.length ? `\n${CODEX_APPROVE_BALLOON}` : '';
+  if (!r.changed) notify('Agent HUD Codex hooks already installed', `${CODEX_PATH} was left as it is.${need}`);
+  else notify('Agent HUD Codex hooks installed', `Added to ${CODEX_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}${need}`);
+}
 async function installFromTray() {
   if (devBlocked()) return;
-  try { if (await confirmInstall({ firstRun: false })) doInstall(); } catch (err) { log('install', err); }
+  try {
+    if (!TARGET.blocked && await confirmInstall({ firstRun: false })) doInstall();
+    if (!CODEX.blocked && await confirmCodexInstall({ firstRun: false })) doCodexInstall();
+  } catch (err) { log('install', err); }
+  refreshMenu();
 }
 function doUninstall() {
   if (devBlocked()) return;
-  const r = uninstallHooks(SETTINGS_PATH);
-  if (!r.ok) notify('Could not remove the hooks', `${SETTINGS_PATH}: ${r.error}`, true);
-  else if (!r.changed) notify('No Agent HUD hooks to remove', `${SETTINGS_PATH} was left as it is.`);
-  else notify('Agent HUD hooks removed', `Removed from ${SETTINGS_PATH}`);
+  if (!TARGET.blocked) {
+    const r = uninstallHooks(SETTINGS_PATH);
+    if (!r.ok) notify('Could not remove the hooks', `${SETTINGS_PATH}: ${r.error}`, true);
+    else if (!r.changed) notify('No Agent HUD hooks to remove', `${SETTINGS_PATH} was left as it is.`);
+    else notify('Agent HUD hooks removed', `Removed from ${SETTINGS_PATH}`);
+  }
+  if (!CODEX.blocked) {
+    const r = removeCodexHooksFile(CODEX_PATH, CODEX_COMMAND);
+    if (!r.ok) notify('Could not remove the Codex hooks', `${CODEX_PATH}: ${r.error}`, true);
+    else if (!r.changed) notify('No Agent HUD Codex hooks to remove', `${CODEX_PATH} was left as it is.`);
+    else {
+      const again = r.shifted?.length ? `\nCodex may ask you to re-approve hooks for: ${r.shifted.join(', ')} (/hooks)` : '';
+      notify('Agent HUD Codex hooks removed', `Removed from ${CODEX_PATH}${again}`);
+    }
+  }
+  refreshMenu();
+}
+
+const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
+
+function claudeInstalled() {
+  if (TARGET.blocked) return false;
+  const doc = readJson(SETTINGS_PATH);
+  return !!doc && typeof doc === 'object' && !isDeepStrictEqual(unmergeHooks(doc), doc);
+}
+
+// Codex hooks file state: { installed, missing } where missing lists the events that still need approval in
+// /hooks. config.toml unreadable -> missing [] (no approval line rather than a guess).
+function codexState() {
+  if (CODEX.blocked) return { installed: false, missing: [] };
+  const doc = readJson(CODEX_PATH);
+  const positions = doc && typeof doc === 'object' ? ourPositions(doc, CODEX_COMMAND) : [];
+  if (!positions.length) return { installed: false, missing: [] };
+  let missing = [];
+  try { missing = approvalMissing(fs.readFileSync(path.join(path.dirname(CODEX_PATH), 'config.toml'), 'utf8'), CODEX_PATH, positions); } catch { /* unreadable: say nothing */ }
+  return { installed: true, missing };
+}
+
+function codexStatusLabel() {
+  const st = codexState();
+  return st.installed ? (st.missing.length ? 'Codex hooks: approve in /hooks' : 'Codex hooks: installed') : 'Codex hooks: not installed';
 }
 
 function refreshMenu() {
@@ -526,6 +600,8 @@ function refreshMenu() {
     { label: 'Collapse', type: 'checkbox', checked: collapsed, click: (mi) => setCollapsed(mi.checked) },
     { label: 'Move back to the corner', enabled: isAnchor(cfg?.position), click: resetPosition },
     { type: 'separator' },
+    ...(TARGET.blocked ? [] : [{ label: `Claude hooks: ${claudeInstalled() ? 'installed' : 'not installed'}`, enabled: false }]),
+    ...(CODEX.blocked ? [] : [{ label: codexStatusLabel(), enabled: false }]),
     { label: 'Install hooks', click: installFromTray },
     { label: 'Remove hooks', click: doUninstall },
     { type: 'separator' },
@@ -567,11 +643,21 @@ async function startServer() {
 }
 
 async function firstRun() {
-  if (cfg.offeredHooks || SKIP_FIRST_RUN || TARGET.blocked) return;
-  const yes = await confirmInstall({ firstRun: true });
-  cfg.offeredHooks = true;
-  try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
-  if (yes) doInstall();
+  if (SKIP_FIRST_RUN) return;
+  if (!cfg.offeredHooks && !TARGET.blocked) {
+    const yes = await confirmInstall({ firstRun: true });
+    cfg.offeredHooks = true;
+    try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
+    if (yes) doInstall();
+  }
+  // The Codex-only offer, independent of the Claude one; asked once whether the user accepts or declines.
+  if (codexOfferDue({ cfg, target: CODEX, installed: codexState().installed })) {
+    const yes = await confirmCodexInstall({ firstRun: true });
+    cfg.offeredCodexHooks = true;
+    try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
+    if (yes) doCodexInstall();
+    refreshMenu();
+  }
 }
 
 function quit() {
@@ -596,13 +682,14 @@ async function start() {
   Menu.setApplicationMenu(null);
   configFile = path.join(app.getPath('userData'), 'config.json');
   cfg = loadConfig(configFile);
-  debug('config', configFile, 'settings', SETTINGS_PATH);
+  debug('config', configFile, 'settings', SETTINGS_PATH, 'codex', CODEX_PATH);
   createTray();
   createWindow();
   for (const ev of ['display-metrics-changed', 'display-added', 'display-removed']) screen.on(ev, dock);
   await poll();
   setInterval(poll, POLL_MS);
   setInterval(stageTick, STAGE_TICK_MS);
+  setInterval(refreshMenu, 30000); // hook status lines follow edits made outside the HUD (e.g. /hooks approval)
   await startServer();
   await firstRun();
 }
@@ -612,7 +699,11 @@ async function start() {
 // file and exits 0: no window, no server, no single-instance handshake.
 const WANT_QUIT = process.argv.includes('--quit');
 if (process.argv.includes('--remove-hooks')) {
-  log('--remove-hooks:', removeHooksCli({ target: TARGET, uninstall: uninstallHooks }).message);
+  const removed = removeHooksCli({
+    target: TARGET, uninstall: uninstallHooks,
+    codex: { target: CODEX, uninstall: (f) => removeCodexHooksFile(f, CODEX_COMMAND) },
+  });
+  for (const m of removed.messages) log('--remove-hooks:', m);
   app.exit(0);
 } else if (!app.requestSingleInstanceLock({ quit: WANT_QUIT })) {
   app.quit();

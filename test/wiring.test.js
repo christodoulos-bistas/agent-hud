@@ -1,7 +1,8 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, codexTarget, codexOfferDue, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
+import { installCodexHooksFile, removeCodexHooksFile, codexHookCommand } from '../src/main/codex-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
 
 const SUGG = [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test' }], behavior: 'allow', destination: 'localSettings' }];
@@ -440,4 +441,47 @@ test('v1.3: a tucked chat is a panel target only while the tucked list is open',
   assert.equal(panelTarget('t', snap, { ...hud, tuckOpen: false }), null, 'folding the list closes its panel');
   assert.equal(panelTarget('a', snap, { ...hud, tuckOpen: false }), 'a');
   assert.equal(panelTarget('gone', snap, { ...hud, tuckOpen: true }), null, 'a ✕-hidden chat with the list folded, or one that left');
+});
+
+test('Task 10: codexTarget: the env path wins; packaged needs ~/.codex; a dev build is blocked', () => {
+  const home = 'C://Users//x';
+  const yes = () => true, no = () => false;
+  assert.deepEqual(codexTarget({ isPackaged: false, envPath: 'C:/t/hooks.json', home, exists: no }), { path: 'C:/t/hooks.json', blocked: false });
+  assert.deepEqual(codexTarget({ isPackaged: true, envPath: 'C:/t/hooks.json', home, exists: no }), { path: 'C:/t/hooks.json', blocked: false });
+  assert.deepEqual(codexTarget({ isPackaged: true, envPath: undefined, home, exists: yes }), { path: path.join(home, '.codex', 'hooks.json'), blocked: false });
+  assert.deepEqual(codexTarget({ isPackaged: true, envPath: '', home, exists: no }), { path: null, blocked: true });
+  assert.deepEqual(codexTarget({ isPackaged: false, envPath: undefined, home, exists: yes }), { path: null, blocked: true });
+  const seen = [];
+  codexTarget({ isPackaged: true, home, exists: (p) => { seen.push(p); return true; } });
+  assert.deepEqual(seen, [path.join(home, '.codex')]);
+});
+test('Task 10: codexOfferDue is true only when never offered, not blocked and not installed', () => {
+  const ok = { path: 'C:/h.json', blocked: false };
+  assert.equal(codexOfferDue({ cfg: {}, target: ok, installed: false }), true);
+  assert.equal(codexOfferDue({ cfg: { offeredCodexHooks: true }, target: ok, installed: false }), false);
+  assert.equal(codexOfferDue({ cfg: {}, target: { path: null, blocked: true }, installed: false }), false);
+  assert.equal(codexOfferDue({ cfg: {}, target: ok, installed: true }), false);
+});
+test('Task 10: removeHooksCli with a Codex target removes from both and reports both', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hud-rm2-'));
+  try {
+    const claude = path.join(dir, 'settings.json'), codex = path.join(dir, 'hooks.json');
+    fs.writeFileSync(claude, '{}\n');
+    assert.equal(installHooks(claude, { port: 47821, secret: 'k' }).ok, true);
+    const command = codexHookCommand('C://x//resources');
+    assert.equal(installCodexHooksFile(codex, command).ok, true);
+    const r = removeHooksCli({
+      target: { path: claude, blocked: false }, uninstall: uninstallHooks,
+      codex: { target: { path: codex, blocked: false }, uninstall: (f) => removeCodexHooksFile(f, command) },
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.messages.length, 2);
+    assert.match(r.messages[0], /hooks removed from .*settings\.json/);
+    assert.match(r.messages[1], /Codex.*removed from .*hooks\.json/);
+    assert.match(r.message, /settings\.json[\s\S]*hooks\.json/);
+    assert.equal(JSON.parse(fs.readFileSync(codex, 'utf8')).hooks, undefined);
+    const blocked = removeHooksCli({ target: { path: claude, blocked: false }, uninstall: uninstallHooks, codex: { target: { path: null, blocked: true }, uninstall: () => { throw new Error('no'); } } });
+    assert.match(blocked.messages[1], /Codex hooks not changed/);
+    assert.equal(removeHooksCli({ target: { path: claude, blocked: false }, uninstall: uninstallHooks }).messages.length, 1);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

@@ -6,6 +6,9 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 
 const SPIKE_SETTINGS = 'C:\\Consortis_projects\\agent-hud-spike\\.claude\\settings.local.json';
+// Codex: DEV_CODEX_TARGET = null (spike 9: Codex does not load project-layer hooks in an untrusted folder),
+// so AGENT_HUD_CODEX_HOOKS_PATH is deliberately not set: a dev build's Codex target is blocked and
+// `npm run dev` never writes ~/.codex/hooks.json. Set it by hand for tests or manual use only.
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const child = spawn(electron, [root, ...process.argv.slice(2)], {
