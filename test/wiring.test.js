@@ -372,17 +372,33 @@ test('I4: guarded runs the function, and a throw is logged with its label instea
 });
 
 // A fake BrowserWindow for releaseFocusOf: records the calls that can move the foreground.
-const fakeWin = ({ focusable = false, focused = false, destroyed = false } = {}) => {
+const fakeWin = ({ focusable = false, focused = false, destroyed = false, onTop = false } = {}) => {
   const calls = [];
   return {
     calls,
     isDestroyed: () => destroyed,
     isFocusable: () => focusable,
     isFocused: () => focused,
+    isAlwaysOnTop: () => onTop,
+    setAlwaysOnTop: (on) => { calls.push(['setAlwaysOnTop', on]); onTop = !!on; },
     setFocusable: (on) => { calls.push(['setFocusable', on]); focusable = !!on; },
     blur: () => { calls.push(['blur']); focused = false; },
   };
 };
+
+// Hands-on check 3 (2026-11-17): after typing an answer, the foreground went to the taskbar. Windows
+// deactivates to the next visible window in z-order, and for an always-on-top window that is another
+// always-on-top one (taskbar, HUD). Spike 7 (spikes/focus-giveback.mjs): leaving the topmost band for
+// the hand-back gives the focus to the window the user typed from, every run.
+test('hands-on 3: releaseFocusOf leaves the always-on-top band while giving the focus back, then returns to it', () => {
+  const panel = fakeWin({ focusable: true, focused: true, onTop: true });
+  releaseFocusOf(panel);
+  assert.deepEqual(panel.calls, [['setAlwaysOnTop', false], ['setFocusable', false], ['blur'], ['setAlwaysOnTop', true]]);
+  assert.equal(panel.isAlwaysOnTop(), true, 'still on top afterwards');
+  const clickedAway = fakeWin({ focusable: true, focused: false, onTop: true });
+  releaseFocusOf(clickedAway);
+  assert.deepEqual(clickedAway.calls, [['setFocusable', false]], 'no focus to give back: the z-order is left alone');
+});
 
 test('v1.2 I1: releaseFocusOf leaves a window that never became focusable alone (no SetFocusable deactivate)', () => {
   const never = fakeWin();

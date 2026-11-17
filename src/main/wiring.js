@@ -195,11 +195,17 @@ export function guarded(label, fn, onError) {
 // it gives it back (blur activates the window underneath). A window that is not focusable (it never
 // took the focus: the panel hidden after an Allow, Deny or ✕) is left alone: on Windows SetFocusable
 // ends with a deactivate that can hand the foreground to the next window in z-order (I1).
+// That deactivate picks the next visible window in z-order, which for an always-on-top window is
+// another always-on-top one (the taskbar, the HUD), not the window the user typed from; so a window
+// giving the focus back leaves the always-on-top band for the hand-back (spike 7, hands-on check 3).
 export function releaseFocusOf(w) {
   if (!w || w.isDestroyed() || !w.isFocusable()) return;
   const had = w.isFocused();
+  const onTop = had && w.isAlwaysOnTop();
+  if (onTop) w.setAlwaysOnTop(false);
   w.setFocusable(false);
   if (had) w.blur();
+  if (onTop) w.setAlwaysOnTop(true);
 }
 
 // True when the latest session list says the id is interactive. An id that isn't listed yet

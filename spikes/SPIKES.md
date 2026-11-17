@@ -162,3 +162,26 @@ The runs in the table above (labelled A) used neither option. Re-run with them, 
 Verdict unchanged: **`PANEL_CLICK_MODE = 'plain'`**. Same caveats (synthetic clicks, scale 1, Notepad not an editor).
 
 Evidence note: the `FOCUSED` poll is close to tautological - `BrowserWindow.getFocusedWindow()` never returns a `focusable:false` window, so its silence proves little. The only real evidence for "no focus theft" is the foreground-title check (`GetForegroundWindow` + `GetWindowText` before vs after); `CLICKED` is the evidence that the click registered.
+
+## Spike 7 - focus give-back after typing (2026-11-17, hands-on check 3)
+
+Hands-on check 3 (a typed "Something else..." answer + Enter) left the foreground on the Windows taskbar
+(`Shell_TrayWnd`), so the user's next keystrokes went nowhere. Cause: Electron's `setFocusable(false)` /
+`blur()` deactivate via Chromium's `HWNDMessageHandler::Deactivate`, which activates the next *visible
+window in z-order*; for an always-on-top window that is another always-on-top one (the taskbar, the HUD).
+
+`spikes/focus-giveback.mjs <variant>` (a topmost, non-focusable window made focusable and focused, then released):
+
+| variant | release | foreground after (runs) |
+| --- | --- | --- |
+| `blur` (v1.2) | `setFocusable(false); blur()` | HUD, `Shell_SecondaryTrayWnd` - wrong 2/2 |
+| `ontop` | `setAlwaysOnTop(false); setFocusable(false); blur(); setAlwaysOnTop(true)` | the window the user came from - 4/4 (VS Code x2, Claude app x2) |
+| `ontop-hide` | `ontop`, then `hide()` (the panel closing after the answer) | the window the user came from - 2/2 |
+| `hide` | `hide(); setFocusable(false); showInactive()` | stays on the spike window - wrong |
+| `idle-blur` / `idle-ontop` | focusable but never focused | no change - correct either way |
+
+**Result:** `releaseFocusOf` leaves the always-on-top band for the hand-back (`ontop`). In the real HUD with
+the fix, a typed answer from the Claude app returned the focus to the Claude app (1 clean run). Two earlier
+runs ended on VS Code, possibly the user switching windows mid-run (unconfirmed). Driving the panel over the
+debug port does not count as user input, so Windows' foreground lock often refuses the panel's `focus()`
+under automation: a real mouse click is the final check.
