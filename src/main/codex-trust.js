@@ -23,10 +23,14 @@ function uniqueHooks(listResult) {
   return [...byKey.values()];
 }
 
+// A pick is only written when it carries a real hash and a key that belongs to its own hooks file.
+const writable = (h) => typeof h.currentHash === 'string' && h.currentHash.startsWith('sha256:')
+  && typeof h.key === 'string' && normPath(h.key).startsWith(`${normPath(h.sourcePath)}:`);
+
 // Our hooks that Codex has not trusted yet: what the trust edits must cover.
 export function pickOurUntrusted(listResult, opts) {
   return uniqueHooks(listResult)
-    .filter((h) => isOurs(h, opts) && h.trustStatus !== 'trusted')
+    .filter((h) => isOurs(h, opts) && h.trustStatus !== 'trusted' && writable(h))
     .map((h) => ({ key: h.key, hash: h.currentHash, event: h.eventName }));
 }
 
@@ -47,6 +51,7 @@ export function trustSummary(listResult, opts) {
 
 // Runs the trust step against `codex app-server`, the way the Codex app's own Trust button does:
 // hooks/list -> config/batchWrite(trusted_hash edits) -> hooks/list. Never rejects; always kills the child.
+// Resolves { ok, trusted, already, untrusted, error? }; error is 'not-found' | 'not-listed' | 'timeout' | 'exit' | 'rpc'.
 export function trustCodexHooks({ exe, hooksPath, command, cwd, timeoutMs = 15000, spawnFn = spawn, env = process.env }) {
   const opts = { hooksPath, command };
   const out = { ok: false, trusted: [], already: [], untrusted: [] };
@@ -105,7 +110,9 @@ export function trustCodexHooks({ exe, hooksPath, command, cwd, timeoutMs = 1500
     rl.on('line', (line) => {
       let msg;
       try { msg = JSON.parse(line); } catch { return; }
-      const res = msg && pending.get(msg.id);
+      // Only a real reply (result or error, no method) resolves a request; server requests share the id space.
+      if (!msg || typeof msg !== 'object' || 'method' in msg || !('result' in msg || 'error' in msg)) return;
+      const res = pending.get(msg.id);
       if (!res) return;
       pending.delete(msg.id);
       res(msg);
@@ -117,6 +124,7 @@ export function trustCodexHooks({ exe, hooksPath, command, cwd, timeoutMs = 1500
         send({ method: 'initialized' });
         const first = await call('hooks/list', { cwds: [cwd] });
         lists.push(first);
+        if (trustSummary(first, opts).ours === 0) return finish({ ok: false, error: 'not-listed', trusted: [], already: [], untrusted: [] });
         const picked = pickOurUntrusted(first, opts);
         if (picked.length === 0) {
           const s = trustSummary(first, opts);
@@ -125,9 +133,10 @@ export function trustCodexHooks({ exe, hooksPath, command, cwd, timeoutMs = 1500
         await call('config/batchWrite', { edits: trustEdits(picked), filePath: null, expectedVersion: null, reloadUserConfig: true });
         const second = await call('hooks/list', { cwds: [cwd] });
         lists.push(second);
-        const before = trustSummary(first, opts).trusted;
-        const after = trustSummary(second, opts);
-        finish({ ok: true, trusted: after.trusted.filter((e) => !before.includes(e)), already: before, untrusted: after.untrusted });
+        const trustedOurs = (l) => uniqueHooks(l).filter((h) => isOurs(h, opts) && h.trustStatus === 'trusted');
+        const beforeKeys = new Set(trustedOurs(first).map((h) => h.key));
+        const fresh = trustedOurs(second).filter((h) => !beforeKeys.has(h.key));
+        finish({ ok: true, trusted: fresh.map((h) => h.eventName), already: trustSummary(first, opts).trusted, untrusted: trustSummary(second, opts).untrusted });
       } catch (e) {
         if (e?.message === 'rpc') finish(partial('rpc'));
         else finish(partial('exit'));

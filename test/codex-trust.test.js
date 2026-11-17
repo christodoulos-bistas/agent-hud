@@ -178,3 +178,33 @@ test('findCodexExe: no LOCALAPPDATA skips the alias step', async () => {
   assert.equal(await f.run(), null);
   assert.equal(f.calls.readlink.length, 0);
 });
+
+test('only foreign hooks listed -> not-listed, no batchWrite', async () => {
+  const s = setup('normal', [hook({ command: 'node other.js' })]);
+  const r = await run(s.env);
+  assert.deepEqual(r, { ok: false, trusted: [], already: [], untrusted: [], error: 'not-listed' });
+  assert.equal(fs.existsSync(s.writes), false);
+});
+
+test('server request with a pending id is not taken as a reply', async () => {
+  const r = await run(setup('request').env);
+  assert.deepEqual(r, { ok: true, trusted: ['stop'], already: ['preToolUse'], untrusted: [] });
+});
+
+test('pickOurUntrusted: needs a sha256 hash and a key under its own sourcePath', () => {
+  const list = { data: [{ hooks: [
+    hook({ currentHash: undefined }),
+    hook({ key: 'elsewhere:stop:3:0' }),
+    hook({ key: `${HP}:stop:4:0`, currentHash: 'md5:zz' }),
+  ] }] };
+  assert.deepEqual(pickOurUntrusted(list, OPTS), []);
+});
+
+test('trusted is computed by key: same event, one already trusted', async () => {
+  const s = setup('normal', [
+    hook({ key: `${HP}:stop:0:0`, trustStatus: 'trusted' }),
+    hook({ key: `${HP}:stop:1:0` }),
+  ]);
+  const r = await run(s.env);
+  assert.deepEqual(r, { ok: true, trusted: ['stop'], already: ['stop'], untrusted: [] });
+});

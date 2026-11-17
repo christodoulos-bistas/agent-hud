@@ -646,8 +646,12 @@ function trustCodex({ reason, note, changed = true }) {
       const untrusted = Array.isArray(r.untrusted) ? r.untrusted : [];
       const trusted = Array.isArray(r.trusted) ? r.trusted : [];
       const withNote = (body) => (note ? `${note}\n${body}` : body);
+      const already = Array.isArray(r.already) ? r.already : [];
+      // Codex now holds the current hashes: let the HUD's own approval memory learn them afresh.
+      if (r.ok && untrusted.length === 0 && (trusted.length || already.length)) resetCodexApproval();
       if (!r.ok || untrusted.length) notify('Agent HUD Codex hooks need approval', withNote(CODEX_APPROVE_BALLOON), true);
       else if (trusted.length) notify(reason === 'startup' ? 'Agent HUD re-trusted its Codex hooks' : 'Agent HUD Codex hooks installed and trusted', withNote(CODEX_TRUSTED_BODY));
+      else if (reason === 'tray') notify('Agent HUD Codex hooks already trusted', 'Codex already runs them; nothing to approve.');
       else if (reason === 'install') notify(changed ? 'Agent HUD Codex hooks installed' : 'Agent HUD Codex hooks already installed', note);
       refreshMenu();
     } catch (err) { log('codex trust', err); }

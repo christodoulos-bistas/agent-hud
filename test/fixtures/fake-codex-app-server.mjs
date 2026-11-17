@@ -25,6 +25,7 @@ rl.on('line', (line) => {
     if (MODE === 'exit') process.exit(3);
   } else if (msg.method === 'hooks/list') {
     const cwd = msg.params?.cwds?.[0] ?? null;
+    if (MODE === 'request') send({ id: msg.id, method: 'item/tool/requestApproval', params: {} });
     send({ id: msg.id, result: { data: [{ cwd, hooks: readState().hooks }] } });
   } else if (msg.method === 'config/batchWrite') {
     if (MODE === 'error') { send({ id: msg.id, error: { code: -1, message: 'nope' } }); return; }
