@@ -48,7 +48,7 @@ export function createHookServer({ port = 0, secret, queue, isInteractive, reply
     }
   }
 
-  function route(body, res) {
+  function route(body, res, source) {
     const sessionId = body.session_id;
     const event = body.hook_event_name;
     const toolName = body.tool_name;
@@ -74,13 +74,18 @@ export function createHookServer({ port = 0, secret, queue, isInteractive, reply
     }
 
     let kind = null;
+    if (source === 'codex') {
+      // Codex exec never sends PermissionRequest, so any one that arrives is answerable: hold it without
+      // consulting isInteractive (the HUD may never have seen the session). No choice or reply cards.
+      if (event === 'PermissionRequest') kind = 'permission';
+    } else
     // AskUserQuestion's PermissionRequest is never held: its PreToolUse already is the choice card (I4).
     if (event === 'PermissionRequest' && toolName !== 'AskUserQuestion' && isInteractive(sessionId)) kind = 'permission';
     else if (event === 'PreToolUse' && toolName === 'AskUserQuestion' && isInteractive(sessionId)) kind = 'choice';
     else if (event === 'Stop' && !bgRunning && isInteractive(sessionId) && replyOptIn(sessionId)) kind = 'reply';
 
     if (!kind || !canHold()) return sendEmpty(res);
-    hold(res, { id: randomUUID(), sessionId, kind, payload: body });
+    hold(res, { id: randomUUID(), sessionId, kind, payload: body, source });
   }
 
   function handle(req, res) {
@@ -124,12 +129,13 @@ export function createHookServer({ port = 0, secret, queue, isInteractive, reply
       try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return sendEmpty(res); }
       if (!body || typeof body !== 'object' || !body.hook_event_name) return sendEmpty(res);
 
+      const source = String(req.headers['x-agent-hud-source'] ?? '').trim().toLowerCase() === 'codex' ? 'codex' : 'claude';
       if (onEvent) {
         try {
-          onEvent({ sessionId: body.session_id, event: body.hook_event_name, toolName: body.tool_name, toolInput: body.tool_input, cwd: body.cwd, at: Date.now(), raw: body });
+          onEvent({ sessionId: body.session_id, event: body.hook_event_name, toolName: body.tool_name, toolInput: body.tool_input, cwd: body.cwd, at: Date.now(), source, raw: body });
         } catch (err) { safeError(err); }
       }
-      try { route(body, res); } catch (err) { safeError(err); sendEmpty(res); }
+      try { route(body, res, source); } catch (err) { safeError(err); sendEmpty(res); }
     });
   }
 

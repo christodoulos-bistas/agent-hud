@@ -376,3 +376,69 @@ test("I2c: a real UserPromptSubmit releases that session's main-thread permissio
     h.queue.releaseAll(); await p.sub; await p.other;
   } finally { await h.srv.close(); }
 });
+
+const CODEX = { 'X-Agent-HUD': SECRET, 'X-Agent-HUD-Source': 'codex' };
+
+test('v2: a codex PermissionRequest for a session the HUD never saw is held as a permission card with source codex (Review Focus 2)', async () => {
+  const h = await setup({ isInteractive: () => false });
+  try {
+    const body = ev('PermissionRequest', { session_id: 'cx-unseen', tool_name: 'apply_patch', tool_input: { command: 'x' } });
+    const p = h.post(body, { headers: CODEX });
+    await waitFor(() => h.queue.list().length === 1);
+    const item = h.queue.list()[0];
+    assert.equal(item.kind, 'permission'); assert.equal(item.source, 'codex');
+    assert.equal(item.sessionId, 'cx-unseen'); assert.deepEqual(item.payload, body);
+    h.queue.answer(item.id, RELEASE);
+    assert.equal((await p).status, 200);
+    // the same event from Claude on a non-interactive session stays unheld
+    const r = await h.post(body);
+    assert.equal(await r.text(), ''); assert.equal(h.queue.list().length, 0);
+  } finally { await h.srv.close(); }
+});
+
+test('v2: a codex PermissionRequest is not held when the server cannot hold', async () => {
+  const h = await setup({ shouldHold: () => false });
+  try {
+    const r = await h.post(ev('PermissionRequest', { tool_name: 'Bash' }), { headers: CODEX });
+    assert.equal(r.status, 200); assert.equal(await r.text(), '');
+    assert.equal(h.queue.list().length, 0);
+  } finally { await h.srv.close(); }
+});
+
+test('v2: codex AskUserQuestion and codex Stop with reply opt-in are not held', async () => {
+  const h = await setup({ replyOptIn: () => true });
+  try {
+    for (const body of [
+      ev('PreToolUse', { tool_name: 'AskUserQuestion', tool_input: { questions: [] } }),
+      ev('Stop'),
+    ]) {
+      const r = await h.post(body, { headers: CODEX });
+      assert.equal(r.status, 200); assert.equal(await r.text(), '');
+    }
+    assert.equal(h.maxHeld(), 0, 'never queued');
+  } finally { await h.srv.close(); }
+});
+
+test('v2: onEvent receives source codex / claude by header', async () => {
+  const h = await setup();
+  try {
+    await h.post(ev('PreToolUse', { tool_name: 'Read' }), { headers: CODEX });
+    await h.post(ev('PreToolUse', { tool_name: 'Read' }), { headers: { 'X-Agent-HUD': SECRET, 'X-Agent-HUD-Source': ' CODEX ' } });
+    await h.post(ev('PreToolUse', { tool_name: 'Read' }));
+    await h.post(ev('PreToolUse', { tool_name: 'Read' }), { headers: { 'X-Agent-HUD': SECRET, 'X-Agent-HUD-Source': 'other' } });
+    assert.deepEqual(h.events.map((e) => e.source), ['codex', 'codex', 'claude', 'claude']);
+    assert.equal(h.events[0].raw.source, undefined, 'payload not mutated');
+  } finally { await h.srv.close(); }
+});
+
+test('v2: a codex PostToolUse releases a held codex permission (source-agnostic)', async () => {
+  const h = await setup();
+  try {
+    const input = { command: 'ls' };
+    const p = h.post(ev('PermissionRequest', { tool_name: 'Bash', tool_input: input }), { headers: CODEX });
+    await waitFor(() => h.queue.list().length === 1);
+    await h.post(ev('PostToolUse', { tool_name: 'Bash', tool_input: input }), { headers: CODEX });
+    assert.equal((await p).status, 200);
+    assert.equal(h.queue.list().length, 0);
+  } finally { await h.srv.close(); }
+});
