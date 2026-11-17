@@ -257,3 +257,20 @@ test('Stop sets lastMessage (collapsed, 600 cap); a new real prompt clears it; h
   log.push(ev('Stop', 5, { raw: { last_assistant_message: '   ' } }));
   assert.equal(log.view('s1').lastMessage, null);
 });
+
+// 2026-11-17: a helper that started before the HUD (its SubagentStart missed) showed nowhere in the panel.
+test('a helper first seen by its own tool joins the helpers (still not a step); SubagentStop or the main Stop removes it', () => {
+  const l = createStepLog();
+  l.push(ev('PreToolUse', 1, { tool: 'Read', input: { file_path: 'C:/a/x.js' }, raw: { agent_id: 'h9', agent_type: 'Explore', tool_use_id: 't1' } }));
+  assert.deepEqual(l.view('s1').helpers, [{ agentId: 'h9', agentType: 'Explore', doing: 'reading x.js' }]);
+  assert.equal(l.view('s1').steps.length + l.view('s1').open.length, 0, 'a helper tool is never a main-thread step');
+  l.push(ev('PreToolUse', 2, { tool: 'Grep', input: {}, raw: { agent_id: 'h9', tool_use_id: 't2' } }));
+  assert.deepEqual(l.view('s1').helpers, [{ agentId: 'h9', agentType: 'Explore', doing: 'searching code' }], 'one entry, latest doing');
+  l.push(ev('PostToolUse', 3, { tool: 'Grep', input: {}, raw: { agent_id: 'h7', tool_use_id: 't3' } }));
+  assert.equal(l.view('s1').helpers.length, 1, 'only a PreToolUse adds a helper');
+  l.push(ev('SubagentStop', 4, { raw: { agent_id: 'h9' } }));
+  assert.deepEqual(l.view('s1').helpers, []);
+  l.push(ev('PreToolUse', 5, { tool: 'Grep', input: {}, raw: { agent_id: 'h8', tool_use_id: 't4' } }));
+  l.push(ev('Stop', 6, { raw: { background_tasks: [] } }));
+  assert.deepEqual(l.view('s1').helpers, [], 'the main Stop reconciles it away like any helper');
+});

@@ -79,6 +79,8 @@ export function createClassEngine({ windowMs = 120000, leadRatio = 1.5, holdMs =
       }
       if (ev.event === 'SubagentStart') {
         if (raw.agent_id) s.ids.add(raw.agent_id); else s.anon++;
+      } else if (ev.event === 'PreToolUse' && raw.agent_id) {
+        s.ids.add(raw.agent_id); // a helper whose SubagentStart was missed (started before the HUD) — see steps.js
       } else if (ev.event === 'SubagentStop') {
         if (raw.agent_id) s.ids.delete(raw.agent_id); else s.anon = Math.max(0, s.anon - 1);
       }

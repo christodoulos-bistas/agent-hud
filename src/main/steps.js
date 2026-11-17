@@ -100,9 +100,12 @@ export function createStepLog({ cap = 20, supersedeMs = 10000 } = {}) {
     if (e === 'SubagentStop') { if (agentId !== null) s.helpers.delete(agentId); return; }
 
     if (agentId !== null) {
+      // A helper's own PreToolUse proves it is running, so one whose SubagentStart was missed (it started
+      // before the HUD or its hooks) joins here. Only a Pre adds one: a late Post could follow its stop.
       if (e === 'PreToolUse') {
-        const h = s.helpers.get(agentId);
-        if (h) h.doing = activityLine(ev);
+        const h = s.helpers.get(agentId) ?? { agentId, agentType: raw.agent_type ?? null, doing: null };
+        h.doing = activityLine(ev);
+        s.helpers.set(agentId, h);
       }
       return;
     }

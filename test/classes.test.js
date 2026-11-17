@@ -153,3 +153,19 @@ test('sticky: old signals fall out of the window', () => {
   assert.equal(e.classOf('s', 192000), 'runesmith');
   assert.equal(e.classOf('s', 201000), 'pathfinder');
 });
+
+// 2026-11-17: helpers that started before the HUD (or before its hooks) were never counted: their
+// SubagentStart was missed. A helper's own PreToolUse proves it is running.
+test('a helper first seen by its own tool counts as active (familiars; summoner at 2); its stop removes it', () => {
+  const e = createClassEngine();
+  e.push(ev('Read', { file_path: 'a.js' }, 1000, 'PreToolUse', { raw: { agent_id: 'h1', agent_type: 'Explore' } }));
+  assert.equal(e.activeSubagents('s'), 1);
+  e.push(ev('Grep', {}, 1100, 'PreToolUse', { raw: { agent_id: 'h2' } }));
+  e.push(ev('Grep', {}, 1200, 'PreToolUse', { raw: { agent_id: 'h2' } }));
+  assert.equal(e.activeSubagents('s'), 2, 'one helper counts once however many tools it runs');
+  assert.equal(e.classOf('s', 1300), 'summoner');
+  e.push(ev(null, {}, 1400, 'PostToolUse', { raw: { agent_id: 'h3' } }));
+  assert.equal(e.activeSubagents('s'), 2, 'only a PreToolUse adds a helper (a late Post could follow its stop)');
+  e.push(ev(null, {}, 1500, 'SubagentStop', { raw: { agent_id: 'h1' } }));
+  assert.equal(e.activeSubagents('s'), 1);
+});
