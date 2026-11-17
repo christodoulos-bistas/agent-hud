@@ -76,15 +76,20 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
       hidden.delete(old.sessionId);
     }
     for (const id of keep) missed.delete(id);
-    // A chat without hooks starts a new turn when its file turns busy: that wakes a ✕-hidden one.
+    // A chat without hooks starts a new turn when its file turns busy: that wakes a ✕-hidden one. A chat
+    // with hooks wakes only on a real prompt (onEvent): its file also turns busy for <task-notification>
+    // turns and on the poll after the prompt that came before the ✕ (final review I1).
     for (const x of fresh) {
       const old = sessions.find((o) => o.sessionId === x.sessionId);
-      if (old && old.status !== 'busy' && x.status === 'busy') st(x.sessionId).wakeAt = now();
+      if (old && old.status !== 'busy' && x.status === 'busy' && !state.get(x.sessionId)?.connected) st(x.sessionId).wakeAt = now();
     }
     sessions = [...fresh, ...held];
   }
 
   function setReplyOptIn(id, on) { optIn.set(id, !!on); }
+  // Whether a Stop for this chat should hold a reply card: its "wait for my reply" box, visible, tucked or
+  // hidden alike (final review I2; a reply card is `needs`, so it brings a hidden chat back).
+  const wantsReply = (id) => !!optIn.get(id) && sessions.some((x) => x.sessionId === id);
 
   // A reply sent from the HUD resumes the session; no hook announces it (SPIKES.md 3a), so mark it here.
   function replySent(id) {
@@ -199,5 +204,5 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     return computeAgents(now()).map((a) => `${a.id}:${a.stage}:${a.stuck ? a.stuck.reason : ''}${a.tuck ? `:${a.tuck}` : ''}`).join('|');
   }
 
-  return { onEvent, setSessions, setReplyOptIn, replySent, permissionDenied, hide, snapshot, detail, stageKey };
+  return { onEvent, setSessions, setReplyOptIn, wantsReply, replySent, permissionDenied, hide, snapshot, detail, stageKey };
 }

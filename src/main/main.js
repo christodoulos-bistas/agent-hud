@@ -543,7 +543,7 @@ function createTray() {
 async function startServer() {
   const srv = createHookServer({
     port: cfg.port, secret: cfg.secret, queue, isInteractive, shouldHold: canHold,
-    replyOptIn: (id) => !!store.snapshot().agents.find((a) => a.id === id)?.replyOptIn,
+    replyOptIn: (id) => store.wantsReply(id),
     onEvent: (ev) => { store.onEvent(ev); push(); },
     onError: (err) => log('hook server', err?.message ?? err),
   });

@@ -533,3 +533,28 @@ test('v1.3: stageKey changes when a chat crosses the one-hour line with no event
   set(1000 + 3_600_000);
   assert.notEqual(store.stageKey(), before);
 });
+
+// v1.3 final review I1: a chat with hooks wakes only on a real prompt; its file going busy (a
+// <task-notification> turn, or the poll after the prompt that preceded the ✕) must not bring it back.
+test('v1.3 I1: a hidden chat with hooks stays hidden when its session file turns busy', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1', { status: 'idle' })]);
+  store.onEvent(ev('s1', 'Stop', 1000));
+  store.hide('s1');
+  set(2000); store.setSessions([S('s1', { status: 'busy' })]);
+  assert.equal(store.snapshot().tucked.length, 1, 'still hidden');
+  set(3000); store.onEvent(ev('s1', 'UserPromptSubmit', 3000, { raw: { prompt: 'go on' } }));
+  assert.equal(store.snapshot().tucked.length, 0, 'a real prompt still wakes it');
+});
+
+// v1.3 final review I2: "wait for my reply" must keep working for a chat that is tucked or hidden.
+test('v1.3 I2: wantsReply answers for tucked and hidden chats too', () => {
+  const { store } = setup(1000);
+  store.setSessions([S('s1'), S('s2')]);
+  store.setReplyOptIn('s1', true);
+  store.hide('s1');
+  assert.equal(store.snapshot().tucked[0].id, 's1');
+  assert.equal(store.wantsReply('s1'), true);
+  assert.equal(store.wantsReply('s2'), false);
+  assert.equal(store.wantsReply('nope'), false);
+});
