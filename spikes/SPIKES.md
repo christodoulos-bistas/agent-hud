@@ -185,3 +185,17 @@ the fix, a typed answer from the Claude app returned the focus to the Claude app
 runs ended on VS Code, possibly the user switching windows mid-run (unconfirmed). Driving the panel over the
 debug port does not count as user input, so Windows' foreground lock often refuses the panel's `focus()`
 under automation: a real mouse click is the final check.
+
+## Spike 8 - Codex hooks through the HUD's own exe (2026-11-17, Codex 0.167.0-alpha.4.1)
+
+Scripts in `spikes/codex/` (`bridge.js`/`bridge.cmd`: the installed `Agent HUD.exe` with `ELECTRON_RUN_AS_NODE=1`
+forwards one hook event over HTTP; `receiver.mjs`: a scratch endpoint that answers allow/deny; `tui.mjs`/`run.mjs`:
+interactive / exec Codex in a scratch folder with the hooks passed as `-c hooks.*` overrides, nothing written to `~/.codex`).
+
+- Bridge cost, median of 5: 80 ms via the HUD exe as Node, 52 ms via system Node (`time.mjs`).
+- Events and fields match Claude's closely; Codex's shell tool is `Bash`; `Stop` carries `last_assistant_message`;
+  `PermissionRequest` has no `tool_use_id` and no `permission_suggestions`.
+- Allow → command ran, no Codex prompt. Deny (+message) → "Blocked by hook", command not run.
+- `codex exec` never asks for approval, so no PermissionRequest there.
+- 8b: with the answer held 25 s, Codex showed only "Working · Running hooks" — no prompt of its own while a hook is pending.
+- Codex keeps hook approvals by position (`hooks.state.'<file>:<event>:<group>:<hook>'` in config.toml).
