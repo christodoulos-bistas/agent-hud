@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { openCommandFor, resolveCodeCmd, canOpen } from '../src/main/focus.js';
+import { openCommandFor, resolveCodeCmd, canOpen, CODEX_ACTIVATE } from '../src/main/focus.js';
 
 const S = (o = {}) => ({ sessionId: 's1', pid: 1, cwd: 'c:\\Consortis_projects\\arsenal', kind: 'interactive', name: 'arsenal-e0', nameSource: 'derived', status: 'idle', startedAt: 0, ...o });
 const CODE = 'C:\\Users\\u\\AppData\\Local\\Programs\\Microsoft VS Code\\bin\\code.cmd';
@@ -39,4 +39,38 @@ test('resolveCodeCmd: first code.cmd on PATH, else the default per-user install,
   assert.equal(resolveCodeCmd({ pathEnv: 'C:\\Windows', localAppData: 'C:\\L', exists }), 'C:\\L\\Programs\\Microsoft VS Code\\bin\\code.cmd');
   assert.equal(resolveCodeCmd({ pathEnv: '', localAppData: 'C:\\nowhere', exists }), null);
   assert.equal(resolveCodeCmd({ pathEnv: undefined, localAppData: undefined, exists }), null);
+});
+
+const X = (host, o = {}) => S({ entrypoint: 'codex', source: 'codex', host, ...o });
+const CODEX_ARG = 'shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App';
+
+test('CODEX_ACTIVATE is the Store-package AppsFolder activation (one backslash)', () => {
+  assert.deepEqual(CODEX_ACTIVATE, { cmd: 'explorer.exe', args: [CODEX_ARG] });
+  assert.equal(CODEX_ACTIVATE.args[0].split('\\').length, 2);
+});
+
+test('codex desktop host -> codexActivate', () => {
+  assert.deepEqual(openCommandFor(X('desktop'), { codeCmd: CODE, codexActivate: CODEX_ACTIVATE }), CODEX_ACTIVATE);
+});
+
+test('codex vscode host -> code.cmd with the cwd', () => {
+  assert.deepEqual(openCommandFor(X('vscode'), { codeCmd: CODE, codexActivate: CODEX_ACTIVATE }), { cmd: CODE, args: ['c:\\Consortis_projects\\arsenal'] });
+});
+
+test('codex vscode host without code.cmd or cwd -> null', () => {
+  assert.equal(openCommandFor(X('vscode'), { codexActivate: CODEX_ACTIVATE }), null);
+  assert.equal(openCommandFor(X('vscode', { cwd: '' }), { codeCmd: CODE }), null);
+});
+
+test('codex cli / unknown host -> null', () => {
+  assert.equal(openCommandFor(X('cli'), { codeCmd: CODE, codexActivate: CODEX_ACTIVATE }), null);
+  assert.equal(openCommandFor(X('unknown'), { codeCmd: CODE, codexActivate: CODEX_ACTIVATE }), null);
+});
+
+test('codex desktop with codexActivate null/absent -> null, and canOpen follows', () => {
+  assert.equal(openCommandFor(X('desktop'), { codeCmd: CODE, codexActivate: null }), null);
+  assert.equal(openCommandFor(X('desktop'), { codeCmd: CODE }), null);
+  assert.equal(canOpen(X('desktop'), { codexActivate: CODEX_ACTIVATE }), true);
+  assert.equal(canOpen(X('desktop'), {}), false);
+  assert.equal(canOpen(X('cli'), { codexActivate: CODEX_ACTIVATE }), false);
 });

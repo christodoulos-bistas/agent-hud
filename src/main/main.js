@@ -14,7 +14,7 @@ import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createCodexSessions, readRolloutMeta } from './codex-sessions.js';
 import { createStore } from './store.js';
-import { openCommandFor, resolveCodeCmd, canOpen } from './focus.js';
+import { openCommandFor, resolveCodeCmd, canOpen, CODEX_ACTIVATE } from './focus.js';
 import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -74,7 +74,8 @@ const CODE_CMD = resolveCodeCmd({
   pathEnv: process.env.PATH ?? process.env.Path, localAppData: process.env.LOCALAPPDATA,
   exists: (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } },
 });
-const store = createStore({ engine, queue, holdMs: HOLD_MS, replyMs: REPLY_MS, onError: (err) => log('step log', err), canOpen: (s) => canOpen(s, { codeCmd: CODE_CMD }) });
+const OPEN_OPTS = { codeCmd: CODE_CMD, codexActivate: CODEX_ACTIVATE };
+const store = createStore({ engine, queue, holdMs: HOLD_MS, replyMs: REPLY_MS, onError: (err) => log('step log', err), canOpen: (s) => canOpen(s, OPEN_OPTS) });
 
 // ---------------------------------------------------------------- snapshot
 
@@ -355,12 +356,12 @@ function spawnQuiet(cmd, args) {
     }
   } catch (err) { log('open', err); return; }
   child.on('error', (err) => log('open', err.message));
-  child.on('exit', (code) => { if (code) log('open', `${cmd} exited ${code}`); });
+  child.on('exit', (code) => { if (code && !/(^|[\\/])explorer\.exe$/i.test(cmd)) log('open', `${cmd} exited ${code}`); });
 }
 
 function openWindow(sessionId) {
   const s = sessionById(sessionId);
-  const c = s && openCommandFor(s, { codeCmd: CODE_CMD });
+  const c = s && openCommandFor(s, OPEN_OPTS);
   if (!c) return; // the button is hidden for sessions we can't focus
   spawnQuiet(c.cmd, c.args);
 }

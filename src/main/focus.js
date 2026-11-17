@@ -20,8 +20,17 @@ export function resolveCodeCmd({ pathEnv, localAppData, exists }) {
   return null;
 }
 
-export function openCommandFor(session, { codeCmd } = {}) {
+// The Codex desktop app is a Store package: explorer.exe activates it by AppUserModelID, restoring it when
+// hidden. (explorer.exe exits 1 even on success.)
+export const CODEX_ACTIVATE = { cmd: 'explorer.exe', args: ['shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App'] };
+
+export function openCommandFor(session, { codeCmd, codexActivate } = {}) {
   const cwd = String(session?.cwd || '');
+  if (session?.entrypoint === 'codex') {
+    if (session.host === 'desktop') return codexActivate || null;
+    if (session.host === 'vscode') return codeCmd && cwd ? { cmd: codeCmd, args: [cwd] } : null;
+    return null;
+  }
   if (session?.entrypoint === 'claude-vscode') return codeCmd && cwd ? { cmd: codeCmd, args: [cwd] } : null;
   if (session?.entrypoint === 'claude-desktop') return { cmd: 'powershell', args: ['-NoProfile', '-Command', APP_ACTIVATE_CLAUDE] };
   return null;
