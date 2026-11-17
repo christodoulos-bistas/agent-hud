@@ -47,7 +47,7 @@ export function createCodexSessions({ now = Date.now, idleAfterMs = 900000, expi
     const setBusy = (b) => { if (c.busy !== b) { c.busy = b; c.statusSince = at; } };
     const e = ev.event;
     const useId = ev.raw?.tool_use_id ?? null;
-    if (e === 'UserPromptSubmit') setBusy(true);
+    if (e === 'UserPromptSubmit' || e === 'PermissionRequest') setBusy(true);
     else if (e === 'PreToolUse') { setBusy(true); if (useId !== null) c.open.add(useId); }
     else if (typeof e === 'string' && e.startsWith('PostToolUse')) { if (useId !== null) c.open.delete(useId); }
     else if (e === 'Stop' || e === 'Interrupt') { c.open.clear(); setBusy(false); }

@@ -104,3 +104,18 @@ test('readRolloutMeta reads only the first line; bad files give null', () => {
     assert.equal(readRolloutMeta(undefined), null);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('PermissionRequest makes an idle chat busy; the unchanged 15 min rule then applies by open steps', () => {
+  const { cs, set } = setup();
+  cs.onEvent(ev(ID1, 'SessionStart', 0)); cs.onEvent(ev(ID2, 'SessionStart', 0));
+  cs.onEvent(ev(ID2, 'PreToolUse', 100, { raw: { tool_use_id: 't1' } }));
+  cs.onEvent(ev(ID2, 'Stop', 150)); // Stop closes steps; reopen one below
+  cs.onEvent(ev(ID1, 'PermissionRequest', 1000));
+  let s = cs.list().find((x) => x.sessionId === ID1);
+  assert.equal(s.status, 'busy'); assert.equal(s.statusSince, 1000);
+  set(1000 + 899999); assert.equal(cs.list().find((x) => x.sessionId === ID1).status, 'busy');
+  set(1000 + 900001); assert.equal(cs.list().find((x) => x.sessionId === ID1).status, 'idle'); // no open step
+  cs.onEvent(ev(ID2, 'PreToolUse', 2000, { raw: { tool_use_id: 't2' } }));
+  cs.onEvent(ev(ID2, 'PermissionRequest', 2100));
+  set(2100 + 900001); assert.equal(cs.list().find((x) => x.sessionId === ID2).status, 'busy'); // open step
+});
