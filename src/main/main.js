@@ -12,6 +12,7 @@ import { createQueue } from './queue.js';
 import { installHooks, uninstallHooks } from './settings-hooks.js';
 import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
+import { createCodexSessions, readRolloutMeta } from './codex-sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor, resolveCodeCmd, canOpen } from './focus.js';
 import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from './wiring.js';
@@ -50,7 +51,7 @@ let tray = null;
 let server = null;
 let cfg = null;
 let configFile = null;
-let sessions = [];
+let claudeSessions = []; // from ~/.claude/sessions; Codex chats come from codexSessions
 let collapsed = false;
 let tuckOpen = false; // v1.3: the HUD's "N tucked away" list is unfolded
 let contentHeight = 120;
@@ -132,21 +133,23 @@ const stageTick = guarded('stage tick', () => {
 function isAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (err) { return err.code === 'EPERM'; }
 }
-const isInteractive = createInteractiveCheck({ current: () => sessions, reread: () => readSessionFiles(SESSIONS_DIR) });
+const codexSessions = createCodexSessions({ readMeta: readRolloutMeta });
+const merged = () => [...claudeSessions, ...codexSessions.list()];
+const isInteractive = createInteractiveCheck({ current: merged, reread: () => readSessionFiles(SESSIONS_DIR) });
 
 let polling = false;
 async function poll() {
   if (polling) return;
   polling = true;
   try {
-    sessions = await listSessions({ dir: SESSIONS_DIR, isAlive });
-    store.setSessions(sessions);
+    claudeSessions = await listSessions({ dir: SESSIONS_DIR, isAlive });
+    store.setSessions(merged());
     push();
   } catch (err) { log('poll', err); } finally { polling = false; }
 }
 
 function sessionById(id) {
-  return sessions.find((s) => s.sessionId === id) ?? readSessionFiles(SESSIONS_DIR).find((s) => s.sessionId === id) ?? null;
+  return merged().find((s) => s.sessionId === id) ?? readSessionFiles(SESSIONS_DIR).find((s) => s.sessionId === id) ?? null;
 }
 
 // ---------------------------------------------------------------- window
@@ -544,7 +547,12 @@ async function startServer() {
   const srv = createHookServer({
     port: cfg.port, secret: cfg.secret, queue, isInteractive, shouldHold: canHold,
     replyOptIn: (id) => store.wantsReply(id),
-    onEvent: (ev) => { store.onEvent(ev); push(); },
+    onEvent: (ev) => {
+      // A Codex chat exists only through its events: track it and list it before the store sees the event.
+      if (ev.source === 'codex') { codexSessions.onEvent(ev); store.setSessions(merged()); }
+      store.onEvent(ev);
+      push();
+    },
     onError: (err) => log('hook server', err?.message ?? err),
   });
   try {

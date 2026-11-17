@@ -142,7 +142,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
         id, display: displayName(sess), cls: engine.classOf(id, t),
         mood: stage === 'thinking' || stage === 'working' ? 'working' : baseMood,
         activity: s.activity, familiars: Math.min(engine.activeSubagents(id), 3),
-        replyOptIn: !!optIn.get(id), entrypoint: sess.entrypoint, cwd: sess.cwd, handedBack, canOpen: openable(sess),
+        replyOptIn: !!optIn.get(id), entrypoint: sess.entrypoint, source: sess.source ?? 'claude', cwd: sess.cwd, handedBack, canOpen: openable(sess),
         stage, stuck, stageSince: rec.since,
         currentStepStartedAt: currentOf(view, sess.status)?.startedAt ?? null,
         lastActivityAt: s.lastActivityAt,
@@ -188,7 +188,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     const card = activeCard(t);
     const view = steps.view(id);
     return {
-      id, display: a.display, cls: a.cls, stage: a.stage, stuck: a.stuck,
+      id, source: sess.source ?? 'claude', display: a.display, cls: a.cls, stage: a.stage, stuck: a.stuck,
       stageSince: a.stageSince, currentStepStartedAt: a.currentStepStartedAt, lastActivityAt: a.lastActivityAt,
       task: view.task ?? null, startedAt: view.taskAt ?? knownTime(sess.startedAt),
       connected: !!state.get(id)?.connected,

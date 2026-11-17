@@ -558,3 +558,13 @@ test('v1.3 I2: wantsReply answers for tucked and hidden chats too', () => {
   assert.equal(store.wantsReply('s2'), false);
   assert.equal(store.wantsReply('nope'), false);
 });
+
+test('store: a codex session view and detail carry source codex; a Claude one carries claude', () => {
+  const { store } = setup();
+  store.setSessions([S('c1'), S('x1', { source: 'codex', entrypoint: 'codex', pid: null })]);
+  const snap = store.snapshot();
+  assert.equal(snap.agents.find((a) => a.id === 'c1').source, 'claude');
+  assert.equal(snap.agents.find((a) => a.id === 'x1').source, 'codex');
+  assert.equal(store.detail('c1').source, 'claude');
+  assert.equal(store.detail('x1').source, 'codex');
+});
