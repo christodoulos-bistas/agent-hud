@@ -1,3 +1,5 @@
+import { patchPaths } from './steps.js';
+
 export const CLASS_IDS = ['pathfinder', 'star-reader', 'runesmith', 'alchemist', 'hexbreaker', 'arbiter',
   'illuminator', 'loremaster', 'herald', 'cartographer', 'vaultkeeper', 'summoner'];
 
@@ -39,6 +41,9 @@ export function signalsFromEvent(ev) {
   }
   const sub = SUBAGENT_CLASS[(ev.raw || {}).agent_type];
   if (sub) return [{ cls: sub, weight: 1 }];
+  if (ev.toolName === 'apply_patch') {
+    return patchPaths((ev.toolInput || {}).command).map((file_path) => ({ cls: toolClass('Edit', { file_path }), weight: 1 }));
+  }
   const c = toolClass(ev.toolName, ev.toolInput);
   return c ? [{ cls: c, weight: 1 }] : [];
 }

@@ -169,3 +169,11 @@ test('a helper first seen by its own tool counts as active (familiars; summoner 
   e.push(ev(null, {}, 1500, 'SubagentStop', { raw: { agent_id: 'h1' } }));
   assert.equal(e.activeSubagents('s'), 1);
 });
+
+test('apply_patch signals equal an Edit of each patched path', () => {
+  const patch = '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-x\n+y\n*** Add File: README.md\n+hi\n*** End Patch\n';
+  assert.deepEqual(signalsFromEvent(ev('apply_patch', { command: patch }, 0)),
+    [...signalsFromEvent(ev('Edit', { file_path: 'src/a.ts' }, 0)), ...signalsFromEvent(ev('Edit', { file_path: 'README.md' }, 0))]);
+  assert.deepEqual(cls(ev('apply_patch', { command: patch }, 0)), ['runesmith', 'loremaster']);
+  assert.deepEqual(signalsFromEvent(ev('apply_patch', { command: 'junk' }, 0)), []);
+});

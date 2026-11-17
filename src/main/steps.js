@@ -1,11 +1,26 @@
 import path from 'node:path';
 
+// Codex edits files with apply_patch; the patch text is in tool_input.command (Task 1 spike, APPLY_PATCH_FIELD).
+const APPLY_PATCH_FIELD = 'command';
+const PATCH_FILE = /^\*\*\* (?:Add|Update|Delete) File: (.+?)\s*$/;
+
+// Paths a patch touches, in order, deduplicated. "*** Move to:" lines are ignored.
+export function patchPaths(patchText) {
+  const out = [];
+  for (const line of String(patchText || '').split(/\r?\n/)) {
+    const m = PATCH_FILE.exec(line);
+    if (m && !out.includes(m[1])) out.push(m[1]);
+  }
+  return out;
+}
+
 export function activityLine(ev) {
   const t = ev.toolName; const i = ev.toolInput || {};
   if (ev.event === 'UserPromptSubmit') return 'thinking';
   switch (t) {
     case 'Read': return `reading ${path.win32.basename(String(i.file_path || ''))}`;
     case 'Edit': case 'Write': return `editing ${path.win32.basename(String(i.file_path || ''))}`;
+    case 'apply_patch': return `editing ${path.win32.basename(patchPaths(i[APPLY_PATCH_FIELD])[0] || '')}`;
     case 'Bash': case 'PowerShell': return `running ${String(i.command || '').slice(0, 40)}`;
     case 'Grep': case 'Glob': return 'searching code';
     case 'WebSearch': return 'searching the web';
@@ -27,6 +42,10 @@ export function stepLabel(toolName, toolInput) {
   switch (toolName) {
     case 'Read': return `Read ${base(i.file_path)}`;
     case 'Edit': case 'Write': case 'NotebookEdit': return `Edited ${base(i.file_path || i.notebook_path)}`;
+    case 'apply_patch': {
+      const files = patchPaths(i[APPLY_PATCH_FIELD]);
+      return `Edited ${base(files[0])}${files.length > 1 ? ` +${files.length - 1}` : ''}`;
+    }
     case 'Bash': case 'PowerShell': return collapse(i.command || '').slice(0, 80);
     case 'Grep': return `Searched code for “${i.pattern ?? ''}”`;
     case 'Glob': return `Listed files ${i.pattern ?? ''}`;

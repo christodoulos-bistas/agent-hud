@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createStepLog, stepLabel } from '../src/main/steps.js';
+import { createStepLog, stepLabel, activityLine, patchPaths } from '../src/main/steps.js';
 
 const ev = (event, at, { tool, input, raw } = {}) => ({
   sessionId: 's1', event, toolName: tool, toolInput: input, cwd: 'C:\\p', at, raw: { ...(raw || {}) },
@@ -273,4 +273,24 @@ test('a helper first seen by its own tool joins the helpers (still not a step); 
   l.push(ev('PreToolUse', 5, { tool: 'Grep', input: {}, raw: { agent_id: 'h8', tool_use_id: 't4' } }));
   l.push(ev('Stop', 6, { raw: { background_tasks: [] } }));
   assert.deepEqual(l.view('s1').helpers, [], 'the main Stop reconciles it away like any helper');
+});
+
+const PATCH = '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-x\n+y\n*** Add File: README.md\n+hi\n*** Delete File: old.js\n*** Update File: src/a.ts\n@@\n-1\n+2\n*** End Patch\n';
+const APPLY_PATCH_FIELD = 'command';
+
+test('patchPaths lists Add/Update/Delete paths in order, deduplicated', () => {
+  assert.deepEqual(patchPaths(PATCH), ['src/a.ts', 'README.md', 'old.js']);
+  assert.deepEqual(patchPaths(undefined), []);
+});
+
+test('apply_patch: stepLabel and activityLine name the first file and count the rest', () => {
+  assert.equal(stepLabel('apply_patch', { [APPLY_PATCH_FIELD]: PATCH }), 'Edited a.ts +2');
+  assert.equal(stepLabel('apply_patch', { [APPLY_PATCH_FIELD]: '*** Begin Patch\n*** Add File: C:\\x\\b.js\n+1\n*** End Patch\n' }), 'Edited b.js');
+  assert.equal(activityLine({ event: 'PreToolUse', toolName: 'apply_patch', toolInput: { [APPLY_PATCH_FIELD]: PATCH } }), 'editing a.ts');
+});
+
+test('Codex Bash (command string) labels like Claude Bash', () => {
+  const input = { command: 'npm   test' };
+  assert.equal(stepLabel('Bash', input), 'npm test');
+  assert.equal(activityLine({ event: 'PreToolUse', toolName: 'Bash', toolInput: input }), 'running npm   test');
 });
