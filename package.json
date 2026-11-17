@@ -45,6 +45,16 @@
       "allowToChangeInstallationDirectory": true,
       "include": "build/installer.nsh"
     },
-    "asar": true
+    "asar": true,
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": ".",
+        "filter": [
+          "codex-bridge.cjs",
+          "codex-hook.cmd"
+        ]
+      }
+    ]
   }
 }
