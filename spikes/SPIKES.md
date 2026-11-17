@@ -234,3 +234,18 @@ Its window title is `ChatGPT`, and while it is closed-to-background its processe
 - `AppActivate(<pid of the process with MainWindowHandle != 0>)`: True, foreground became `ChatGPT` (VS Code in front first).
 - `explorer.exe shell:AppsFolder\OpenAI.Codex_2p2nqsd0c76g0!App`: brings the app to the front from VS Code, and also restores it when it had no visible window.
 **`CODEX_ACTIVATE = { cmd: 'explorer.exe', args: ['shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App'] }` as a JS literal; the raw argument is `shell:AppsFolder\OpenAI.Codex_2p2nqsd0c76g0!App`** (no window lookup, works hidden or not). Caveat: the package version is in the install path, not in the AUMID, so it survives updates.
+
+## Live check - v2.0 Codex support (2026-11-17, dev HUD on codex-support)
+
+- `codex exec` with the ten hooks passed as `-c hooks.*` overrides running the repo bridge (`node resources/codex-bridge.cjs`):
+  hooks fire and the dev HUD shows "codex-live · 6e — Codex · Pathfinder · finished · Your turn". Codex clamps the
+  `SessionEnd` and `Interrupt` hook timeouts to 3 s (both are answered at once, so harmless); `Interrupt` is a known event.
+- Permission cards through the real bridge (PreToolUse + PermissionRequest fed to `resources/codex-bridge.cjs`): the card shows
+  the `Codex · Pathfinder` tag, the Codex body, a 1:00 countdown and no "always allow"; the row reads "Codex · … · asks permission ·
+  Needs you". Allow from the panel → the bridge prints `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`;
+  Deny → `…"behavior":"deny","message":"Denied from Agent HUD"…` (the shapes Codex honoured in Spike 8).
+- HUD stopped → the bridge exits 0 with no output in 91 ms (fail-open).
+- Open: in the interactive TUI (codex 0.167.0-alpha.4.1) hooks passed as `-c` overrides did not run this afternoon (no "Running hooks"),
+  though the same setup ran in the morning; `codex exec` runs them. Not the product path (the app reads `~/.codex/hooks.json`);
+  verify after the user installs: a Codex Desktop chat should appear in the HUD and its permission prompts should card.
+- Still to confirm in Codex Desktop after install: closing a chat removes its row (SessionEnd); Esc mid-turn idles it (Interrupt).
