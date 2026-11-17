@@ -119,3 +119,25 @@ test('PermissionRequest makes an idle chat busy; the unchanged 15 min rule then 
   cs.onEvent(ev(ID2, 'PermissionRequest', 2100));
   set(2100 + 900001); assert.equal(cs.list().find((x) => x.sessionId === ID2).status, 'busy'); // open step
 });
+
+test('host retry: unknown host is re-read from a later event with a transcript_path', () => {
+  const calls = [];
+  const answers = [null, { originator: 'Codex Desktop' }];
+  const { cs } = setup((p) => { calls.push(p); return answers.shift() ?? null; });
+  cs.onEvent(ev(ID1, 'SessionStart', 1, { raw: { transcript_path: 'r' } }));
+  assert.equal(cs.list()[0].host, 'unknown');
+  cs.onEvent(ev(ID1, 'UserPromptSubmit', 2)); // no transcript_path: no read
+  assert.equal(calls.length, 1);
+  cs.onEvent(ev(ID1, 'PreToolUse', 3, { raw: { transcript_path: 'r' } }));
+  assert.equal(cs.list()[0].host, 'desktop');
+  cs.onEvent(ev(ID1, 'PreToolUse', 4, { raw: { transcript_path: 'r' } }));
+  assert.equal(calls.length, 2); // resolved: no more reads
+});
+
+test('host retry stops after 3 failed attempts', () => {
+  let n = 0;
+  const { cs } = setup(() => { n++; return null; });
+  for (let i = 1; i <= 6; i++) cs.onEvent(ev(ID1, 'PreToolUse', i, { raw: { transcript_path: 'r' } }));
+  assert.equal(n, 3);
+  assert.equal(cs.list()[0].host, 'unknown');
+});

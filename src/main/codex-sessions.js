@@ -29,6 +29,17 @@ export function readRolloutMeta(file, { maxBytes = 65536 } = {}) {
 export function createCodexSessions({ now = Date.now, idleAfterMs = 900000, expireAfterMs = 86400000, readMeta = () => null } = {}) {
   const chats = new Map(); // id -> { cwd, host, startedAt, statusSince, busy, lastEventAt, open: Set of tool_use_id }
 
+  // The rollout's first line may not exist yet at SessionStart: while the host is unknown, retry from later
+  // events that carry a transcript_path, at most 3 reads per chat.
+  function readHost(c, ev, first) {
+    const file = ev.raw?.transcript_path;
+    if (c.host !== 'unknown' || c.hostTries >= 3 || (!file && !first)) return;
+    if (file) c.hostTries++;
+    let meta = null;
+    try { meta = readMeta(file); } catch { meta = null; }
+    c.host = hostOf(meta);
+  }
+
   function onEvent(ev) {
     const id = ev?.sessionId;
     if (!id) return;
@@ -37,11 +48,10 @@ export function createCodexSessions({ now = Date.now, idleAfterMs = 900000, expi
     let c = chats.get(id);
     if (c && at - c.lastEventAt >= expireAfterMs) c = null; // expired before this event: a new chat
     if (!c) {
-      let meta = null;
-      try { meta = readMeta(ev.raw?.transcript_path); } catch { meta = null; }
-      c = { cwd: ev.cwd ?? null, host: hostOf(meta), startedAt: at, statusSince: at, busy: false, lastEventAt: at, open: new Set() };
+      c = { cwd: ev.cwd ?? null, host: 'unknown', startedAt: at, statusSince: at, busy: false, lastEventAt: at, open: new Set(), hostTries: 0 };
       chats.set(id, c);
-    }
+      readHost(c, ev, true);
+    } else readHost(c, ev, false);
     c.lastEventAt = at;
     if (ev.cwd) c.cwd = ev.cwd;
     const setBusy = (b) => { if (c.busy !== b) { c.busy = b; c.statusSince = at; } };
