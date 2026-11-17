@@ -27,6 +27,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
   function onEvent(ev) {
     engine.push(ev);
     const s = st(ev.sessionId);
+    s.connected = true; // its hooks reach the HUD (a session known only from its file never sets this)
     if (ev.cwd) s.cwd = ev.cwd;
     const e = ev.event;
     // Subagent events share the parent's session_id and carry agent_id (SPIKES.md).
@@ -161,6 +162,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
       id, display: a.display, cls: a.cls, stage: a.stage, stuck: a.stuck,
       stageSince: a.stageSince, currentStepStartedAt: a.currentStepStartedAt, lastActivityAt: a.lastActivityAt,
       task: view.task ?? null, startedAt: view.taskAt ?? knownTime(sess.startedAt),
+      connected: !!state.get(id)?.connected,
       stepCount: view.stepCount, current: currentOf(view, sess.status), steps: view.steps, helpers: view.helpers,
       // Where a "needs you" is waiting, for the panel's line (M3): a card in the panel, or its own window.
       handedBack: a.handedBack, hasCard: queue.list().some((it) => it.sessionId === id), canOpen: a.canOpen,

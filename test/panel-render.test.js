@@ -55,6 +55,15 @@ test('task null → "Started before the HUD" (Review Focus 1)', () => {
   assert.match(renderPanel(detail({ task: null }), NOW), /Started before the HUD/);
 });
 
+// 2026-11-17: a chat whose folder has no HUD hooks sent nothing at all; "Started before the HUD" misled.
+test('a chat that never sent the HUD a hook event → "Not connected" with what to do, not "Started before the HUD"', () => {
+  const h = renderPanel(detail({ task: null, connected: false, current: null, steps: [], stepCount: 0 }), NOW);
+  assert.match(h, /Not connected/);
+  assert.match(h, /Install hooks from the tray, then restart the chat/);
+  assert.doesNotMatch(h, /Started before the HUD/);
+  assert.match(renderPanel(detail({ task: null, connected: true }), NOW), /Started before the HUD/, 'connected but its first prompt was missed');
+});
+
 test('needs with a question queued behind the current one → "Its question opens here after the current one"', () => {
   assert.match(renderPanel(detail({ stage: 'needs', hasCard: true }), NOW), /Its question opens here after the current one/);
   assert.doesNotMatch(renderPanel(detail(), NOW), /Its question opens/);

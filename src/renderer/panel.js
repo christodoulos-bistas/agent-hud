@@ -101,7 +101,11 @@ export function renderPanel(detail, nowMs = Date.now(), cardOpts = {}) {
   const card = d.card && typeof d.card === 'object' ? d.card : null;
   const steps = (Array.isArray(d.steps) ? d.steps : []).slice(0, MAX_STEPS);
   const helpers = Array.isArray(d.helpers) ? d.helpers : [];
-  const task = d.task ? `<p class="task">“${esc(d.task)}”</p>` : '<p class="task none">Started before the HUD</p>';
+  // No task: either the chat's first prompt came before the HUD, or the chat never reached the HUD at all
+  // (no hooks for its folder, or hooks added after it started).
+  const task = d.task ? `<p class="task">“${esc(d.task)}”</p>`
+    : d.connected === false ? '<p class="task none">Not connected: this chat sends the HUD nothing. Install hooks from the tray, then restart the chat.</p>'
+    : '<p class="task none">Started before the HUD</p>';
   const list = steps.length
     ? '<p class="lbl">Recent steps</p><ol>' + steps.map((s) =>
       `<li>${markOf(s)}<span>${esc(s.label)}${s.ok === false && s.error ? `<span class="err">${esc(s.error)}</span>` : ''}</span>` +

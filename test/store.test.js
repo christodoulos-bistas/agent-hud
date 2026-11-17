@@ -467,3 +467,15 @@ test('detail.card is the active card for that session, null for others', () => {
   assert.ok('expiresAt' in store.detail('s1').card && 'canOpen' in store.detail('s1').card);
   assert.equal(store.detail('s2').card, null);
 });
+
+// 2026-11-17: the panel tells a chat that never reported (no hooks for its folder) from one that
+// started before the HUD; any hook event from the session marks it connected.
+test('detail.connected: false for a session known only from its session file, true after any hook event', () => {
+  const { store } = setup();
+  store.setSessions([S('s1'), S('s2')]);
+  store.snapshot(); // computing the rows must not count as hearing from a session
+  assert.equal(store.detail('s1').connected, false);
+  store.onEvent(ev('s1', 'SessionStart', 1000));
+  assert.equal(store.detail('s1').connected, true);
+  assert.equal(store.detail('s2').connected, false);
+});
