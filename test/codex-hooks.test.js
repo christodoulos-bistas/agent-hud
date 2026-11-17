@@ -2,7 +2,7 @@ import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import {
   CODEX_EVENTS, codexHookCommand, installCodexHooks, removeCodexHooks, ourPositions, approvalMissing, approvalState,
-  installCodexHooksFile, removeCodexHooksFile,
+  installCodexHooksFile, removeCodexHooksFile, legacyCodexCommand, hasLegacyCodexHooks,
 } from '../src/main/codex-hooks.js';
 
 const OURS = '"C:\\x\\resources\\codex-hook.cmd"';
@@ -209,11 +209,11 @@ test('removeCodexHooksFile on a missing file is a no-op and creates nothing', ()
   } finally { t.done(); }
 });
 
-const NEW = 'cmd /d /c "C:\P\Agent HUD\resources\codex-hook.cmd"';
-const LEGACY = '"C:\P\Agent HUD\resources\codex-hook.cmd"';
+const NEW = 'cmd /d /c "C:\\P\\Agent HUD\\resources\\codex-hook.cmd"';
+const LEGACY = '"C:\\P\\Agent HUD\\resources\\codex-hook.cmd"';
 
 test('codexHookCommand: cmd /d /c with the quoted script path', () => {
-  assert.equal(codexHookCommand('C:\P\Agent HUD\resources'), NEW);
+  assert.equal(codexHookCommand('C:\\P\\Agent HUD\\resources'), NEW);
 });
 
 test('legacyCodexCommand', () => {
