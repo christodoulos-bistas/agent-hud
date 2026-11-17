@@ -87,7 +87,7 @@ function keepOriginal(target) {
 }
 
 // Unchanged settings are neither backed up nor rewritten, so the .bak keeps the last real change.
-function rewrite(file, transform) {
+export function rewrite(file, transform) {
   try {
     const target = path.resolve(file);
     const { exists, settings, eol, trailing } = readSettings(target);
