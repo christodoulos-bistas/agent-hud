@@ -3,10 +3,11 @@
 // comes from the snapshot goes through esc() before it reaches markup.
 import { GR, CLASSES, MOODS_BADGE, MOODS_PENNANT, FAMILIAR, CODEX_FAMILIAR, spriteSvg } from './sprites.js';
 import { fmtDuration } from './format.js';
+import { soundCue, createPlayer } from './sounds.js';
 import { esc, className, int, sessionOf, renderCard, replyLeftMs, picksFrom, actionsArmed, clickAllowed } from './cards.js';
 
 // The answer cards live in the detail panel now (cards.js, panel.js); the HUD shows only the asking
-// row and the "Next:" line. These are re-exported so existing imports keep working.
+// row. These are re-exported so existing imports keep working.
 export { esc, className, renderCard, replyLeftMs, picksFrom, actionsArmed, clickAllowed };
 
 const MOODS = new Set(['needs', 'done', 'working', 'idle']);
@@ -170,7 +171,7 @@ export function newlyFinished(agents, prev = null) {
 }
 
 // `tucked` (v1.3): a row in the unfolded "tucked away" list, dimmed and without the ✕.
-export function renderRow(agent, { ask, selected = false, tucked = false } = {}) {
+export function renderRow(agent, { ask, selected = false, tucked = false, highlighted = false } = {}) {
   const a = agent || {};
   const mood = moodOf(a);
   const id = esc(a.id);
@@ -179,15 +180,17 @@ export function renderRow(agent, { ask, selected = false, tucked = false } = {})
   const fams = Math.max(0, Math.min(3, int(a.familiars, 0)));
   let fam = '';
   for (let i = 1; i <= fams; i++) fam += `<span class="fam f${i}">${famSvg(source)}</span>`;
+  // A finished turn's recap replaces "finished" on the sub-line.
+  const recap = a.recap && chipState(a).cls === 'turn' && !handed ? String(a.recap) : null;
   const line = handed
     ? (a.canOpen === false
       ? '<span class="link">Waiting in its window</span>'
       : `<button type="button" class="link" data-act="open" data-session="${id}">Waiting in its window — open ↗</button>`)
-    : `${srcTag(source)}<span class="cls">${esc(className(a.cls))}</span> · ${esc(doing(a, mood, ask))}${mood === 'working' ? '<span class="dots"></span>' : ''}`;
+    : `${srcTag(source)}<span class="cls">${esc(className(a.cls))}</span> · ${esc(recap ?? doing(a, mood, ask))}${mood === 'working' ? '<span class="dots"></span>' : ''}`;
   // ✕ takes the chat off the HUD until it asks or starts a new turn; never on a row that is asking.
   const hide = mood === 'needs' || tucked ? ''
     : `<button type="button" class="hide" data-act="hide" data-session="${id}" title="Hide from the HUD" aria-label="Hide ${esc(a.display)} from the HUD">✕</button>`;
-  return `<div class="row ${mood}${mood === 'needs' ? ' glow-ask' : ''}${handed ? ' handed' : ''}${selected ? ' selected' : ''}${tucked ? ' tucked' : ''}" data-key="row:${id}" style="--d:${bobDelay(a.id)}">` +
+  return `<div class="row ${mood}${mood === 'needs' ? ' glow-ask' : ''}${handed ? ' handed' : ''}${selected ? ' selected' : ''}${highlighted ? ' hl' : ''}${tucked ? ' tucked' : ''}" data-key="row:${id}" style="--d:${bobDelay(a.id)}">` +
     `<div class="sprite-box" data-act="select" data-session="${id}">${sprite(a.cls, source)}${fam}</div>` +
     '<div class="who">' +
       `<button type="button" class="who-n" data-act="select" data-session="${id}" aria-pressed="${selected ? 'true' : 'false'}" title="Show details">${esc(a.display)}</button>` +
@@ -199,19 +202,15 @@ export function renderRow(agent, { ask, selected = false, tucked = false } = {})
 }
 
 
-function nextLine(next) {
-  const m = /^Next: (.+) (asks permission|asks a question|wants a reply)$/.exec(String(next));
-  return m ? `Next: <b>${esc(m[1])}</b> ${m[2]} · after this one` : esc(next);
-}
-
 function face(a) {
   const mood = moodOf(a);
-  return `<button type="button" class="face ${mood}" data-key="face:${esc(a.id)}" data-act="expand" style="--d:${bobDelay(a.id)}" ` +
+  // A needs face reopens the bubble stack; any other face expands the HUD.
+  return `<button type="button" class="face ${mood}" data-key="face:${esc(a.id)}" data-act="${mood === 'needs' ? 'ask' : 'expand'}" style="--d:${bobDelay(a.id)}" ` +
     `title="${esc(a.display)}" aria-label="${esc(a.display)}, ${mood}">` +
     `<span class="sprite-box">${sprite(a.cls, sourceOf(a))}${mood === 'needs' ? SEAL() : ''}</span></button>`;
 }
 
-// The party: rows (or, collapsed, a column of faces), the header and the "Next:" line. No answer card:
+// The party: rows (or, collapsed, a column of faces), and the header. No answer card:
 // a question opens the detail panel on its agent, and the asking row only says what it asks.
 export function renderParty(snapshot, { collapsed = false } = {}) {
   const selectedId = snapshot?.selected != null ? String(snapshot.selected) : null;
@@ -222,14 +221,16 @@ export function renderParty(snapshot, { collapsed = false } = {}) {
       `<div class="party-body" data-key="body" data-deep>${agents.map(face).join('')}</div>` +
     '</div>';
   }
-  const card = snapshot?.card || null;
-  const owner = card ? sessionOf(card) : null;
+  const cards = Array.isArray(snapshot?.cards) ? snapshot.cards : [];
+  const highlight = snapshot?.highlight != null ? String(snapshot.highlight) : null;
   const parts = [];
-  let asked = false;
   for (const a of agents) {
-    const mine = !!card && !asked && String(a.id) === owner;
-    parts.push(renderRow(a, { ...(mine ? { ask: card.kind } : {}), selected: selectedId != null && String(a.id) === selectedId }));
-    if (mine) asked = true;
+    const card = cards.find((c) => sessionOf(c) === String(a.id));
+    parts.push(renderRow(a, {
+      ...(card ? { ask: card.kind } : {}),
+      selected: selectedId != null && String(a.id) === selectedId,
+      highlighted: highlight != null && String(a.id) === highlight,
+    }));
   }
   // v1.3: chats tucked away (quiet an hour, or hidden with ✕) sit under one line; unfolded, they list dimmed.
   const tucked = Array.isArray(snapshot?.tucked) ? snapshot.tucked : [];
@@ -252,7 +253,6 @@ export function renderParty(snapshot, { collapsed = false } = {}) {
     `<div class="party-top" data-key="top"><span class="t">The Guild</span><span class="n">${total} at work${need}</span>` +
     '<button type="button" class="min" data-act="collapse" title="Collapse" aria-label="Collapse the HUD">–</button></div>' +
     `<div class="party-body" data-key="body" data-deep>${parts.join('')}</div>` +
-    (snapshot?.next ? `<div class="queue" data-key="queue">◆ ${nextLine(snapshot.next)}</div>` : '') +
   '</div>';
 }
 
@@ -299,7 +299,9 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
   const rendered = new WeakMap();
   // The HUD has no text boxes (the answer cards are in the detail panel), so it never takes the focus.
   // `turn` stays null until the first snapshot seeds it (newlyFinished).
-  const st = { snap: null, collapsed: false, needs: new Set(), turn: null };
+  const st = { snap: null, collapsed: false, needs: new Set(), turn: null, sound: null };
+  let player = null;
+  const soundFiles = new Map(); // custom files that arrived before the player exists
 
   // The selected agent's row, or its face while collapsed (a question opens the panel beside the column).
   const rowEl = (id) => root.querySelector(`[data-key="${st.collapsed ? 'face' : 'row'}:${String(id).replace(/["\\]/g, '\\$&')}"]`);
@@ -322,7 +324,8 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
   let lastOffset = null;
   let lastOffsetId = null;
   function syncRowOffset(snap) {
-    const id = snap?.selected != null ? String(snap.selected) : null;
+    // The panel is anchored to a row; with no anchor there is nothing to report.
+    const id = snap?.anchor != null ? String(snap.anchor) : null;
     if (id == null) { lastOffset = null; lastOffsetId = null; return; }
     const el = rowEl(id);
     if (!el) return;
@@ -334,7 +337,7 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
   }
 
   function render() {
-    const snap = st.snap || { agents: [], card: null, next: null, counts: { total: 0, needs: 0 } };
+    const snap = st.snap || { agents: [], cards: [], counts: { total: 0, needs: 0 } };
     const tpl = doc.createElement('template');
     tpl.innerHTML = renderParty(snap, { collapsed: st.collapsed });
     patch(root, tpl.content, rendered);
@@ -360,6 +363,29 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     }
     syncRowOffset(snap);
     tick();
+    if (st.snap) playSound(snap);
+  }
+
+  // A cue for a new card or a newly finished agent. A synth failure never throws out of render().
+  function playSound(snap) {
+    const r = soundCue(st.sound, snap);
+    st.sound = r.state;
+    if (!r.cue) return;
+    try {
+      player ??= makePlayer();
+      player.play(r.cue);
+    } catch { /* silent */ }
+  }
+
+  function makePlayer() {
+    const p = createPlayer({
+      makeContext: () => new AudioContext(),
+      makeAudio: (url) => new Audio(url),
+      makeUrl: (blob) => URL.createObjectURL(blob),
+      revokeUrl: (url) => URL.revokeObjectURL(url),
+    });
+    for (const [cue, file] of soundFiles) p.setCustom(cue, file);
+    return p;
   }
 
   root.addEventListener('animationend', (e) => {
@@ -382,6 +408,8 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
         }
         break;
       }
+      case 'ask':
+        call('showStack'); break;
       case 'open':
         call('openWindow', el.dataset.session); break;
       case 'hide':
@@ -421,6 +449,11 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
   setInterval(tick, 1000);
   render();
   call('onSnapshot', (snap) => gate.offer(snap));
+  // Task 13 adds onSoundFile in the preload; until then this is a no-op.
+  api?.onSoundFile?.((cue, file) => {
+    if (file) soundFiles.set(cue, file); else soundFiles.delete(cue);
+    try { player?.setCustom(cue, file); } catch { /* silent */ }
+  });
 }
 
 if (typeof document !== 'undefined' && globalThis.hud) boot();

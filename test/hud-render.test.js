@@ -130,32 +130,27 @@ test('renderParty collapsed contains no card markup but keeps seals', () => {
   assert.equal(count(html, '<svg'), 3); // two sprites + one seal
 });
 
-test('renderParty renders no card markup even when snapshot.card is set; the Next line stays', () => {
+test('renderParty renders no card markup even when cards are set; there is no Next line', () => {
   const snap = {
     agents: [agent({ id: 's0', display: 'first' }), agent({ id: 's2', mood: 'needs', display: 'second' }), agent({ id: 's3', display: 'third' })],
-    card: choice(), next: 'Next: agent-hud asks permission', counts: { total: 3, needs: 1 },
+    cards: [{ id: 'c2', kind: 'choice', sessionId: 's2' }], counts: { total: 3, needs: 1 },
   };
   for (const opts of [{}, { collapsed: false }, { collapsed: false, arming: true, leftMs: 1000 }]) {
     const html = renderParty(snap, opts);
     for (const needle of ['class="ans', 'card-slot', 'data-sticky', 'data-act="answer"', 'data-act="open-card"', 'Something else', 'Should the updater']) {
       assert.ok(!html.includes(needle), `${needle} in ${JSON.stringify(opts)}`);
     }
-    assert.ok(html.includes('Next: <b>agent-hud</b> asks permission · after this one'), 'the Next line stays');
+    assert.ok(!html.includes('queue') && !html.includes('Next:'), 'no Next line');
     assert.match(html, /data-key="row:s2"[^]*· asks a question[^]*data-key="row:s3"/, "the asking agent's row still says what it asks");
     assert.equal(count(html, 'asks a question'), 1, 'only the card owner\'s row');
   }
 });
 
-test('renderParty expanded escapes the next line', () => {
-  const snap = {
-    agents: [agent({ id: 's0', display: 'first' }), agent({ id: 's1', mood: 'needs', display: 'second' }), agent({ id: 's2', display: 'third' })],
-    card: permission(), next: `Next: ${XSS} asks a question`, counts: { total: 3, needs: 1 },
-  };
+test('renderParty shows the counts in the header', () => {
+  const snap = { agents: [agent({ id: 's0' }), agent({ id: 's1', mood: 'needs' }), agent({ id: 's2' })], cards: [], counts: { total: 3, needs: 1 } };
   const html = renderParty(snap, { collapsed: false });
-  assert.ok(html.includes('Next: <b>&lt;img src=x onerror=alert(1)&gt;</b> asks a question'));
   assert.ok(html.includes('3 at work'));
   assert.ok(html.includes('1 needs you'));
-  assert.ok(!html.includes('<img'));
 });
 
 test('renderParty with no agents shows an empty note', () => {
@@ -291,11 +286,6 @@ test('R19: replyLeftMs counts down to card.expiresAt when present, else from whe
   assert.equal(replyLeftMs(null, 100000, 0), undefined);
 });
 
-test('R20: next line for a queued permission is bolded like the others', () => {
-  const html = renderParty({ agents: [agent()], card: permission(), next: 'Next: agent-hud asks permission', counts: { total: 1, needs: 1 } });
-  assert.ok(html.includes('Next: <b>agent-hud</b> asks permission · after this one'));
-});
-
 test('I7: actionsArmed is false for 500 ms after a card first appears, then true', () => {
   assert.equal(actionsArmed(10000, 10000), false);
   assert.equal(actionsArmed(10000, 10499), false);
@@ -403,10 +393,48 @@ test('needs rows carry glow-ask; turn chip contains the pennant svg', () => {
   assert.ok(!turn.includes('glow-done'), 'glow-done is added by the DOM once, not rendered');
 });
 
-test('v1.2 M7: renderParty needs only the card id, kind and session for the asking row and the Next line', () => {
-  const html = renderParty({ agents: [agent({ id: 's1', mood: 'needs', stage: 'needs' })], card: { id: 'c1', kind: 'choice', sessionId: 's1' }, next: 'Next: b asks permission' });
+test('v1.2 M7: renderParty needs only the card kind and session for the asking row', () => {
+  const html = renderParty({ agents: [agent({ id: 's1', mood: 'needs', stage: 'needs' })], cards: [{ id: 'c1', kind: 'choice', sessionId: 's1' }] });
   assert.match(html, /asks a question/);
-  assert.match(html, /Next: <b>b<\/b> asks permission/);
+});
+
+test("a row's ask comes from the first card for that session", () => {
+  const html = renderParty({ agents: [agent({ id: 's1', mood: 'needs' })], cards: [{ id: 'c1', kind: 'permission', sessionId: 's1' }, { id: 'c2', kind: 'choice', sessionId: 's1' }] });
+  assert.match(html, /asks permission/);
+  assert.ok(!html.includes('asks a question'));
+});
+
+test('no queue element, even with three cards', () => {
+  const cards = [1, 2, 3].map((n) => ({ id: 'c' + n, kind: 'permission', sessionId: 's' + n }));
+  const html = renderParty({ agents: [agent({ id: 's1', mood: 'needs' })], cards, counts: { total: 1, needs: 1 } });
+  assert.ok(!html.includes('class="queue"'));
+});
+
+test('a highlighted row carries the hl class; others do not', () => {
+  assert.match(renderRow(agent(), { highlighted: true }), /class="row [^"]*\bhl\b/);
+  assert.ok(!/\bhl\b/.test(renderRow(agent())));
+  const html = renderParty({ agents: [agent({ id: 'a' }), agent({ id: 'b' })], highlight: 'b' });
+  assert.match(html, /class="row [^"]*\bhl\b[^"]*" data-key="row:b"/);
+  assert.ok(!/\bhl\b[^>]*data-key="row:a"/.test(html));
+});
+
+test('a turn row with a recap reads "<cls> · <recap>" instead of finished', () => {
+  const html = renderRow(agent({ mood: 'done', stage: 'turn', recap: 'Fixed the <b>bug</b>' }));
+  assert.ok(html.includes('Runesmith</span> · Fixed the &lt;b&gt;bug&lt;/b&gt;'));
+  assert.ok(!html.includes('finished'));
+  assert.ok(renderRow(agent({ mood: 'done', stage: 'turn' })).includes('finished'));
+});
+
+test('a needs face in the collapsed HUD opens the stack (data-act="ask"); others expand', () => {
+  const html = renderParty({ agents: [agent({ id: 's1', mood: 'needs' }), agent({ id: 's2' })] }, { collapsed: true });
+  assert.match(html, /data-key="face:s1" data-act="ask"/);
+  assert.match(html, /data-key="face:s2" data-act="expand"/);
+});
+
+test('the HUD page allows blob: media in its CSP', async () => {
+  const { readFileSync } = await import('node:fs');
+  const html = readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8');
+  assert.match(html, /Content-Security-Policy" content="[^"]*; media-src blob:"/);
 });
 
 test('v1.2 M5: the "Your turn" pennant carries the pennant class, so its sparkle twinkles (hud.css .pennant .g-tw)', () => {

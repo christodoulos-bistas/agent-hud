@@ -68,6 +68,7 @@ button.who-n:hover { text-decoration: underline dotted rgba(240, 233, 218, .5); 
 .seal .px { position: relative; z-index: 1; display: block; }
 .seal::before { content: ''; position: absolute; inset: 8%; border-radius: 50%; box-shadow: 0 0 0 2px rgba(237, 203, 133, .45), 0 0 10px 3px rgba(224, 180, 92, .5); }
 .sprite-box[data-act="select"] { cursor: pointer; }
+.row.hl { background: rgba(224, 180, 92, .14); box-shadow: inset 0 0 0 1px var(--gold-l); }
 .row.selected { background: rgba(224, 180, 92, .08); box-shadow: inset 0 0 0 1px rgba(237, 203, 133, .35); }
 
 /* stage chips (mockup option B) */
@@ -82,8 +83,6 @@ button.who-n:hover { text-decoration: underline dotted rgba(240, 233, 218, .5); 
 .st .flag .px { display: block; overflow: visible; }
 .st.think::before, .st.work::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
-.queue { font-size: .72rem; color: var(--gold-l); padding: 6px 12px 8px; border-top: 1px solid rgba(224, 180, 92, .16); background: rgba(224, 180, 92, .05); }
-.queue b { font-weight: 700; }
 .empty { margin: 0; padding: 10px 12px 12px; font-size: .78rem; font-style: italic; color: var(--sage); }
 /* v1.3: ✕ to hide a row (shown on hover or keyboard focus), and the "N tucked away" line with its dimmed rows. */
 .row .hide { position: absolute; top: 3px; right: 4px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--sage); font-size: .7rem; line-height: 18px; text-align: center; cursor: pointer; opacity: 0; }
