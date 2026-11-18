@@ -452,7 +452,7 @@ for (const planEvent of ['PreToolUse', 'PermissionRequest']) {
     const srv = createHookServer({ port: 0, secret: SECRET, queue, planEvent, isInteractive: opts.isInteractive ?? (() => true), replyOptIn: () => false, onError: () => {} });
     const port = await srv.listen();
     const post = (body, headers = { 'X-Agent-HUD': SECRET }) => fetch(`http://127.0.0.1:${port}/agent-hud/hook`, { method: 'POST', headers, body: JSON.stringify(body) });
-    return { queue, srv, post };
+    return { queue, srv, post, maxHeld: h.maxHeld };
   };
   const plan = (name, extra = {}) => ev(name, { tool_name: 'ExitPlanMode', tool_input: { plan: 'p' }, ...extra });
 
@@ -473,10 +473,24 @@ for (const planEvent of ['PreToolUse', 'PermissionRequest']) {
     try {
       const r = await h.post(plan(planEvent));
       assert.equal(r.status, 200); assert.equal(await r.text(), ''); assert.equal(h.queue.list().length, 0);
-      const r2 = await h2.post(plan(planEvent), { 'X-Agent-HUD': SECRET, 'X-Agent-HUD-Source': 'codex' });
-      assert.equal(r2.status, 200); assert.equal(await r2.text(), '');
-      assert.equal(h2.queue.list().filter((i) => i.kind === 'plan').length, 0);
+      assert.equal(h.maxHeld(), 0);
+      for (const name of ['PermissionRequest', 'PreToolUse']) {
+        const r2 = await h2.post(plan(name), { 'X-Agent-HUD': SECRET, 'X-Agent-HUD-Source': 'codex' });
+        assert.equal(r2.status, 200); assert.equal(await r2.text(), '');
+      }
+      assert.equal(h2.maxHeld(), 0, 'codex ExitPlanMode is never held as any kind');
     } finally { await h.srv.close(); await h2.srv.close(); }
+  });
+
+  test(`plan[${planEvent}]: a subagent's ExitPlanMode (agent_id set) is never held, on either event`, async () => {
+    const h = await mkPlan();
+    try {
+      for (const name of ['PermissionRequest', 'PreToolUse']) {
+        const r = await h.post(plan(name, { agent_id: 'sub' }));
+        assert.equal(r.status, 200); assert.equal(await r.text(), '');
+      }
+      assert.equal(h.maxHeld(), 0);
+    } finally { await h.srv.close(); }
   });
 
   test(`plan[${planEvent}]: ${other} for ExitPlanMode is never held (not as plan, not as permission)`, async () => {

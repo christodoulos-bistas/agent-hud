@@ -79,12 +79,13 @@ export function createHookServer({ port = 0, secret, queue, isInteractive, reply
     if (source === 'codex') {
       // Codex exec never sends PermissionRequest, so any one that arrives is answerable: hold it without
       // consulting isInteractive (the HUD may never have seen the session). No choice or reply cards.
-      if (event === 'PermissionRequest') kind = 'permission';
+      // ExitPlanMode is never held as a permission.
+      if (event === 'PermissionRequest' && toolName !== 'ExitPlanMode') kind = 'permission';
     } else
     // AskUserQuestion's PermissionRequest is never held: its PreToolUse already is the choice card (I4).
     // The plan card rides on planEvent only; the other event for ExitPlanMode is never held.
-    if (toolName === 'ExitPlanMode' && event === planEvent && isInteractive(sessionId)) kind = 'plan';
-    else if (toolName === 'ExitPlanMode' && event === 'PermissionRequest') kind = null;
+    // A subagent's ExitPlanMode (agent_id set) is never held, on either event.
+    if (toolName === 'ExitPlanMode') kind = event === planEvent && (body.agent_id ?? null) === null && isInteractive(sessionId) ? 'plan' : null;
     else if (event === 'PermissionRequest' && toolName !== 'AskUserQuestion' && isInteractive(sessionId)) kind = 'permission';
     else if (event === 'PreToolUse' && toolName === 'AskUserQuestion' && isInteractive(sessionId)) kind = 'choice';
     else if (event === 'Stop' && !bgRunning && isInteractive(sessionId) && replyOptIn(sessionId)) kind = 'reply';

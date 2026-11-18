@@ -166,6 +166,13 @@ test('R19: card carries sessionId and expiresAt = addedAt + holdMs (default 60 0
   assert.equal(card.expiresAt, 61000);
 });
 
+test('R19: an item without expiresAt falls back to addedAt + hold', () => {
+  const queue = { active: () => ({ id: 'x', kind: 'permission', sessionId: 's1', addedAt: 1000, payload: {} }), list: () => [], onChange: () => () => {}, handedBack: () => [] };
+  const store = createStore({ engine: createClassEngine(), queue, now: () => 1500 });
+  store.setSessions([S('s1')]);
+  assert.equal(store.snapshot().card.expiresAt, 61000);
+});
+
 test('R19: reply card expiresAt = addedAt + replyMs (default 540 000 ms)', () => {
   const { queue, store } = setup(2000);
   store.setSessions([S('s1')]);
@@ -173,7 +180,7 @@ test('R19: reply card expiresAt = addedAt + replyMs (default 540 000 ms)', () =>
   assert.equal(store.snapshot().card.expiresAt, 542000);
 });
 
-test('R19: createStore takes holdMs and replyMs for the card deadline', () => {
+test('R19: the queue stamps expiresAt from its own holdMs/replyMs and the store reads it', () => {
   let t = 100;
   const queue = createQueue({ holdMs: 5000, replyMs: 9000, now: () => t, setTimer: () => 0, clearTimer: () => {} });
   const store = createStore({ engine: createClassEngine(), queue, now: () => t });
