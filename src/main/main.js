@@ -170,6 +170,7 @@ const pushStackNow = guarded('stack', () => {
   const json = JSON.stringify(stack);
   if (json === sentStack) return;
   try { panelWin.webContents.send('stack', stack); sentStack = json; } catch (err) { log('stack', err); }
+  debug('stack', JSON.stringify({ visible: stack.visible, expanded: stack.expanded?.id ?? null, cards: stack.cards.map((c) => ({ id: c.id, kind: c.kind, sessionId: c.sessionId, holdMs: c.holdMs })) }));
 }, log);
 const pushStack = createThrottle(pushStackNow, PUSH_MS);
 
