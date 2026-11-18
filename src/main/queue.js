@@ -1,11 +1,12 @@
 import { RELEASE } from './answers.js';
 
-export function createQueue({ holdMs = 60000, replyMs = 540000, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, onError = (e) => console.error(e) } = {}) {
+export function createQueue({ holdMs = 60000, replyMs = 540000, planMs = 540000, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, onError = (e) => console.error(e) } = {}) {
   const entries = []; // arrival order: { item, resolve, timer }
   let handed = [];
   const listeners = new Set();
   const emit = () => { for (const fn of [...listeners]) { try { fn(); } catch (err) { try { onError(err); } catch { /* never break the queue */ } } } };
 
+  const holdFor = (kind) => (kind === 'reply' ? replyMs : kind === 'plan' ? planMs : holdMs);
   const take = (id) => {
     const i = entries.findIndex((e) => e.item.id === id);
     if (i < 0) return null;
@@ -19,7 +20,8 @@ export function createQueue({ holdMs = 60000, replyMs = 540000, now = Date.now, 
   ].map((e) => e.item);
 
   function add(item) {
-    item.addedAt = now(); // the renderer's countdown reads the deadline from this (R19)
+    item.addedAt = now();
+    item.expiresAt = item.addedAt + holdFor(item.kind); // the renderer's countdown reads this (R19)
     return new Promise((resolve) => {
       const e = { item, resolve, timer: null };
       e.timer = setTimer(() => {
@@ -28,7 +30,7 @@ export function createQueue({ holdMs = 60000, replyMs = 540000, now = Date.now, 
         if (item.kind !== 'reply') handed.push({ sessionId: item.sessionId, agentId: item.payload?.agent_id ?? null, at: now() });
         resolve(RELEASE);
         emit();
-      }, item.kind === 'reply' ? replyMs : holdMs);
+      }, holdFor(item.kind));
       entries.push(e);
       emit();
     });

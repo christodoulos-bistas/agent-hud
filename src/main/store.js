@@ -166,7 +166,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     const a = queue.active();
     return a ? {
       id: a.id, kind: a.kind, sessionId: a.sessionId, display: displayOf(a.sessionId), cls: engine.classOf(a.sessionId, t), payload: a.payload,
-      expiresAt: Number.isFinite(a.addedAt) ? a.addedAt + (a.kind === 'reply' ? replyMs : holdMs) : null,
+      expiresAt: Number.isFinite(a.expiresAt) ? a.expiresAt : Number.isFinite(a.addedAt) ? a.addedAt + (a.kind === 'reply' ? replyMs : holdMs) : null,
       canOpen: openable(sessions.find((x) => x.sessionId === a.sessionId)),
     } : null;
   }

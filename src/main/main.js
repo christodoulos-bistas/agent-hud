@@ -28,6 +28,7 @@ const PANEL_WIDTH = 340;
 const STAGE_TICK_MS = 1000;
 const HOLD_MS = 60000;
 const REPLY_MS = 540000;
+const PLAN_MS = 540000;
 const POLL_MS = 3000;
 const PUSH_MS = 100;
 const WIDTH = 272;
@@ -80,7 +81,7 @@ let sentDetail; // JSON of the last detail sent, so an unchanged one doesn't re-
 let place = null; // { side, arrowY } of the last placement, for the panel's arrow
 let sentPlace; // JSON of the last place sent
 
-const queue = createQueue({ holdMs: HOLD_MS, replyMs: REPLY_MS, onError: log });
+const queue = createQueue({ holdMs: HOLD_MS, replyMs: REPLY_MS, planMs: PLAN_MS, onError: log });
 const engine = createClassEngine();
 // Full path of VS Code's code.cmd (a bare "code" makes code.cmd look for Code.exe in the wrong place).
 const CODE_CMD = resolveCodeCmd({

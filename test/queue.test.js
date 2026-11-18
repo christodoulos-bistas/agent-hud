@@ -144,3 +144,31 @@ test('I2a: a reply that times out resolves RELEASE but is not recorded as a hand
   assert.equal(await p, RELEASE); assert.equal(q.list().length, 0);
   assert.deepEqual(q.handedBack(), []);
 });
+
+test('plan: held for planMs, then released and recorded in handedBack', () => {
+  const f = fake();
+  const q = createQueue({ holdMs: 60000, replyMs: 540000, planMs: 540000, now: f.now, setTimer: f.setTimer, clearTimer: f.clearTimer });
+  const s = settled(q.add(it('pl', 'plan')));
+  f.tick(539999);
+  assert.equal(q.list().length, 1, 'still held just before planMs');
+  f.tick(1);
+  assert.equal(q.list().length, 0);
+  return Promise.resolve().then(() => {
+    assert.equal(s(), RELEASE);
+    assert.deepEqual(q.handedBack().map((h) => h.sessionId), ['s1']);
+  });
+});
+
+test('plan sorts with the questions, ahead of an earlier reply', () => {
+  const [, q] = mk(); q.add(it('r', 'reply')); q.add(it('pl', 'plan'));
+  assert.deepEqual(q.list().map((i) => i.id), ['pl', 'r']);
+});
+
+test('expiresAt === addedAt + the hold for its kind', () => {
+  const f = fake(); f.tick(1000);
+  const q = createQueue({ holdMs: 111, replyMs: 222, planMs: 333, now: f.now, setTimer: f.setTimer, clearTimer: f.clearTimer });
+  for (const [kind, ms] of [['permission', 111], ['choice', 111], ['reply', 222], ['plan', 333]]) {
+    const item = it(kind, kind); q.add(item);
+    assert.equal(item.expiresAt, item.addedAt + ms, kind);
+  }
+});

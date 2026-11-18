@@ -175,8 +175,8 @@ test('R19: reply card expiresAt = addedAt + replyMs (default 540 000 ms)', () =>
 
 test('R19: createStore takes holdMs and replyMs for the card deadline', () => {
   let t = 100;
-  const queue = createQueue({ now: () => t, setTimer: () => 0, clearTimer: () => {} });
-  const store = createStore({ engine: createClassEngine(), queue, now: () => t, holdMs: 5000, replyMs: 9000 });
+  const queue = createQueue({ holdMs: 5000, replyMs: 9000, now: () => t, setTimer: () => 0, clearTimer: () => {} });
+  const store = createStore({ engine: createClassEngine(), queue, now: () => t });
   queue.add({ id: 'c', sessionId: 's1', kind: 'choice', payload: {} });
   assert.equal(store.snapshot().card.expiresAt, 5100);
   queue.answer('c', {});
