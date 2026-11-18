@@ -136,12 +136,13 @@ function planCard(card, leftMs, arming) {
   const chars = Array.from(raw);
   const text = chars.length > PLAN_MAX ? chars.slice(0, PLAN_MAX).join('') : raw;
   const lines = text.split(/\r?\n/);
-  const total = text.trim() ? text.replace(/(\r?\n)+$/, '').split(/\r?\n/).length : 0;
+  // Non-empty lines of the whole plan (not the PLAN_MAX cut), as the bubble counts them (main bubbles.js).
+  const total = raw.split(/\r?\n/).filter((l) => l.trim()).length;
   const clip = (t) => { const c = Array.from(t); return c.length > 120 ? `${c.slice(0, 120).join('').trimEnd()}…` : t; };
-  const at = lines.findIndex((l) => /^#{1,6}\s+\S/.test(l));
-  const title = at >= 0 ? lines[at].replace(/^#{1,6}\s+/, '').trim() : 'Plan';
+  const at = lines.findIndex((l) => /^ {0,3}#{1,6}[ \t]+\S/.test(l));
+  const title = at >= 0 ? lines[at].replace(/^ {0,3}#{1,6}[ \t]+/, '').trim() : 'Plan';
   const rest = at >= 0 ? lines.slice(at + 1) : lines;
-  let items = rest.filter((l) => /^#{1,3}\s+\S/.test(l)).map((l) => l.replace(/^#{1,3}\s+/, '').trim());
+  let items = rest.filter((l) => /^ {0,3}#{1,3}[ \t]+\S/.test(l)).map((l) => l.replace(/^ {0,3}#{1,3}[ \t]+/, '').trim());
   if (!items.length) items = rest.map((l) => l.trim()).filter(Boolean).slice(0, 4);
   const list = items.length ? `<ol class="plan-o">${items.map((t) => `<li>${esc(clip(t))}</li>`).join('')}</ol>` : '';
   const hasHold = card.holdMs != null;

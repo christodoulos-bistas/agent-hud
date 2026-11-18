@@ -36,12 +36,13 @@ test('never throws on odd payloads', () => {
   ]) assert.equal(typeof bubbleLine(item), 'string');
 });
 
-test('plan line counts markdown headings # to ### as steps', () => {
+test('plan line counts the markdown headings # to ### after the title as steps (as the card lists them)', () => {
   const md = (s) => ({ kind: 'plan', payload: { tool_input: { plan: s } } });
-  assert.equal(bubbleLine(md('# Title\nintro\n## One\ntext\n### Two\n#### deep\n####### no\n#nospace\n  # indented')), 'Plan ready · 4 steps');
-  assert.equal(bubbleLine(md('# Only\nbody\nmore')), 'Plan ready · 1 step');
+  assert.equal(bubbleLine(md('# Title\nintro\n## One\ntext\n### Two\n#### deep\n####### no\n#nospace\n  # indented')), 'Plan ready · 3 steps');
+  assert.equal(bubbleLine(md('# Only\nbody\nmore')), 'Plan ready · 3 lines', 'a title alone is no step');
   assert.equal(bubbleLine(md('#### Not a step\na\nb')), 'Plan ready · 3 lines');
-  assert.equal(bubbleLine(md('# A\r\n## B\r\n')), 'Plan ready · 2 steps');
+  assert.equal(bubbleLine(md('# A\r\n## B\r\n')), 'Plan ready · 1 step');
+  assert.equal(bubbleLine(md('## \n## B')), 'Plan ready · 2 lines', 'an empty heading is not a title or a step');
 });
 
 test('plan line also reads a top-level plan', () => {

@@ -113,12 +113,19 @@ test('renderBubble escapes display and line and carries the data attributes', ()
 
 const PLAN_MD = '# Ship the thing\n\nIntro text\n## Step one\nbody\n### Step two\n#### too deep\n## Step three\n';
 
+test('plan card: the line count covers the whole plan, past PLAN_MAX; indented headings are steps too', () => {
+  const long = 'x\n'.repeat(cards.PLAN_MAX); // twice PLAN_MAX characters
+  assert.match(cards.renderCard(PLAN(long, { holdMs: null }), {}), new RegExp(`<p class="plan-n">${cards.PLAN_MAX} lines</p>`));
+  const h = cards.renderCard(PLAN('# T\n  ## A\n## B', { holdMs: null }), {});
+  assert.match(h, /<li>A<\/li><li>B<\/li>/);
+});
+
 test('plan card: title, step headings as a list, line count, Read plan and Open chat', () => {
   const h = cards.renderCard(PLAN(PLAN_MD, { holdMs: null, expiresAt: null, canOpen: true }), {});
   assert.match(h, /data-kind="plan"/);
   assert.match(h, /<p class="plan-t">Ship the thing<\/p>/);
   assert.match(h, /<ol class="plan-o"><li>Step one<\/li><li>Step two<\/li><li>Step three<\/li><\/ol>/, '#-### after the title; not ####');
-  assert.match(h, /<p class="plan-n">8 lines<\/p>/);
+  assert.match(h, /<p class="plan-n">7 lines<\/p>/, 'non-empty lines, as the bubble counts them');
   assert.ok(h.includes('<button type="button" class="btn gold" data-act="read-plan">Read plan ↗</button>'));
   assert.match(h, /data-act="open-card"[^>]*>Open chat ↗</);
   assert.ok(!cards.renderCard(PLAN(PLAN_MD, { canOpen: false }), {}).includes('open-card'), 'no Open chat without a window');

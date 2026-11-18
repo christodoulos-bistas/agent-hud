@@ -733,6 +733,9 @@ test('planFileOk: rejects escapes, other folders, non-.md, relative paths and od
     'C:\\Users\\other\\.claude\\plans\\x.md',
     'C:\\Users\\u\\.claude\\plans\\x.txt', // not .md
     'C:\\Users\\u\\.claude\\plans\\x.md.exe',
+    'C:\\Users\\u\\.claude\\plans\\x:evil.md', // an NTFS alternate data stream
+    'C:\\Users\\u\\.claude\\plans\\a.md::$DATA.md',
+    'C:/Users/u/.claude/plans/a.md:s.md',
     'C:\\Users\\u\\.claude\\plans\\x.cmd',
     'C:\\Users\\u\\.claude\\plans', // the plans folder itself
     'C:\\Users\\u\\.claude\\plans\\',

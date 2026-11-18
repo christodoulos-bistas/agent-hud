@@ -378,6 +378,8 @@ export function planFileOk(p, home) {
   const win = /^[a-zA-Z]:/.test(p) || p.includes('\\');
   const P = win ? path.win32 : path.posix;
   if (win ? !(WIN_ABS.test(p) && WIN_ABS.test(home)) : !(p.startsWith('/') && home.startsWith('/'))) return false;
+  if (win && p.slice(2).includes(':')) return false; // a colon past the drive names an NTFS stream
+
   const fold = (s) => (win ? s.toLowerCase() : s);
   const rel = P.relative(fold(P.resolve(home, '.claude', 'plans')), fold(P.resolve(p)));
   return rel !== '' && !P.isAbsolute(rel) && rel.split(/[\\/]/)[0] !== '..';

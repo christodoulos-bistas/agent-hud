@@ -38,12 +38,14 @@ function choiceLine(p) {
   return line;
 }
 
-// Steps are the plan's markdown headings # to ###; a plan without any counts its non-empty lines.
-const HEADING = /^ {0,3}#{1,3}(?:[ \t]|$)/;
+// Steps are the plan's markdown headings # to ### after its title (the first heading), the ones the
+// plan card lists (renderer cards.js uses the same two patterns); without any, its non-empty lines.
+const TITLE = /^ {0,3}#{1,6}[ \t]+\S/;
+const STEP = /^ {0,3}#{1,3}[ \t]+\S/;
 function planLine(p) {
   const i = p.tool_input && typeof p.tool_input === 'object' ? p.tool_input : {};
   const lines = String(String(i.plan ?? '').trim() ? i.plan : (p.plan ?? '')).split(/\r?\n/).filter((l) => l.trim());
-  const steps = lines.filter((l) => HEADING.test(l)).length;
+  const steps = lines.slice(lines.findIndex((l) => TITLE.test(l)) + 1).filter((l) => STEP.test(l)).length;
   if (steps) return `Plan ready · ${steps} step${steps === 1 ? '' : 's'}`;
   return `Plan ready · ${lines.length} line${lines.length === 1 ? '' : 's'}`;
 }

@@ -654,7 +654,7 @@ test('plan notice: snapshot cards are the queue summaries, then the notice summa
   const snap = store.snapshot();
   assert.deepEqual(snap.cards.map((c) => c.id), ['a', 'plan:s1:1']);
   const n = snap.cards[1];
-  assert.deepEqual(n, { id: 'plan:s1:1', kind: 'plan', sessionId: 's1', display: 's1 · e0', cls: n.cls, source: 'claude', line: 'Plan ready · 3 steps', expiresAt: null, holdMs: null, canOpen: true });
+  assert.deepEqual(n, { id: 'plan:s1:1', kind: 'plan', sessionId: 's1', display: 's1 · e0', cls: n.cls, source: 'claude', line: 'Plan ready · 2 steps', expiresAt: null, holdMs: null, canOpen: true });
   assert.equal(typeof n.cls, 'string');
   assert.deepEqual(Object.keys(n).sort(), Object.keys(snap.cards[0]).sort(), 'same CardSummary keys as a held card');
 });
