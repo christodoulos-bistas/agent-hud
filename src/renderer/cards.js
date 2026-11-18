@@ -1,13 +1,14 @@
 // Answer cards (permission / multiple choice / reply), shown in the detail panel: the pure renderCard
 // (snapshot card in, HTML string out) and mountCards, which wires a rendered card to the panel's api.
 // Nothing here touches the DOM at import, so it loads in Node for the tests.
-import { CLASSES } from './sprites.js';
+import { CLASSES, spriteSvg } from './sprites.js';
 
 export const REPLY_MS = 540000; // the reply hold in the main process (queue replyMs)
 export const HOLD_MS = 60000; // the question hold (queue holdMs): then a permission or choice goes back to its window
-const holdOf = (card) => (card?.kind === 'reply' ? REPLY_MS : HOLD_MS);
+export const PLAN_MS = 540000; // the plan hold in the main process
+const holdOf = (card) => (card?.kind === 'plan' ? PLAN_MS : card?.kind === 'reply' ? REPLY_MS : HOLD_MS);
 export const ARM_MS = 500; // a new card's answer buttons stay inert this long (I7)
-const ARMED_ACTS = new Set(['answer', 'allow', 'deny', 'send', 'noreply']);
+const ARMED_ACTS = new Set(['answer', 'allow', 'deny', 'send', 'noreply', 'approve-auto', 'approve-ask', 'approve', 'keep']);
 const NAMES = new Map(CLASSES.map((c) => [c.id, c.name]));
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -121,12 +122,54 @@ function replyCard(card, leftMs, arming) {
   '</div>';
 }
 
+export const PLAN_MAX = 20000;
+const KIND_ICON = { permission: '!', choice: '?', plan: '▤', reply: '↩' };
+
+function planCard(card, leftMs, arming) {
+  const raw = String(card.payload?.tool_input?.plan ?? card.payload?.plan ?? '');
+  const chars = Array.from(raw);
+  const cut = chars.length > PLAN_MAX;
+  const text = cut ? chars.slice(0, PLAN_MAX).join('') : raw;
+  // escape first, then bold: the escape can't be bypassed by the markup added after it
+  const body = text.split('\n').map((l) => (l.startsWith('#') ? `<b>${esc(l)}</b>` : esc(l))).join('\n');
+  const approve = card.planModes
+    ? '<button type="button" class="btn gold" data-act="approve-auto">Approve · auto-accept edits</button>' +
+      '<button type="button" class="btn gold" data-act="approve-ask">Approve · ask before edits</button>'
+    : '<button type="button" class="btn gold" data-act="approve">Approve</button>';
+  return cardOpen(card, 'plan', { arming }) +
+    cardTop(card, '<span class="ans-seal" aria-hidden="true">▤</span>') +
+    `<div class="plan">${body}</div>` +
+    (cut ? '<p class="plan-more">Open the window to read the rest.</p>' : '') +
+    `<div class="btns">${approve}</div>` +
+    '<div class="reply"><input data-feedback placeholder="What should change?" aria-label="What should change?">' +
+    '<button type="button" class="btn ghost" data-act="keep">Keep planning</button></div>' +
+    timer(card, leftMs, 'Back to its window in') +
+  '</div>';
+}
+
+// A compact bubble for one waiting question; pure (the caller decides `expanded`).
+export function renderBubble(summary, { nowMs, expanded = false } = {}) {
+  const c = summary || {};
+  const hold = holdOf(c);
+  const p = Number.isFinite(c.expiresAt) && Number.isFinite(nowMs)
+    ? Math.max(0, Math.min(100, Math.round(((c.expiresAt - nowMs) / hold) * 100))) : 100;
+  const source = c.source === 'codex' ? 'codex' : 'claude';
+  return `<button type="button" class="bub" data-act="expand" data-card="${esc(c.id)}" data-session="${esc(c.sessionId)}" aria-expanded="${expanded ? 'true' : 'false'}">` +
+    `<span class="spr">${spriteSvg(classOf(c.cls), 1, { source })}</span>` +
+    `<span class="bub-n">${esc(c.display)}</span>` +
+    `<span class="bub-k" aria-hidden="true">${KIND_ICON[c.kind] ?? ''}</span>` +
+    `<span class="bub-l">${esc(c.line)}</span>` +
+    `<i class="ring" data-ring data-expires="${esc(c.expiresAt)}" data-hold="${hold}" style="--p:${p}"></i>` +
+  '</button>';
+}
+
 // `leftMs`: the time left on the card's hold (cardLeftMs); without it the countdown shows the whole hold.
 export function renderCard(card, { leftMs, arming = false } = {}) {
   if (!card) return '';
   if (card.kind === 'permission') return permissionCard(card, leftMs, arming);
   if (card.kind === 'choice') return choiceCard(card, leftMs, arming);
   if (card.kind === 'reply') return replyCard(card, leftMs, arming);
+  if (card.kind === 'plan') return planCard(card, leftMs, arming);
   return '';
 }
 
@@ -134,7 +177,7 @@ export function renderCard(card, { leftMs, arming = false } = {}) {
 // the main process stamps the deadline (expiresAt, R19); without it, fall back to counting from when
 // the card appeared here. Undefined for no card or an unknown kind.
 export function cardLeftMs(card, nowMs, sinceMs) {
-  if (!['permission', 'choice', 'reply'].includes(card?.kind)) return undefined;
+  if (!['permission', 'choice', 'reply', 'plan'].includes(card?.kind)) return undefined;
   return Number.isFinite(card.expiresAt) ? card.expiresAt - nowMs : holdOf(card) - (nowMs - sinceMs);
 }
 // The same for a reply card only (v1's name, kept for its callers).
@@ -243,6 +286,8 @@ export function mountCards(host, { api, doc, onInteractive, adopt = false, draft
       if (v) { o.value = v; any = true; }
     }
     if (any) syncAnswer(cardEl);
+    const fb = cardEl.querySelector('[data-feedback]');
+    if (fb && text) fb.value = text;
   }
 
   function settle(cardEl, send) {
@@ -298,6 +343,15 @@ export function mountCards(host, { api, doc, onInteractive, adopt = false, draft
         if (text) answer(cardEl, { kind: 'reply', text });
         break;
       }
+      case 'approve-auto':
+        answer(cardEl, { kind: 'plan', approve: 'acceptEdits' }); break;
+      case 'approve-ask':
+      case 'approve':
+        answer(cardEl, { kind: 'plan', approve: 'default' }); break;
+      case 'keep': {
+        const feedback = (cardEl.querySelector('[data-feedback]')?.value ?? '').trim();
+        answer(cardEl, { kind: 'plan', keep: true, feedback }); break;
+      }
       case 'noreply':
         release(cardEl, false); break;
       case 'open-card':
@@ -315,6 +369,8 @@ export function mountCards(host, { api, doc, onInteractive, adopt = false, draft
       }
       drafts.set(`${cardEl.dataset.card}#${e.target.dataset.q}`, e.target.value);
       syncAnswer(cardEl);
+    } else if (e.target.matches('[data-feedback]')) {
+      drafts.set(cardEl.dataset.card, e.target.value);
     } else if (e.target.matches('[data-reply]')) {
       drafts.set(cardEl.dataset.card, e.target.value);
       const send = cardEl.querySelector('[data-act="send"]');
@@ -326,7 +382,7 @@ export function mountCards(host, { api, doc, onInteractive, adopt = false, draft
     if (e.key !== 'Enter' || e.isComposing) return;
     const cardEl = cardOf(e.target);
     if (!cardEl) return;
-    const act = e.target.matches('[data-reply]') ? 'send' : e.target.matches('.other') ? 'answer' : null;
+    const act = e.target.matches('[data-reply]') ? 'send' : e.target.matches('[data-feedback]') ? 'keep' : e.target.matches('.other') ? 'answer' : null;
     const btn = act && cardEl.querySelector(`[data-act="${act}"]`);
     if (btn && !btn.disabled && clickAllowed(act, st.cardSince, Date.now())) { e.preventDefault(); btn.click(); }
   });

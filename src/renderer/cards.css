@@ -36,7 +36,7 @@
 .btn:disabled { opacity: .45; cursor: default; }
 /* For 500 ms after a card appears its answer buttons are inert (cards.js ARM_MS), so a click meant for
    the card it replaced can't land on it. */
-.ans.arming :is([data-act="allow"], [data-act="deny"], [data-act="answer"], [data-act="send"], [data-act="noreply"]) { opacity: .45; cursor: default; pointer-events: none; }
+.ans.arming :is([data-act="allow"], [data-act="deny"], [data-act="answer"], [data-act="send"], [data-act="noreply"], [data-act="approve-auto"], [data-act="approve-ask"], [data-act="approve"], [data-act="keep"]) { opacity: .45; cursor: default; pointer-events: none; }
 .chk { position: relative; font-size: .72rem; color: var(--sage); display: flex; align-items: center; gap: 5px; margin-top: 7px; cursor: pointer; }
 .chk input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
 .chk i { position: relative; width: 11px; height: 11px; flex: none; border: 1px solid rgba(169, 179, 166, .6); border-radius: 3px; display: inline-block; }
