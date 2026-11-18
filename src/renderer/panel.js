@@ -230,6 +230,7 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
       release: (id) => call('release', id),
       openWindow: (sessionId) => call('openWindow', sessionId),
       openPlan: (id) => call('openPlan', id), // a plan notice's "Read plan": main opens Claude's plan file
+      dismissPlan: (id) => call('dismissPlan', id), // a plan notice's "Dismiss": the notice goes
     },
   });
 

@@ -633,6 +633,8 @@ fromPanel('panel:openPlan', (cardId) => {
   }
   openWindow(card.sessionId);
 });
+// A plan card's "Dismiss": Esc in the chat sends no event, so the user clears the notice here.
+fromPanel('panel:dismissPlan', (cardId) => { if (store.dismissNotice(String(cardId))) push(); });
 fromPanel('panel:answer', answerCard);
 fromPanel('panel:release', releaseCard);
 fromPanel('panel:setInteractive', (on) => setInteractiveOf(panelWin, !!on));

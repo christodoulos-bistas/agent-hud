@@ -223,5 +223,14 @@ export function createStore({ engine, queue, now = Date.now, stepLog, plans = cr
     return computeAgents(now()).map((a) => `${a.id}:${a.stage}:${a.stuck ? a.stuck.reason : ''}${a.tuck ? `:${a.tuck}` : ''}`).join('|');
   }
 
-  return { onEvent, setSessions, setReplyOptIn, wantsReply, replySent, permissionDenied, hide, snapshot, cardById, detail, stageKey };
+  // A plan card's Dismiss (by its card id): Esc on the chat's plan dialog sends the HUD no event, so the
+  // user clears the notice. True when one went; a stale id or any other card's id does nothing.
+  function dismissNotice(id) {
+    const n = plans.list().find((x) => x.id === String(id));
+    if (!n) return false;
+    plans.forget(n.sessionId);
+    return true;
+  }
+
+  return { onEvent, setSessions, setReplyOptIn, wantsReply, replySent, permissionDenied, hide, snapshot, cardById, detail, stageKey, dismissNotice };
 }

@@ -130,6 +130,8 @@ test('plan card: title, step headings as a list, line count, Read plan and Open 
   assert.match(h, /data-act="open-card"[^>]*>Open chat ↗</);
   assert.ok(!cards.renderCard(PLAN(PLAN_MD, { canOpen: false }), {}).includes('open-card'), 'no Open chat without a window');
   assert.ok(cards.renderCard(PLAN(PLAN_MD, { canOpen: false }), {}).includes('read-plan'));
+  assert.ok(h.includes('<button type="button" class="btn ghost" data-act="dismiss-plan">Dismiss</button>'), 'Dismiss: Esc in the chat sends the HUD nothing');
+  assert.ok(cards.renderCard(PLAN(PLAN_MD, { canOpen: false }), {}).includes('dismiss-plan'), 'Dismiss even without a window');
 });
 
 test('plan card: no headings falls back to "Plan" and the first lines', () => {
@@ -166,7 +168,7 @@ test('mounted plan card: read-plan calls openPlan with its own id and never answ
   const cardEl = { dataset: { card: 'plan:s1:1', session: 's1', kind: 'plan' }, querySelector: () => null, querySelectorAll: () => [], classList: { remove() {} } };
   const host = { addEventListener: (t, f) => { L[t] = f; }, contains: () => true, querySelector: () => null, querySelectorAll: () => [] };
   const calls = [];
-  const api = { answer: (...a) => calls.push(['answer', ...a]), openPlan: (id) => calls.push(['openPlan', id]), release: (id) => calls.push(['release', id]), openWindow: (s) => calls.push(['openWindow', s]) };
+  const api = { answer: (...a) => calls.push(['answer', ...a]), openPlan: (id) => calls.push(['openPlan', id]), dismissPlan: (id) => calls.push(['dismissPlan', id]), release: (id) => calls.push(['release', id]), openWindow: (s) => calls.push(['openWindow', s]) };
   const m = cards.mountCards(host, { api, adopt: true });
   m.show({ id: 'plan:s1:1', kind: 'plan', sessionId: 's1', holdMs: null, expiresAt: null }, Date.now() - 10_000);
   const clickOn = (act) => { const el = { dataset: { act }, disabled: false, closest: (s) => (s === '[data-act]' ? el : cardEl) }; L.click({ target: el }); };
@@ -183,6 +185,11 @@ test('mounted plan card: read-plan calls openPlan with its own id and never answ
   calls.length = 0;
   clickOn('read-plan');
   assert.deepEqual(calls, [['openPlan', 'plan:s1:1']]);
+  calls.length = 0;
+  clickOn('dismiss-plan');
+  clickOn('dismiss-plan');
+  assert.deepEqual(calls, [['dismissPlan', 'plan:s1:1']], 'Dismiss clears the notice once; never an answer or a release');
+  assert.equal(cardEl.dataset.done, '1');
   m.clear();
 });
 

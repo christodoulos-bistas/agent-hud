@@ -129,8 +129,9 @@ export const PLAN_MAX = 20000;
 const KIND_ICON = { permission: '!', choice: '?', plan: '▤', reply: '↩' };
 
 // The plan notice: read-only. The title (first heading, else "Plan"), the step headings (# to ###) after
-// it as a list (else the first few lines), a line count, and two buttons: Read plan opens Claude's plan
-// file (main: panel:openPlan), Open chat hands the notice back and opens the window. Nothing answers.
+// it as a list (else the first few lines), a line count, and three buttons: Read plan opens Claude's plan
+// file (main: panel:openPlan), Open chat opens the window (the card stays), Dismiss clears the notice
+// (Esc on the chat's dialog sends the HUD nothing). Nothing answers.
 function planCard(card, leftMs, arming) {
   const raw = String(card.payload?.tool_input?.plan ?? card.payload?.plan ?? '');
   const chars = Array.from(raw);
@@ -151,7 +152,8 @@ function planCard(card, leftMs, arming) {
     `<p class="plan-t">${esc(clip(title))}</p>` + list +
     `<p class="plan-n">${total} ${total === 1 ? 'line' : 'lines'}</p>` +
     '<div class="btns"><button type="button" class="btn gold" data-act="read-plan">Read plan ↗</button>' +
-    (card.canOpen === false ? '' : '<button type="button" class="btn ghost" data-act="open-card">Open chat ↗</button>') + '</div>' +
+    (card.canOpen === false ? '' : '<button type="button" class="btn ghost" data-act="open-card">Open chat ↗</button>') +
+    '<button type="button" class="btn ghost" data-act="dismiss-plan">Dismiss</button></div>' +
     (hasHold ? timer(card, leftMs, 'Back to its window in') : '') +
   '</div>';
 }
@@ -353,6 +355,9 @@ export function mountCards(host, { api, doc, onInteractive, adopt = false, draft
       }
       case 'read-plan':
         call('openPlan', cardEl.dataset.card); break; // the card stays; a plan is never answered
+      case 'dismiss-plan':
+        // Esc in the chat sends the HUD nothing: the user clears the notice. Settled, so it goes once.
+        settle(cardEl, (id) => call('dismissPlan', id)); break;
       case 'noreply':
         release(cardEl, false); break;
       case 'open-card':

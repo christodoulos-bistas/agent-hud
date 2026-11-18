@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld('panel', {
   openWindow: (sessionId) => ipcRenderer.send('panel:openWindow', sessionId == null ? null : String(sessionId)),
   // A plan card's "Read plan ↗" (by card id): main opens the plan file, or the chat if it can't.
   openPlan: (id) => ipcRenderer.send('panel:openPlan', String(id)),
+  // A plan card's "Dismiss" (by card id): the notice goes; the chat's own dialog is untouched.
+  dismissPlan: (id) => ipcRenderer.send('panel:dismissPlan', String(id)),
   reportHeight: (px) => ipcRenderer.send('panel:reportHeight', Number(px)),
   // The answer card (cards.js): the same answers and releases as the HUD's v1 card.
   answer: (id, response) => ipcRenderer.send('panel:answer', String(id), response),

@@ -705,6 +705,25 @@ test('plan notice: Claude moving on clears the card and the needs stage', () => 
   assert.equal(store.cardById('plan:s1:1'), null);
 });
 
+test('plan notice: Dismiss clears it by its own id (Esc in the chat sends no event); other ids do nothing', () => {
+  const { queue, store } = setup(1000);
+  store.setSessions([S('s1'), S('s2')]);
+  store.onEvent(planEv('s1', 'PreToolUse', 1000));
+  queue.add({ id: 'q', sessionId: 's2', kind: 'permission', payload: { tool_name: 'Bash', tool_input: { command: 'ls' } } });
+  assert.equal(store.dismissNotice('plan:s1:999'), false, 'a stale id');
+  assert.equal(store.dismissNotice('q'), false, 'a held question is never dismissed this way');
+  assert.equal(store.dismissNotice(null), false);
+  assert.deepEqual(store.snapshot().cards.map((c) => c.id), ['q', 'plan:s1:1']);
+  assert.equal(store.dismissNotice('plan:s1:1'), true);
+  const snap = store.snapshot();
+  assert.deepEqual(snap.cards.map((c) => c.id), ['q']);
+  assert.notEqual(snap.agents.find((a) => a.id === 's1').stage, 'needs');
+  assert.equal(store.cardById('plan:s1:1'), null);
+  // A later plan is a new notice with a new id (so it chimes again).
+  store.onEvent(planEv('s1', 'PreToolUse', 1500));
+  assert.equal(store.snapshot().cards.find((c) => c.kind === 'plan').id, 'plan:s1:2');
+});
+
 test('plan notice: a subagent or Codex ExitPlanMode never shows one', () => {
   const { store } = setup(1000);
   store.setSessions([S('s1')]);
