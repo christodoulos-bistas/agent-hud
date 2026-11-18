@@ -267,7 +267,9 @@ export function renderParty(snapshot, { collapsed = false } = {}) {
 export function patch(parent, fresh, rendered) {
   const old = new Map();
   for (const el of [...parent.children]) {
-    if (el.dataset.key) old.set(el.dataset.key, el); else el.remove();
+    // A second child with a key already seen could never be matched or removed below: it would stay
+    // on screen for good, one more on every render (duplicate rows piling up). Drop it now.
+    if (el.dataset.key && !old.has(el.dataset.key)) old.set(el.dataset.key, el); else el.remove();
   }
   const nodes = [];
   for (const n of [...fresh.children]) {

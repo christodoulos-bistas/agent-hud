@@ -14,6 +14,7 @@ function toSession(o) {
   return {
     sessionId: o.sessionId, pid: o.pid, cwd: o.cwd || '', kind: o.kind, entrypoint: o.entrypoint,
     name: o.name || '', nameSource: o.nameSource, status: o.status, startedAt: knownTime(o.startedAt),
+    procStart: knownTime(o.procStart), // the process's own start (tie-break between two files of one chat)
     statusSince: knownTime(o.statusUpdatedAt), // when status last changed: the idle clock for chats without hooks (v1.3)
   };
 }
@@ -32,8 +33,21 @@ export function readSessionFiles(dir) {
   return out;
 }
 
+// One chat can leave two files: Claude restarts it in a new process and the old process's file stays
+// behind. Its pid is then often reused by an unrelated process, so isAlive can't tell it is stale.
+// Keep one entry per sessionId: the newest start (then the newest process start) wins.
+const newer = (a, b) => (a.startedAt ?? -1) - (b.startedAt ?? -1) || (a.procStart ?? -1) - (b.procStart ?? -1);
+function oneEach(list) {
+  const best = new Map();
+  for (const s of list) {
+    const cur = best.get(s.sessionId);
+    if (!cur || newer(s, cur) > 0) best.set(s.sessionId, s);
+  }
+  return list.filter((s) => best.get(s.sessionId) === s);
+}
+
 export async function listSessions({ dir, isAlive }) {
-  return readSessionFiles(dir).filter((s) => isAlive(s.pid));
+  return oneEach(readSessionFiles(dir).filter((s) => isAlive(s.pid)));
 }
 
 export function displayName(s) {

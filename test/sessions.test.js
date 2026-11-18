@@ -62,3 +62,23 @@ test('readSessionFiles keeps statusUpdatedAt as statusSince; zero or missing is 
   assert.equal(byId['a.json'].statusSince, 1794810712245);
   assert.equal(byId['b.json'].statusSince, null);
 });
+
+test('listSessions keeps one entry per sessionId: the newest process wins (a stale file whose pid was reused)', async () => {
+  const dir = mk();
+  // The same chat, first in process 36420 (dead; its pid since reused, so it still "looks" alive), then in 48896.
+  fs.writeFileSync(path.join(dir, '36420.json'), file(36420, { sessionId: 'same', startedAt: 1000, procStart: 10, status: 'busy' }));
+  fs.writeFileSync(path.join(dir, '48896.json'), file(48896, { sessionId: 'same', startedAt: 2000, procStart: 20, status: 'idle' }));
+  fs.writeFileSync(path.join(dir, '7.json'), file(7));
+  const l = await listSessions({ dir, isAlive: () => true });
+  assert.deepEqual(l.map((s) => [s.sessionId, s.pid]).sort(), [['same', 48896], ['sid-7', 7]]);
+});
+
+test('listSessions dedupe: equal start times fall back to procStart; missing times lose to known ones', async () => {
+  const dir = mk();
+  fs.writeFileSync(path.join(dir, '1.json'), file(1, { sessionId: 'x', startedAt: 5, procStart: 30 }));
+  fs.writeFileSync(path.join(dir, '2.json'), file(2, { sessionId: 'x', startedAt: 5, procStart: 40 }));
+  fs.writeFileSync(path.join(dir, '3.json'), file(3, { sessionId: 'y', startedAt: 0 }));
+  fs.writeFileSync(path.join(dir, '4.json'), file(4, { sessionId: 'y', startedAt: 9 }));
+  const l = await listSessions({ dir, isAlive: () => true });
+  assert.deepEqual(l.map((s) => [s.sessionId, s.pid]).sort(), [['x', 2], ['y', 4]]);
+});
