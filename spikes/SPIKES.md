@@ -348,6 +348,22 @@ Use ONLY a throwaway session started in `C:\Consortis_projects\agent-hud-spike`;
 from `~/.claude/sessions/<pid>.json`, connect, and send one newline-terminated JSON line: `{"type":"user_message","text":"Say PINEAPPLE"}`.
 Record the exact response (bytes returned, or none) and whether the chat reacts (shows the message / Claude answers PINEAPPLE). Task 3 builds the script; this section is only the procedure.
 
+### listing (automated)
+
+`node spikes/messaging-socket.mjs` (read-only, never connects; existence checked by listing `\\.\pipe\`). Session ids redacted to last 4; pipe hash elided.
+
+| pid | sessionId | entrypoint | kind | messagingSocketPath | exists |
+| --- | --- | --- | --- | --- | --- |
+| 25200 | ...a2c9 | claude-vscode | interactive | `\\.\pipe\LOCAL\cc-msg-<32 hex>` | true |
+| 36360 | ...0b58 | claude-vscode | interactive | `\\.\pipe\LOCAL\cc-msg-<32 hex>` | true |
+| 36420 | ...f6a5 | claude-vscode | interactive | `\\.\pipe\LOCAL\cc-msg-<32 hex>` | true |
+| 45848 | ...4c5b | claude-desktop | interactive | `\\.\pipe\LOCAL\cc-msg-<32 hex>` | true |
+
+Every live session advertises a per-session named pipe that exists. Whether it accepts input is untested; the hands-on send is below.
+Run it with `node spikes/messaging-socket.mjs --send <sessionId>` (refuses unless the session cwd is the spike dir).
+
+REPLY_ANYWHERE = unclear (pending the hands-on send)
+
 ## Decisions (provisional - the build uses these until the checklists above are run)
 
 - `PLAN_EVENT = 'PermissionRequest'` - provisional - flip after the checklist. Flips to `'PreToolUse'` if only PreToolUse carries ExitPlanMode or only it accepts the answer.
