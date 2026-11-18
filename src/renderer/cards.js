@@ -355,6 +355,8 @@ export function mountCards(host, { api, doc, onInteractive, adopt = false, draft
       case 'noreply':
         release(cardEl, false); break;
       case 'open-card':
+        // A plan notice holds nothing to release: just open the chat and keep the card working.
+        if (cardEl.dataset.kind === 'plan') { if (cardEl.dataset.session) call('openWindow', cardEl.dataset.session); break; }
         release(cardEl, true); break;
       default:
     }

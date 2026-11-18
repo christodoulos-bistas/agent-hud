@@ -154,9 +154,9 @@ test('a bubble has no ring without a hold', () => {
   assert.match(b, /class="bub"/);
 });
 
-test('mounted plan card: read-plan calls openPlan with its own id and never answers; Open chat releases then opens', () => {
+test('mounted plan card: read-plan calls openPlan with its own id and never answers; Open chat only opens the chat', () => {
   const L = {};
-  const cardEl = { dataset: { card: 'plan:s1:1', session: 's1' }, querySelector: () => null, querySelectorAll: () => [], classList: { remove() {} } };
+  const cardEl = { dataset: { card: 'plan:s1:1', session: 's1', kind: 'plan' }, querySelector: () => null, querySelectorAll: () => [], classList: { remove() {} } };
   const host = { addEventListener: (t, f) => { L[t] = f; }, contains: () => true, querySelector: () => null, querySelectorAll: () => [] };
   const calls = [];
   const api = { answer: (...a) => calls.push(['answer', ...a]), openPlan: (id) => calls.push(['openPlan', id]), release: (id) => calls.push(['release', id]), openWindow: (s) => calls.push(['openWindow', s]) };
@@ -169,7 +169,13 @@ test('mounted plan card: read-plan calls openPlan with its own id and never answ
   assert.ok(!cardEl.dataset.done);
   calls.length = 0;
   clickOn('open-card');
-  assert.deepEqual(calls, [['release', 'plan:s1:1'], ['openWindow', 's1']]);
+  // Nothing is held for a plan, so nothing is released: the notice stays (Claude still waits) and the
+  // card keeps working, so Read plan still opens the file after a trip to the chat.
+  assert.deepEqual(calls, [['openWindow', 's1']]);
+  assert.ok(!cardEl.dataset.done, 'the card is not settled');
+  calls.length = 0;
+  clickOn('read-plan');
+  assert.deepEqual(calls, [['openPlan', 'plan:s1:1']]);
   m.clear();
 });
 
