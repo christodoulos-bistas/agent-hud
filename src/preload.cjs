@@ -14,8 +14,6 @@ contextBridge.exposeInMainWorld('hud', {
     ipcRenderer.on('sound-file', listener);
     return () => ipcRenderer.removeListener('sound-file', listener);
   },
-  answer: (id, response) => ipcRenderer.send('hud:answer', String(id), response),
-  release: (id) => ipcRenderer.send('hud:release', String(id)),
   setReplyOptIn: (sessionId, on) => ipcRenderer.send('hud:setReplyOptIn', String(sessionId), !!on),
   openWindow: (sessionId) => ipcRenderer.send('hud:openWindow', String(sessionId)),
   selectAgent: (sessionId, rowY) => ipcRenderer.send('hud:selectAgent', String(sessionId), Number(rowY)),

@@ -516,7 +516,7 @@ function fromHud(channel, handler) {
   });
 }
 
-// An answer from a card (the panel's; the HUD's channel stays for v1 and is harmless).
+// An answer from a card in the panel.
 function answerCard(id, response) {
   const item = queue.list().find((i) => i.id === id);
   if (!item) return;
@@ -528,8 +528,6 @@ function answerCard(id, response) {
 }
 const releaseCard = (id) => queue.answer(id, RELEASE);
 
-fromHud('hud:answer', answerCard);
-fromHud('hud:release', releaseCard);
 fromHud('hud:setReplyOptIn', (sessionId, on) => { store.setReplyOptIn(sessionId, !!on); push(); });
 // v1.3: ✕ takes a chat off the HUD until it asks something or starts a new turn; its open panel closes.
 fromHud('hud:hideAgent', (sessionId) => {

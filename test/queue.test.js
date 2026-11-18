@@ -23,9 +23,9 @@ const mk = () => { const f = fake(); return [f, createQueue({ now: f.now, setTim
 const it = (id, kind = 'permission', sessionId = 's1') => ({ id, sessionId, kind, payload: {} });
 const settled = (p) => { let v = 'pending'; p.then((x) => { v = x; }); return () => v; };
 
-test('order: reply added first, then permission -> active() is the permission', () => {
+test('order: reply added first, then permission -> the permission comes first', () => {
   const [, q] = mk(); q.add(it('r', 'reply')); q.add(it('p', 'permission'));
-  assert.equal(q.active().id, 'p');
+  assert.equal(q.list()[0].id, 'p');
   assert.deepEqual(q.list().map((i) => i.id), ['p', 'r']);
 });
 test('two permissions from the same session stay in arrival order', () => {
@@ -35,7 +35,7 @@ test('two permissions from the same session stay in arrival order', () => {
 test('answer resolves the promise with the given response and removes the item', async () => {
   const [, q] = mk(); const p = q.add(it('a')); const r = { ok: 1 };
   q.answer('a', r);
-  assert.equal(await p, r); assert.equal(q.active(), null); assert.deepEqual(q.handedBack(), []);
+  assert.equal(await p, r); assert.deepEqual(q.list(), []); assert.deepEqual(q.handedBack(), []);
 });
 test('permission not answered in 60 000 ms resolves RELEASE and appears in handedBack()', async () => {
   const [f, q] = mk(); const p = q.add(it('a'));

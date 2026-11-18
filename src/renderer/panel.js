@@ -40,9 +40,9 @@ function stuckLine(d, nowMs) {
   return `<div class="warn"><b>${head}</b> ${text}</div>`;
 }
 
-// Where the answer is waiting (M3), when its card is not the one shown above: queued behind the
-// current question (it opens here next); handed back to its window (the footer's "open window ↗"
-// opens it); or a native prompt the HUD never held.
+// Where the answer is waiting (M3) when the agent has no card in the stack (d.hasCard: the stack holds
+// it, so no note): handed back to its window (the footer's "open window ↗" opens it), or a native
+// prompt the HUD never held.
 function needsNote(d) {
   if (d.hasCard) return '';
   if (d.handedBack) return d.canOpen === false ? 'Waiting in its window' : 'Waiting in its window — open ↗';

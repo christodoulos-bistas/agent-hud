@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, stackVisible, panelShows, anchorOf, createThrottle, createInteractiveCheck, loadConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, stackVisible, panelShows, createThrottle, createInteractiveCheck, loadConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { installCodexHooksFile, removeCodexHooksFile, codexHookCommand } from '../src/main/codex-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply, planApprove, planKeepPlanning, PLAN_MODES } from '../src/main/answers.js';
@@ -148,14 +148,11 @@ test('stack functions never mutate their input state (deep-frozen hidden and exp
   assert.equal(JSON.stringify([hidden, expanded]), keep);
 });
 
-test('(a) two cards arrive: stack visible, nothing selected, anchor is the first card session', () => {
+test('(a) two cards arrive: stack visible, nothing selected', () => {
   const cards = [C('a', 's1'), C('b', 's2')];
   const s = stackUpdate(STACK_INIT, cards);
   assert.equal(stackVisible(s, cards), true);
   assert.equal(s.selected, null);
-  assert.equal(anchorOf(s, cards), 's1');
-  assert.equal(anchorOf(STACK_INIT, []), null);
-  assert.equal(anchorOf({ ...STACK_INIT, selected: { id: 's9', rowY: 1 } }, cards), 's9');
 });
 
 test('stackExpand: unknown id changes nothing; same id collapses', () => {

@@ -1,5 +1,6 @@
-// Answer cards (permission / multiple choice / reply), shown in the detail panel: the pure renderCard
-// (snapshot card in, HTML string out) and mountCards, which wires a rendered card to the panel's api.
+// The panel's bubble stack: renderBubble (one compact bubble per held question) and the answer cards
+// (permission / multiple choice / reply / plan) shown in full under the expanded bubble: the pure
+// renderCard (card in, HTML string out) and mountCards, which wires a rendered card to the panel's api.
 // Nothing here touches the DOM at import, so it loads in Node for the tests.
 import { CLASSES, spriteSvg } from './sprites.js';
 

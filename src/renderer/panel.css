@@ -60,7 +60,7 @@ body[data-arrow="left"]::after { left: 0; border-right-color: rgba(224, 180, 92,
 .det .warn b { color: var(--amber); }
 .det .needs-note { color: var(--gold-l); font-size: .74rem; margin: 0 0 8px; }
 
-/* The question (cards.css) sits under the agent header, above the task: the panel pops open on it. */
+/* The expanded question (cards.css) sits in the stack, right under its bubble. */
 .card-slot { margin: 0 0 9px; }
 .card-slot .ans { box-shadow: none; }
 

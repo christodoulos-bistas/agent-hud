@@ -130,8 +130,8 @@ export function panelBounds(hud, workArea, { width = 340, height, rowY, gap = 8,
 }
 
 // Which agent the panel shows: the selected one, only while the HUD is visible and the agent is still
-// in the snapshot; otherwise none (the panel closes). A collapsed HUD has a panel only for the agent
-// that owns the active question (`hasCard`): it opens beside the collapsed column.
+// in the snapshot; otherwise none (the panel closes). A collapsed HUD shows details only for the agent
+// whose card is expanded in the stack (`hasCard`): they open beside the collapsed column.
 // A tucked chat (v1.3) counts only while the tucked list is open (`tuckOpen`): its row is on screen then.
 export function panelTarget(selectedId, snapshot, { collapsed, visible, hasCard, tuckOpen } = {}) {
   if (selectedId == null || !visible || (collapsed && !hasCard)) return null;
@@ -213,11 +213,6 @@ export function panelShows(state, snapshot, { collapsed, visible, tuckOpen } = {
   const hasCard = !!(sel && owner != null && String(owner) === String(sel.id));
   const detailId = sel ? panelTarget(sel.id, snapshot, { collapsed, visible, hasCard, tuckOpen }) : null;
   return { stack: stackVisible(state, cards), detailId };
-}
-
-// The row the panel's arrow points at.
-export function anchorOf(state, cards) {
-  return state.selected?.id ?? cards?.[0]?.sessionId ?? null;
 }
 
 // The panel's ✕ names the agent it was showing; it closes the panel only if that agent is still the

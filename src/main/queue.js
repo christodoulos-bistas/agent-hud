@@ -56,7 +56,6 @@ export function createQueue({ holdMs = 60000, replyMs = 540000, planMs = 540000,
     add, answer, drop,
     releaseSession: (sessionId, kinds) => releaseWhere((i) => i.sessionId === sessionId && (!kinds || kinds.includes(i.kind))),
     releaseAll: () => releaseWhere(() => true),
-    active: () => ordered()[0] ?? null,
     list: ordered,
     handedBack: () => handed.map((h) => ({ ...h })),
     // Only the thread that was handed back can clear it: the main thread (agentId null) or one subagent.

@@ -1,4 +1,4 @@
-/* Answer cards (cards.js), shown in the detail panel. Self-contained apart from the colour tokens in
+/* Answer cards (cards.js), shown under their bubble in the panel's stack. Self-contained apart from the colour tokens in
    tokens.css: link that first. */
 /* ---------- answer cards ---------- */
 .ans { background: rgba(24, 34, 31, .98); border: 1px solid rgba(224, 180, 92, .4); border-radius: 10px; padding: 10px 12px 11px; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
