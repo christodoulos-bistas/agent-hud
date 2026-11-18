@@ -212,6 +212,17 @@ function face(a, cards = []) {
     `<span class="sprite-box">${sprite(a.cls, sourceOf(a))}${mood === 'needs' ? SEAL() : ''}</span></button>`;
 }
 
+// The header's sound on/off button: a speaker (with waves when on, crossed when muted). It mutes the
+// same setting as the tray's Sounds → Mute; aria-pressed is "sound on".
+const SPEAKER = '<path d="M1.5 4.5h2l2.5-2v7l-2.5-2h-2z" fill="currentColor"/>';
+const SND_ON = `<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SPEAKER}<path d="M8 4.3a2.4 2.4 0 0 1 0 3.4"/><path d="M9.6 2.8a4.5 4.5 0 0 1 0 6.4"/></svg>`;
+const SND_OFF = `<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SPEAKER}<path d="M8 4.5l3 3M11 4.5l-3 3"/></svg>`;
+function soundButton(snapshot) {
+  const on = !snapshot?.sound?.muted;
+  return `<button type="button" class="snd" data-act="sound" aria-pressed="${on}" title="${on ? 'Sound on — click to mute' : 'Sound off — click to turn on'}" ` +
+    `aria-label="${on ? 'Sound on, click to mute' : 'Sound off, click to turn on'}">${on ? SND_ON : SND_OFF}</button>`;
+}
+
 // The party: rows (or, collapsed, a column of faces), and the header. No answer card:
 // a question opens the detail panel on its agent, and the asking row only says what it asks.
 export function renderParty(snapshot, { collapsed = false } = {}) {
@@ -220,7 +231,7 @@ export function renderParty(snapshot, { collapsed = false } = {}) {
   const cards = Array.isArray(snapshot?.cards) ? snapshot.cards : [];
   if (collapsed) {
     return '<div class="party collapsed" data-key="party" data-deep>' +
-      '<div class="party-top" data-key="top"><button type="button" class="min" data-act="collapse" title="Expand" aria-label="Expand the HUD">+</button></div>' +
+      `<div class="party-top" data-key="top">${soundButton(snapshot)}<button type="button" class="min" data-act="collapse" title="Expand" aria-label="Expand the HUD">+</button></div>` +
       `<div class="party-body" data-key="body" data-deep>${agents.map((a) => face(a, cards)).join('')}</div>` +
     '</div>';
   }
@@ -253,7 +264,7 @@ export function renderParty(snapshot, { collapsed = false } = {}) {
   const need = needs ? ` · <b>${needs} ${needs === 1 ? 'needs' : 'need'} you</b>` : '';
   return '<div class="party" data-key="party" data-deep>' +
     `<div class="party-top" data-key="top"><span class="t">The Guild</span><span class="n">${total} at work${need}</span>` +
-    '<button type="button" class="min" data-act="collapse" title="Collapse" aria-label="Collapse the HUD">–</button></div>' +
+    `${soundButton(snapshot)}<button type="button" class="min" data-act="collapse" title="Collapse" aria-label="Collapse the HUD">–</button></div>` +
     `<div class="party-body" data-key="body" data-deep>${parts.join('')}</div>` +
   '</div>';
 }
@@ -400,6 +411,8 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     const el = e.target.closest('[data-act]');
     if (!el || !root.contains(el) || el.disabled) return;
     switch (el.dataset.act) {
+      case 'sound': // sound on → mute; muted → sound on (main saves it and pushes the new state back)
+        call('setMuted', el.getAttribute('aria-pressed') === 'true'); break;
       case 'collapse':
         st.collapsed = !st.collapsed; call('collapse', st.collapsed); render(); break;
       case 'expand':

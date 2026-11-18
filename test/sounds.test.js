@@ -44,31 +44,49 @@ test('muted or quiet silences the cue but the state still advances', () => {
   }
 });
 
+const param = (v = 0) => { const p = { value: v, setValueAtTime(x) { p.value = x; }, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }; return p; };
 const fakeCtx = () => {
   const osc = [];
   const gains = [];
+  const node = (extra = {}) => ({ connect(n) { return n; }, ...extra });
   const ctx = {
-    currentTime: 0, destination: {},
+    currentTime: 0, destination: node(),
     createOscillator() {
-      const o = { type: '', frequency: { value: 0 }, connect() {}, start() {}, stop() {} };
+      const o = node({ type: '', frequency: param(), start() {}, stop() {} });
       osc.push(o); return o;
     },
-    createGain() {
-      const g = { gain: { value: 0, setValueAtTime(v) { g.gain.value = v; }, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} };
-      gains.push(g); return g;
-    },
+    createGain() { const g = node({ gain: param(1) }); gains.push(g); return g; },
+    createDelay() { return node({ delayTime: param() }); },
+    createBiquadFilter() { return node({ type: '', frequency: param(350), Q: param(1) }); },
   };
   return { ctx, osc, gains };
 };
 const file = { bytes: new Uint8Array([1, 2]), mime: 'audio/wav' };
+const near = (a, b) => Math.abs(a - b) < 0.05;
 
-test('the synth plays two notes per cue at the set frequencies', () => {
+test('needs plays the harp call: four plucked notes, A4 C#5 E5 A5, rising', () => {
   const { ctx, osc } = fakeCtx();
-  const p = createPlayer({ makeContext: () => ctx });
-  p.play('needs');
-  assert.deepEqual(osc.map((o) => o.frequency.value), [660, 880]);
-  p.play('finished');
-  assert.deepEqual(osc.slice(2).map((o) => o.frequency.value), [523, 784]);
+  createPlayer({ makeContext: () => ctx }).play('needs');
+  assert.equal(osc.length, 4);
+  assert.ok(osc.every((o) => o.type === 'triangle'));
+  [440, 554.37, 659.26, 880].forEach((hz, i) => assert.ok(near(osc[i].frequency.value, hz), `note ${i}: ${osc[i].frequency.value}`));
+});
+
+test('finished plays sparkle resolve: three soft bells settling down (C6 A5 F5) plus a sparkle', () => {
+  const { ctx, osc } = fakeCtx();
+  createPlayer({ makeContext: () => ctx }).play('finished');
+  assert.ok(osc.length > 4);
+  assert.ok(osc.every((o) => o.type === 'sine'));
+  const hz = osc.map((o) => o.frequency.value);
+  for (const f of [1046.5, 880, 698.46]) assert.ok(hz.some((h) => near(h, f)), `bell ${f}`);
+  assert.ok(hz.some((h) => h > 2400), 'a sparkle above the bells');
+});
+
+test('the voices are the same every time (no randomness)', () => {
+  const a = fakeCtx(); const b = fakeCtx();
+  createPlayer({ makeContext: () => a.ctx }).play('finished');
+  createPlayer({ makeContext: () => b.ctx }).play('finished');
+  assert.deepEqual(a.osc.map((o) => o.frequency.value), b.osc.map((o) => o.frequency.value));
 });
 
 test('a rejected play() of a custom file falls back to the synth', async () => {
@@ -81,7 +99,7 @@ test('a rejected play() of a custom file falls back to the synth', async () => {
   p.setCustom('needs', file);
   p.play('needs');
   await new Promise((r) => setTimeout(r, 0));
-  assert.equal(osc.length, 2);
+  assert.ok(osc.length > 0);
 });
 
 test('an error event on the custom audio falls back to the synth', () => {
@@ -95,7 +113,7 @@ test('an error event on the custom audio falls back to the synth', () => {
   p.setCustom('finished', file);
   p.play('finished');
   onError();
-  assert.equal(osc.length, 2);
+  assert.ok(osc.length > 0);
 });
 
 test('setCustom(cue, null) reverts to the synth and revokes the old URL', () => {
@@ -112,7 +130,7 @@ test('setCustom(cue, null) reverts to the synth and revokes the old URL', () => 
   p.setCustom('needs', null);
   assert.deepEqual(revoked, ['blob:old']);
   p.play('needs');
-  assert.equal(osc.length, 2);
+  assert.ok(osc.length > 0);
 });
 
 test('a suspended context is resumed and the notes are still scheduled', () => {
@@ -122,7 +140,7 @@ test('a suspended context is resumed and the notes are still scheduled', () => {
   ctx.resume = () => { resumed++; return Promise.resolve(); };
   createPlayer({ makeContext: () => ctx }).play('needs');
   assert.equal(resumed, 1);
-  assert.equal(osc.length, 2);
+  assert.ok(osc.length > 0);
 });
 
 test('a synchronous throw from makeAudio falls back to the synth', () => {
@@ -130,7 +148,7 @@ test('a synchronous throw from makeAudio falls back to the synth', () => {
   const p = createPlayer({ makeContext: () => ctx, makeAudio: () => { throw new Error('boom'); }, makeUrl: () => 'blob:x', revokeUrl() {} });
   p.setCustom('needs', file);
   p.play('needs');
-  assert.equal(osc.length, 2);
+  assert.ok(osc.length > 0);
 });
 
 test('a synchronous throw from audio.play() falls back to the synth', () => {
@@ -138,7 +156,7 @@ test('a synchronous throw from audio.play() falls back to the synth', () => {
   const p = createPlayer({ makeContext: () => ctx, makeAudio: () => ({ play() { throw new Error('boom'); }, addEventListener() {} }), makeUrl: () => 'blob:x', revokeUrl() {} });
   p.setCustom('needs', file);
   p.play('needs');
-  assert.equal(osc.length, 2);
+  assert.ok(osc.length > 0);
 });
 
 test('setCustom with a new file revokes the old URL', () => {

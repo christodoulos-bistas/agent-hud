@@ -127,7 +127,7 @@ test('renderParty collapsed contains no card markup but keeps seals', () => {
   assert.ok(!html.includes('class="ans'));
   assert.ok(!html.includes('Allow'));
   assert.equal(count(html, 'class="seal'), 1);
-  assert.equal(count(html, '<svg'), 3); // two sprites + one seal
+  assert.equal(count(html, '<svg'), 4); // two sprites + one seal + the header's speaker
 });
 
 test('renderParty renders no card markup even when cards are set; there is no Next line', () => {
@@ -523,4 +523,20 @@ test('a Claude and a Codex agent of one class render different sprites in one pa
   const [fa, fb] = faces.split('data-key="face:b"');
   assert.ok(!fa.includes('#8ef5c6'));
   assert.ok(fb.includes('#8ef5c6'));
+});
+
+test('the header has a sound on/off button next to collapse: aria-pressed follows snapshot.sound.muted', () => {
+  const on = renderParty({ agents: [], cards: [], sound: { muted: false } });
+  assert.match(on, /<button type="button" class="snd" data-act="sound" aria-pressed="true"[^>]*aria-label="Sound on[^"]*"[^>]*><svg/);
+  assert.ok(on.indexOf('class="snd"') < on.indexOf('class="min"'), 'speaker sits left of the collapse button');
+  const off = renderParty({ agents: [], cards: [], sound: { muted: true } });
+  assert.match(off, /class="snd" data-act="sound" aria-pressed="false"[^>]*aria-label="Sound off[^"]*"/);
+  const none = renderParty({ agents: [], cards: [] });
+  assert.match(none, /class="snd" data-act="sound" aria-pressed="true"/, 'no sound field: on');
+});
+
+test('the collapsed header keeps the sound button beside the expand button', () => {
+  const html = renderParty({ agents: [], cards: [], sound: { muted: true } }, { collapsed: true });
+  assert.match(html, /class="snd" data-act="sound" aria-pressed="false"/);
+  assert.ok(html.indexOf('class="snd"') < html.indexOf('data-act="collapse"'));
 });

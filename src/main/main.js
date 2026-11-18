@@ -343,16 +343,21 @@ async function chooseSound(cue) {
   } catch (err) { log('choose sound', err); }
 }
 
+// Mute from the tray or the HUD header's speaker button: one setting, saved, pushed to the HUD and
+// ticked in the tray, so both places always agree.
+function setMuted(on) {
+  if (!cfg) return;
+  cfg.sounds = { ...cfg.sounds, muted: !!on };
+  try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
+  push(); refreshMenu();
+}
+
 function soundsMenu() {
   const s = cfg?.sounds ?? {};
   return {
     label: 'Sounds',
     submenu: [
-      { label: 'Mute', type: 'checkbox', checked: !!s.muted, click: (mi) => {
-        cfg.sounds = { ...cfg.sounds, muted: mi.checked };
-        try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
-        push(); refreshMenu();
-      } },
+      { label: 'Mute', type: 'checkbox', checked: !!s.muted, click: (mi) => setMuted(mi.checked) },
       { type: 'separator' },
       ...CUES.map(([cue, label]) => ({
         label,
@@ -584,6 +589,7 @@ fromHud('hud:rowOffset', (id, rowY) => {
 });
 // The HUD's "show the questions again": the hidden stack comes back.
 fromHud('hud:showStack', () => apply(stackShow(pick)));
+fromHud('hud:setMuted', (on) => setMuted(!!on));
 
 function fromPanel(channel, handler) {
   ipcMain.on(channel, (e, ...args) => {

@@ -21,14 +21,20 @@ button { font: inherit; color: inherit; }
 /* the header bar is the handle you drag the HUD by; its button stays clickable */
 .party-top { display: flex; align-items: center; gap: 8px; padding: 7px 10px 6px 12px; border-bottom: 1px solid rgba(224, 180, 92, .16); -webkit-app-region: drag; user-select: none; }
 .party-top button { -webkit-app-region: no-drag; }
-.party-top .t { font-family: 'IM Fell English', Georgia, serif; font-size: .95rem; color: var(--gold-l); }
-.party-top .n { font-size: .72rem; color: var(--sage); margin-left: auto; }
+.party-top .t { font-family: 'IM Fell English', Georgia, serif; font-size: .95rem; color: var(--gold-l); white-space: nowrap; flex: none; }
+/* The count shortens ("…") rather than running under the buttons. */
+.party-top .n { font-size: .72rem; color: var(--sage); margin-left: auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .party-top .n b { color: var(--gold); font-weight: 700; }
-.party-top .min {
+.party-top .snd { flex: none; }
+.party-top .snd svg { width: 12px; height: 12px; display: block; }
+.party-top .snd[aria-pressed="true"] { color: var(--gold); }
+.party-top .snd[aria-pressed="false"] { opacity: .7; }
+.party-top .min { flex: none; }
+.party-top .min, .party-top .snd {
   width: 18px; height: 18px; border-radius: 4px; color: var(--sage); display: inline-flex; align-items: center; justify-content: center;
   font-size: .9rem; line-height: 1; border: 1px solid rgba(169, 179, 166, .25); background: transparent; padding: 0; cursor: pointer;
 }
-.party-top .min:hover { color: var(--parch); border-color: rgba(224, 180, 92, .6); }
+.party-top .min:hover, .party-top .snd:hover { color: var(--parch); border-color: rgba(224, 180, 92, .6); opacity: 1; }
 
 .row { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 10px 4px 6px; position: relative; }
 .row + .row { border-top: 1px solid rgba(240, 233, 218, .05); }
