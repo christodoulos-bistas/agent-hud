@@ -27,25 +27,17 @@ test('activityLine for each tool in the table', () => {
   assert.equal(l('mcp__x__y', {}), 'mcp__x__y');
 });
 
-test('snapshot: permission pending for s1 -> mood needs, card permission; next names the second item', () => {
+test('snapshot: permission pending for s1 -> mood needs, cards list both held items', () => {
   const { queue, store } = setup();
   store.setSessions([S('s1'), S('s2')]);
   queue.add({ id: 'a', sessionId: 's1', kind: 'permission', payload: { tool_name: 'Bash' } });
   queue.add({ id: 'b', sessionId: 's2', kind: 'choice', payload: {} });
   const snap = store.snapshot();
   assert.equal(snap.agents.find((a) => a.id === 's1').mood, 'needs');
-  assert.equal(snap.card.kind, 'permission');
-  assert.equal(snap.card.display, 's1 · e0');
-  assert.equal(snap.next, 'Next: s2 · e0 asks a question');
+  assert.equal(snap.cards[0].kind, 'permission');
+  assert.equal(snap.cards[0].display, 's1 · e0');
+  assert.equal(snap.cards[1].line, 'asks a question');
   assert.deepEqual(snap.counts, { total: 2, needs: 2 });
-});
-
-test('next line for a reply item', () => {
-  const { queue, store } = setup();
-  store.setSessions([S('s1'), S('s2')]);
-  queue.add({ id: 'a', sessionId: 's1', kind: 'permission', payload: {} });
-  queue.add({ id: 'b', sessionId: 's2', kind: 'reply', payload: {} });
-  assert.equal(store.snapshot().next, 'Next: s2 · e0 wants a reply');
 });
 
 test('handed-back item -> handedBack true until the next event for that session', () => {
@@ -141,19 +133,11 @@ test('R7: events for unknown sessions are kept but not listed; card falls back t
   store.onEvent(ev('zz', 'PreToolUse', 1000, { toolName: 'Grep', cwd: 'C:\\x\\proj\\' }));
   assert.deepEqual(store.snapshot().agents.map((a) => a.id), ['s1']);
   queue.add({ id: 'a', sessionId: 'zz', kind: 'permission', payload: {} });
-  assert.equal(store.snapshot().card.display, 'proj');
+  assert.equal(store.snapshot().cards[0].display, 'proj');
   queue.add({ id: 'b', sessionId: 'qq', kind: 'permission', payload: {} });
   queue.answer('a', {});
-  assert.equal(store.snapshot().card.display, 'unknown');
+  assert.equal(store.snapshot().cards[0].display, 'unknown');
   assert.equal(store.snapshot().counts.needs, 0);
-});
-
-test('R20: next line for a queued permission reads "asks permission"', () => {
-  const { queue, store } = setup();
-  store.setSessions([S('s1'), S('s2')]);
-  queue.add({ id: 'a', sessionId: 's1', kind: 'choice', payload: {} });
-  queue.add({ id: 'b', sessionId: 's2', kind: 'permission', payload: {} });
-  assert.equal(store.snapshot().next, 'Next: s2 · e0 asks permission');
 });
 
 test('R19: card carries sessionId and expiresAt = addedAt + holdMs (default 60 000 ms)', () => {
@@ -161,23 +145,23 @@ test('R19: card carries sessionId and expiresAt = addedAt + holdMs (default 60 0
   store.setSessions([S('s1')]);
   queue.add({ id: 'a', sessionId: 's1', kind: 'permission', payload: {} });
   set(5000);
-  const card = store.snapshot().card;
+  const card = store.snapshot().cards[0];
   assert.equal(card.sessionId, 's1');
   assert.equal(card.expiresAt, 61000);
 });
 
 test('R19: an item without expiresAt falls back to addedAt + hold', () => {
-  const queue = { active: () => ({ id: 'x', kind: 'permission', sessionId: 's1', addedAt: 1000, payload: {} }), list: () => [], onChange: () => () => {}, handedBack: () => [] };
+  const queue = { list: () => [{ id: 'x', kind: 'permission', sessionId: 's1', addedAt: 1000, payload: {} }], onChange: () => () => {}, handedBack: () => [] };
   const store = createStore({ engine: createClassEngine(), queue, now: () => 1500 });
   store.setSessions([S('s1')]);
-  assert.equal(store.snapshot().card.expiresAt, 61000);
+  assert.equal(store.snapshot().cards[0].expiresAt, 61000);
 });
 
 test('R19: reply card expiresAt = addedAt + replyMs (default 540 000 ms)', () => {
   const { queue, store } = setup(2000);
   store.setSessions([S('s1')]);
   queue.add({ id: 'r', sessionId: 's1', kind: 'reply', payload: {} });
-  assert.equal(store.snapshot().card.expiresAt, 542000);
+  assert.equal(store.snapshot().cards[0].expiresAt, 542000);
 });
 
 test('R19: the queue stamps expiresAt from its own holdMs/replyMs and the store reads it', () => {
@@ -185,11 +169,11 @@ test('R19: the queue stamps expiresAt from its own holdMs/replyMs and the store 
   const queue = createQueue({ holdMs: 5000, replyMs: 9000, now: () => t, setTimer: () => 0, clearTimer: () => {} });
   const store = createStore({ engine: createClassEngine(), queue, now: () => t });
   queue.add({ id: 'c', sessionId: 's1', kind: 'choice', payload: {} });
-  assert.equal(store.snapshot().card.expiresAt, 5100);
+  assert.equal(store.snapshot().cards[0].expiresAt, 5100);
   queue.answer('c', {});
   t = 200;
   queue.add({ id: 'r', sessionId: 's1', kind: 'reply', payload: {} });
-  assert.equal(store.snapshot().card.expiresAt, 9200);
+  assert.equal(store.snapshot().cards[0].expiresAt, 9200);
 });
 
 test("I3: a subagent event does not clear the main thread's hand-back; a main-thread event does", () => {
@@ -436,7 +420,7 @@ test('canOpen: agents, the card and detail say whether the session can be focuse
   const snap = store.snapshot();
   assert.equal(snap.agents.find((x) => x.id === 'a').canOpen, true);
   assert.equal(snap.agents.find((x) => x.id === 'b').canOpen, false);
-  assert.equal(snap.card.canOpen, false);
+  assert.equal(snap.cards[0].canOpen, false);
   assert.equal(store.detail('a').canOpen, true);
   queue.releaseAll();
 });
@@ -460,19 +444,6 @@ test('detail.lastMessage only while stage is turn', () => {
   store.onEvent(ev('s1', 'UserPromptSubmit', 3000, { raw: { prompt: 'again' } }));
   const d2 = store.detail('s1');
   assert.notEqual(d2.stage, 'turn'); assert.equal(d2.lastMessage, null);
-});
-
-test('detail.card is the active card for that session, null for others', () => {
-  const { queue, store } = setup();
-  store.setSessions([S('s1'), S('s2')]);
-  assert.equal(store.detail('s1').card, null);
-  queue.add({ id: 'a', sessionId: 's1', kind: 'permission', payload: { tool_name: 'Bash' } });
-  queue.add({ id: 'b', sessionId: 's2', kind: 'choice', payload: {} });
-  const snap = store.snapshot();
-  assert.deepEqual(store.detail('s1').card, snap.card);
-  assert.equal(store.detail('s1').card.id, 'a');
-  assert.ok('expiresAt' in store.detail('s1').card && 'canOpen' in store.detail('s1').card);
-  assert.equal(store.detail('s2').card, null);
 });
 
 // 2026-11-17: the panel tells a chat that never reported (no hooks for its folder) from one that
@@ -610,3 +581,4 @@ test('recap holds the recapOf text at stage turn and is null otherwise, in snaps
   assert.equal(a.recap, 'Done in 8s · 1 command');
   assert.equal(store.detail('s1').recap, 'Done in 8s · 1 command');
 });
+

@@ -2,6 +2,8 @@ import { moodOf } from './classes.js';
 import { displayName, baseOf, knownTime } from './sessions.js';
 import { activityLine, createStepLog, recapOf } from './steps.js';
 import { stageOf, stuckOf, currentOf } from './stages.js';
+import { bubbleLine } from './bubbles.js';
+import { PLAN_MODES } from './answers.js';
 import { quietSince, tuckOf } from './tuck.js';
 
 const NEEDS_NOTIFS = new Set(['permission_prompt', 'elicitation_dialog', 'agent_needs_input']);
@@ -162,25 +164,30 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     hidden.set(id, now());
   }
 
-  function activeCard(t) {
-    const a = queue.active();
-    return a ? {
-      id: a.id, kind: a.kind, sessionId: a.sessionId, display: displayOf(a.sessionId), cls: engine.classOf(a.sessionId, t), payload: a.payload,
-      expiresAt: Number.isFinite(a.expiresAt) ? a.expiresAt : Number.isFinite(a.addedAt) ? a.addedAt + (a.kind === 'reply' ? replyMs : holdMs) : null,
-      canOpen: openable(sessions.find((x) => x.sessionId === a.sessionId)),
-    } : null;
+  const expiryOf = (it) => (Number.isFinite(it.expiresAt) ? it.expiresAt : Number.isFinite(it.addedAt) ? it.addedAt + (it.kind === 'reply' ? replyMs : holdMs) : null);
+  const cardBase = (it, t) => ({
+    id: it.id, kind: it.kind, sessionId: it.sessionId, display: displayOf(it.sessionId), cls: engine.classOf(it.sessionId, t),
+    source: it.source ?? sessions.find((x) => x.sessionId === it.sessionId)?.source ?? 'claude',
+    expiresAt: expiryOf(it), canOpen: openable(sessions.find((x) => x.sessionId === it.sessionId)),
+  });
+
+  // The full card (payload included) for one held question, or null once it is gone.
+  function cardById(id) {
+    const it = queue.list().find((x) => x.id === id);
+    if (!it) return null;
+    const c = cardBase(it, now());
+    const full = { ...c, payload: it.payload };
+    if (it.kind === 'plan') full.planModes = PLAN_MODES;
+    return full;
   }
 
   function snapshot() {
     const t = now();
-    const items = queue.list();
     const all = computeAgents(t);
     const agents = all.filter((x) => !x.tuck);
     const tucked = all.filter((x) => x.tuck);
-    const card = activeCard(t);
-    const second = items[1];
-    const next = second ? `Next: ${displayOf(second.sessionId)} ${ASKS[second.kind] ?? 'asks a question'}` : null;
-    return { agents, tucked, card, next, counts: { total: agents.length, needs: agents.filter((x) => x.mood === 'needs').length } };
+    const cards = queue.list().map((it) => ({ ...cardBase(it, t), line: bubbleLine(it) }));
+    return { agents, tucked, cards, counts: { total: agents.length, needs: agents.filter((x) => x.mood === 'needs').length } };
   }
 
   function detail(id) {
@@ -188,7 +195,6 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     if (!sess) return null;
     const t = now();
     const a = computeAgents(t).find((x) => x.id === id);
-    const card = activeCard(t);
     const view = steps.view(id);
     return {
       id, source: sess.source ?? 'claude', display: a.display, cls: a.cls, stage: a.stage, stuck: a.stuck,
@@ -200,7 +206,6 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
       handedBack: a.handedBack, hasCard: queue.list().some((it) => it.sessionId === id), canOpen: a.canOpen,
       lastMessage: a.stage === 'turn' ? (view.lastMessage ?? null) : null,
       recap: a.stage === 'turn' ? recapOf(view.recap, view.taskAt) : null,
-      card: card && card.sessionId === id ? card : null,
     };
   }
 
@@ -208,5 +213,5 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     return computeAgents(now()).map((a) => `${a.id}:${a.stage}:${a.stuck ? a.stuck.reason : ''}${a.tuck ? `:${a.tuck}` : ''}`).join('|');
   }
 
-  return { onEvent, setSessions, setReplyOptIn, wantsReply, replySent, permissionDenied, hide, snapshot, detail, stageKey };
+  return { onEvent, setSessions, setReplyOptIn, wantsReply, replySent, permissionDenied, hide, snapshot, cardById, detail, stageKey };
 }
