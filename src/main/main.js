@@ -19,7 +19,7 @@ import { readSessionFiles, listSessions } from './sessions.js';
 import { createCodexSessions, readRolloutMeta } from './codex-sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor, resolveCodeCmd, canOpen, CODEX_ACTIVATE, chatLinkFor, createChatOpener, VSCODE_TITLES_PS } from './focus.js';
-import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, panelShows, createThrottle, createInteractiveCheck, loadConfig, saveConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, devOverrides } from './wiring.js';
+import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, panelShows, createThrottle, createInteractiveCheck, loadConfig, saveConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, devOverrides, planFileOk } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
@@ -619,6 +619,18 @@ fromPanel('panel:hoverCard', (id) => {
 fromPanel('panel:openWindow', (sessionId) => {
   const id = typeof sessionId === 'string' && sessionId ? sessionId : pick.selected?.id;
   if (id) openWindow(id);
+});
+// A plan card's "Read plan ↗": Claude's own plan file opens in its default app (planFileOk: a .md in
+// ~/.claude/plans); any other path, or any other card, opens the chat instead.
+fromPanel('panel:openPlan', (cardId) => {
+  const card = store.cardById(String(cardId));
+  if (!card) return;
+  const file = card.payload?.tool_input?.planFilePath;
+  if (card.kind === 'plan' && planFileOk(file, os.homedir())) {
+    shell.openPath(file).then((err) => { if (err) log('open plan', err); }, (err) => log('open plan', err));
+    return;
+  }
+  openWindow(card.sessionId);
 });
 fromPanel('panel:answer', answerCard);
 fromPanel('panel:release', releaseCard);

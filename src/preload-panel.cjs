@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('panel', {
   // window; a close without one is ignored.
   close: (id) => ipcRenderer.send('panel:close', id == null ? null : String(id)),
   openWindow: (sessionId) => ipcRenderer.send('panel:openWindow', sessionId == null ? null : String(sessionId)),
+  // A plan card's "Read plan ↗" (by card id): main opens the plan file, or the chat if it can't.
+  openPlan: (id) => ipcRenderer.send('panel:openPlan', String(id)),
   reportHeight: (px) => ipcRenderer.send('panel:reportHeight', Number(px)),
   // The answer card (cards.js): the same answers and releases as the HUD's v1 card.
   answer: (id, response) => ipcRenderer.send('panel:answer', String(id), response),

@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, stackVisible, panelShows, createThrottle, createInteractiveCheck, loadConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, devOverrides } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, stackVisible, panelShows, createThrottle, createInteractiveCheck, loadConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, devOverrides, planFileOk } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { installCodexHooksFile, removeCodexHooksFile, codexHookCommand } from '../src/main/codex-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
@@ -708,4 +708,51 @@ test('R3: devOverrides: a port that is not a whole number in 1..65535 is ignored
   }
   assert.equal(devOverrides({ isPackaged: false, env: { AGENT_HUD_PORT: ' 1 ' } }).port, 1);
   assert.equal(devOverrides({ isPackaged: false, env: { AGENT_HUD_PORT: '65535' } }).port, 65535);
+});
+
+// "Read plan" opens only Claude's own plan files: a .md inside <home>/.claude/plans.
+test('planFileOk: Windows paths inside <home>\\.claude\\plans', () => {
+  const home = 'C:\\Users\\u';
+  assert.equal(planFileOk('C:\\Users\\u\\.claude\\plans\\shiny-plan.md', home), true);
+  assert.equal(planFileOk('C:\\Users\\u\\.claude\\plans\\sub\\deep.md', home), true, 'a sub-folder is still inside');
+  assert.equal(planFileOk('C:/Users/u/.claude/plans/shiny-plan.md', home), true, 'forward slashes');
+  assert.equal(planFileOk('C:/Users/u/.claude/plans/shiny-plan.md', 'C:/Users/u'), true, 'forward slashes in home too');
+  assert.equal(planFileOk('c:\\users\\U\\.Claude\\PLANS\\Shiny.MD', home), true, 'case-insensitive on Windows');
+  assert.equal(planFileOk('C:\\Users\\u\\.claude\\plans\\..plan.md', home), true, 'a name starting with .. is no escape');
+});
+
+test('planFileOk: rejects escapes, other folders, non-.md, relative paths and odd input', () => {
+  const home = 'C:\\Users\\u';
+  for (const p of [
+    'C:\\Users\\u\\.claude\\plans\\..\\settings.md', // .. escape
+    'C:\\Users\\u\\.claude\\plans\\..\\..\\x.md',
+    'C:/Users/u/.claude/plans/../../Desktop/x.md',
+    'C:\\Users\\u\\.claude\\x.md', // other folder
+    'C:\\Users\\u\\.claude\\plans-old\\x.md', // a sibling that shares the prefix
+    'D:\\Users\\u\\.claude\\plans\\x.md', // other drive
+    'C:\\Users\\other\\.claude\\plans\\x.md',
+    'C:\\Users\\u\\.claude\\plans\\x.txt', // not .md
+    'C:\\Users\\u\\.claude\\plans\\x.md.exe',
+    'C:\\Users\\u\\.claude\\plans\\x.cmd',
+    'C:\\Users\\u\\.claude\\plans', // the plans folder itself
+    'C:\\Users\\u\\.claude\\plans\\',
+    'C:\\Users\\u\\.claude\\plans\\.', // resolves to the folder itself
+    '.claude\\plans\\x.md', // relative
+    'plans/x.md',
+    '\\Users\\u\\.claude\\plans\\x.md', // no drive
+    '', null, undefined, 42, {},
+  ]) assert.equal(planFileOk(p, home), false, String(p));
+  assert.equal(planFileOk('C:\\Users\\u\\.claude\\plans\\x.md', ''), false, 'no home');
+  assert.equal(planFileOk('C:\\Users\\u\\.claude\\plans\\x.md', null), false);
+});
+
+test('planFileOk: POSIX paths (case-sensitive)', () => {
+  const home = '/home/u';
+  assert.equal(planFileOk('/home/u/.claude/plans/p.md', home), true);
+  assert.equal(planFileOk('/home/u/.claude/plans/p.MD', home), true, '.md matched case-insensitively');
+  assert.equal(planFileOk('/home/u/.claude/plans/../p.md', home), false);
+  assert.equal(planFileOk('/home/u/.claude/PLANS/p.md', home), false, 'POSIX compares case-sensitively');
+  assert.equal(planFileOk('/home/u/.claude/plans', home), false);
+  assert.equal(planFileOk('home/u/.claude/plans/p.md', home), false);
+  assert.equal(planFileOk('C:\\Users\\u\\.claude\\plans\\p.md', home), false, 'a Windows path is not under a POSIX home');
 });

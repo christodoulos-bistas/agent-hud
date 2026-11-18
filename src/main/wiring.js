@@ -369,6 +369,20 @@ export function readSoundFile(filePath, { readFile = fs.readFileSync, stat = fs.
   } catch { return null; }
 }
 
+// "Read plan ↗" opens a plan file only when it is Claude's own: an absolute .md path that resolves
+// inside <home>/.claude/plans (not the folder itself, no `..` escape). A path that looks like Windows
+// (drive letter or a backslash) is judged with path.win32 and compared case-insensitively.
+const WIN_ABS = /^(?:[a-zA-Z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)/; // C:\ or \\server\share
+export function planFileOk(p, home) {
+  if (typeof p !== 'string' || typeof home !== 'string' || !p || !home || !/\.md$/i.test(p)) return false;
+  const win = /^[a-zA-Z]:/.test(p) || p.includes('\\');
+  const P = win ? path.win32 : path.posix;
+  if (win ? !(WIN_ABS.test(p) && WIN_ABS.test(home)) : !(p.startsWith('/') && home.startsWith('/'))) return false;
+  const fold = (s) => (win ? s.toLowerCase() : s);
+  const rel = P.relative(fold(P.resolve(home, '.claude', 'plans')), fold(P.resolve(p)));
+  return rel !== '' && !P.isAbsolute(rel) && rel.split(/[\\/]/)[0] !== '..';
+}
+
 export function saveConfig(file, cfg) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
