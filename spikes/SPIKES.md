@@ -264,3 +264,44 @@ Probe: `node spikes/codex/trust-probe.mjs <codex.exe> list|trust <key>`.
   `C:\Program Files\WindowsApps\OpenAI.Codex_26.1106.6628.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe` → keep the alias step.
 - Not yet tested: whether the running app runs a newly trusted hook in a new chat without a restart. Moved into the live
   check (plan Task 6), where trust is removed and re-added with the user present.
+
+## Spike 10 - audio from an inactive window (2026-11-18, Electron 44)
+
+Probe: `env -u ELECTRON_RUN_AS_NODE npx electron spikes/audio-hover.mjs` (two frameless, transparent, always-on-top windows,
+`showInactive()`, `sandbox: true`, `autoplayPolicy: 'no-user-gesture-required'`, CSP `default-src 'self'; media-src blob:`;
+page + scripts + CSS written to os.tmpdir()). Headless-style evidence: nobody listened, so this records API state, not "heard it".
+
+```
+[A] AudioContext.state initial=running
+[A] AudioContext.state after resume=running
+[A] chime scheduled without error, state=running        (660 Hz then 880 Hz, 120 ms each, gain 0.15)
+[A] audio.play() promise RESOLVED, paused=false         (Blob URL, generated 0.3 s WAV)
+[A] audio ended event
+```
+
+- AUDIO_OK = yes (by API evidence): the context starts `running` with no gesture in a window that never had focus
+  (`isFocused()` false for both windows throughout), the oscillator chime schedules without error, and the Blob WAV plays to its
+  `ended` event under that CSP. Audibility is on Spider-Man's live checklist.
+- Gotcha: the CSP `default-src 'self'` also blocks inline `<script>` and inline `style=` attributes, so the HUD's own pages must
+  keep scripts and styles in files (the probe loads `a.js`, `b.js`, `s.css` from the page's folder).
+
+## Spike 11 - hover in a non-focusable window (2026-11-18, Electron 44)
+
+Same probe. Window B is `focusable: false`; its 200x100 box logs `pointerenter`/`mouseenter`/`pointerleave`.
+SYNTHETIC evidence only: the mouse was not moved by a person; events came from
+`webContents.sendInputEvent({ type: 'mouseMove', ... })` (10,10 then 50,50 inside the box, then 215,115 outside).
+
+```
+main: focusable A=true B=false; focused A=false B=false
+[B] pointerenter
+[B] mouseenter
+[B] pointerleave
+```
+
+(The run also logged three further enter/mouseenter/leave cycles later, with no input sent from the script at those times;
+possible stray real-pointer or compositor-generated moves, not investigated.)
+
+- HOVER_OK = yes for the renderer side: a non-focusable window delivers pointer events to the page, and the box saw enter and
+  leave; neither window ever became focused (`isFocused()` false after the run), so the editor would keep focus.
+  Not proven: that a real mouse over a `focusable: false` window on Windows is routed to it (synthetic events bypass the OS
+  hit-test). A real-mouse hover check is on Spider-Man's live checklist; until it passes, treat the highlight as likely-but-unconfirmed.
