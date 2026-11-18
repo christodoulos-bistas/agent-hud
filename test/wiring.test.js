@@ -3,7 +3,7 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, stackVisible, panelShows, createThrottle, createInteractiveCheck, loadConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, devOverrides } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { installCodexHooksFile, removeCodexHooksFile, codexHookCommand } from '../src/main/codex-hooks.js';
-import { permissionAllow, permissionDeny, choiceAnswer, stopReply, planApprove, planKeepPlanning, PLAN_MODES } from '../src/main/answers.js';
+import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
 import { recordText, recordAllowed } from '../src/main/records.js';
 
 const SUGG = [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test' }], behavior: 'allow', destination: 'localSettings' }];
@@ -599,10 +599,6 @@ test('recordText per kind', () => {
   assert.equal(recordText(edit, { kind: 'allow' }), 'Agent HUD · Allowed: Edit a.ts');
   const ch = { kind: 'choice', payload: { tool_input: { questions: [{ question: 'Which DB?' }, { question: 'Port?' }] } } };
   assert.equal(recordText(ch, { kind: 'choice', picks: { 'Which DB?': 'Postgres', 'Port?': ['5432', '5433'] } }), 'Agent HUD · Answered: Which DB? → Postgres; Port? → 5432, 5433');
-  const plan = { kind: 'plan', payload: {} };
-  assert.equal(recordText(plan, { kind: 'plan', approve: 'acceptEdits' }, { modes: true }), 'Agent HUD · Plan approved (auto-accept edits)');
-  assert.equal(recordText(plan, { kind: 'plan', approve: 'default' }, { modes: true }), 'Agent HUD · Plan approved (ask before edits)');
-  assert.equal(recordText(plan, { kind: 'plan', keep: true, feedback: 'add\nrollback' }), 'Agent HUD · Keep planning: add rollback');
   assert.equal(recordText({ kind: 'reply', payload: {} }, { kind: 'reply', text: 'x'.repeat(200) }), `Agent HUD · You replied: ${'x'.repeat(80)}…`);
   assert.ok(recordText(bash, { kind: 'allow', always: true }).length <= 160);
   const long = { kind: 'permission', payload: { tool_name: 'Bash', tool_input: { command: 'y'.repeat(400) } } };
@@ -620,18 +616,12 @@ test('encodeAnswer: record flag adds systemMessage, never changes the decision',
   assert.equal(encodeAnswer(reply, { kind: 'reply', text: ' ' }, { record: true }), null);
 });
 
-test('encodeAnswer: plan case', () => {
-  const plan = { id: 'pl', sessionId: 's1', kind: 'plan', payload: {} };
-  assert.deepEqual(encodeAnswer(plan, { kind: 'plan', approve: 'acceptEdits' }), planApprove('acceptEdits', { modes: PLAN_MODES }));
-  assert.deepEqual(encodeAnswer(plan, { kind: 'plan', approve: 'default' }), planApprove('default', { modes: PLAN_MODES }));
-  assert.deepEqual(encodeAnswer(plan, { kind: 'plan', keep: true, feedback: 'more' }), planKeepPlanning('more'));
-  assert.deepEqual(encodeAnswer(plan, { kind: 'plan', keep: true }), planKeepPlanning(''));
-  assert.equal(encodeAnswer(plan, { kind: 'plan', approve: 'bypass' }), null);
-  assert.equal(encodeAnswer(plan, { kind: 'plan' }), null);
-  assert.equal(encodeAnswer(plan, { kind: 'plan', keep: true, feedback: 5 }), null);
-  assert.equal(encodeAnswer(plan, { kind: 'allow' }), null);
-  assert.equal(encodeAnswer(plan, { kind: 'plan', approve: 'default' }, { record: true }).systemMessage, PLAN_MODES ? 'Agent HUD · Plan approved (ask before edits)' : 'Agent HUD · Plan approved');
-  if (!PLAN_MODES) assert.deepEqual(encodeAnswer(plan, { kind: 'plan', approve: 'acceptEdits' }), encodeAnswer(plan, { kind: 'plan', approve: 'default' }));
+test('encodeAnswer: a plan is never answered, whatever the response (notice-and-read)', () => {
+  const plan = { id: 'plan:s1:1', sessionId: 's1', kind: 'plan', payload: { tool_input: { plan: '# p', planFilePath: 'x.md' } } };
+  for (const r of [{ kind: 'plan', approve: 'acceptEdits' }, { kind: 'plan', approve: 'default' }, { kind: 'plan', keep: true, feedback: 'more' }, { kind: 'allow' }, { kind: 'deny' }]) {
+    assert.equal(encodeAnswer(plan, r), null, JSON.stringify(r));
+    assert.equal(encodeAnswer(plan, r, { record: true }), null, JSON.stringify(r));
+  }
 });
 
 test('recordAllowed follows RECORD_HOSTS by entrypoint, Codex by source', () => {
@@ -651,11 +641,9 @@ test('recordText: Windows paths shorten to the basename', () => {
   const edit = { kind: 'permission', payload: { tool_name: 'Edit', tool_input: { file_path: 'C:\\p\\src\\a.ts' } } };
   assert.equal(recordText(edit, { kind: 'allow' }), 'Agent HUD · Allowed: Edit a.ts');
 });
-test('recordText: plan approve names a mode only when modes is on', () => {
+test('recordText: a plan has no chat record', () => {
   const plan = { kind: 'plan', payload: {} };
-  for (const approve of ['acceptEdits', 'default']) assert.equal(recordText(plan, { kind: 'plan', approve }, { modes: false }), 'Agent HUD · Plan approved');
-  assert.equal(recordText(plan, { kind: 'plan', approve: 'acceptEdits' }, { modes: true }), 'Agent HUD · Plan approved (auto-accept edits)');
-  assert.equal(recordText(plan, { kind: 'plan', approve: 'default' }, { modes: true }), 'Agent HUD · Plan approved (ask before edits)');
+  for (const r of [{ kind: 'plan', approve: 'acceptEdits' }, { kind: 'plan', approve: 'default' }, { kind: 'plan', keep: true, feedback: 'x' }]) assert.equal(recordText(plan, r), null);
 });
 test('recordText: malformed choice questions never throw', () => {
   for (const questions of ['x', null, [null, 5, { question: 'Q?' }]]) {

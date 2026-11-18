@@ -145,29 +145,18 @@ test('I2a: a reply that times out resolves RELEASE but is not recorded as a hand
   assert.deepEqual(q.handedBack(), []);
 });
 
-test('plan: held for planMs, then released and recorded in handedBack', () => {
-  const f = fake();
-  const q = createQueue({ holdMs: 60000, replyMs: 540000, planMs: 540000, now: f.now, setTimer: f.setTimer, clearTimer: f.clearTimer });
-  const s = settled(q.add(it('pl', 'plan')));
-  f.tick(539999);
-  assert.equal(q.list().length, 1, 'still held just before planMs');
-  f.tick(1);
-  assert.equal(q.list().length, 0);
-  return Promise.resolve().then(() => {
-    assert.equal(s(), RELEASE);
-    assert.deepEqual(q.handedBack().map((h) => h.sessionId), ['s1']);
-  });
-});
-
-test('plan sorts with the questions, ahead of an earlier reply', () => {
-  const [, q] = mk(); q.add(it('r', 'reply')); q.add(it('pl', 'plan'));
-  assert.deepEqual(q.list().map((i) => i.id), ['pl', 'r']);
+test('answer, release or drop of an id the queue never held (a plan notice id) is a no-op', async () => {
+  const [, q] = mk(); const p = q.add(it('a')); const s = settled(p);
+  let changes = 0; q.onChange(() => { changes++; });
+  q.answer('plan:s1:1', { kind: 'allow' }); q.answer('plan:s1:1', null); q.drop('plan:s1:1');
+  await Promise.resolve();
+  assert.equal(changes, 0); assert.equal(s(), 'pending'); assert.deepEqual(q.list().map((i) => i.id), ['a']);
 });
 
 test('expiresAt === addedAt + the hold for its kind', () => {
   const f = fake(); f.tick(1000);
-  const q = createQueue({ holdMs: 111, replyMs: 222, planMs: 333, now: f.now, setTimer: f.setTimer, clearTimer: f.clearTimer });
-  for (const [kind, ms] of [['permission', 111], ['choice', 111], ['reply', 222], ['plan', 333]]) {
+  const q = createQueue({ holdMs: 111, replyMs: 222, now: f.now, setTimer: f.setTimer, clearTimer: f.clearTimer });
+  for (const [kind, ms] of [['permission', 111], ['choice', 111], ['reply', 222]]) {
     const item = it(kind, kind); q.add(item);
     assert.equal(item.expiresAt, item.addedAt + ms, kind);
   }
@@ -175,8 +164,8 @@ test('expiresAt === addedAt + the hold for its kind', () => {
 
 test('R1: add stamps the hold for its kind on the item (holdMs), the one place it is set', () => {
   const f = fake();
-  const q = createQueue({ holdMs: 111, replyMs: 222, planMs: 333, now: f.now, setTimer: f.setTimer, clearTimer: f.clearTimer });
-  for (const [kind, ms] of [['permission', 111], ['choice', 111], ['reply', 222], ['plan', 333]]) {
+  const q = createQueue({ holdMs: 111, replyMs: 222, now: f.now, setTimer: f.setTimer, clearTimer: f.clearTimer });
+  for (const [kind, ms] of [['permission', 111], ['choice', 111], ['reply', 222]]) {
     const item = it(kind, kind); q.add(item);
     assert.equal(item.holdMs, ms, kind);
   }

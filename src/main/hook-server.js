@@ -2,7 +2,7 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { RELEASE, PLAN_EVENT } from './answers.js';
+import { RELEASE } from './answers.js';
 
 const HOOK_PATH = '/agent-hud/hook';
 const MAX_BODY = 1024 * 1024;
@@ -10,7 +10,7 @@ const HARD_CAP = 16 * 1024 * 1024;
 
 // shouldHold(): false while nobody can answer (HUD hidden, renderer gone); blocking events then pass
 // straight through with an empty 200.
-export function createHookServer({ port = 0, secret, queue, isInteractive, replyOptIn, planEvent = PLAN_EVENT, shouldHold = () => true, onEvent, onError = (e) => console.error(e) } = {}) {
+export function createHookServer({ port = 0, secret, queue, isInteractive, replyOptIn, shouldHold = () => true, onEvent, onError = (e) => console.error(e) } = {}) {
   const safeError = (err) => { try { onError(err); } catch { /* never break a request */ } };
   const canHold = () => {
     try { return !!shouldHold(); } catch (err) { safeError(err); return false; }
@@ -42,7 +42,7 @@ export function createHookServer({ port = 0, secret, queue, isInteractive, reply
   // holding was answered elsewhere: release it. Subagent questions (agent_id set) are left alone.
   function releaseMainQuestions(sessionId) {
     for (const it of queue.list()) {
-      if ((it.kind === 'permission' || it.kind === 'choice' || it.kind === 'plan') && it.sessionId === sessionId && (it.payload?.agent_id ?? null) === null) {
+      if ((it.kind === 'permission' || it.kind === 'choice') && it.sessionId === sessionId && (it.payload?.agent_id ?? null) === null) {
         queue.answer(it.id, RELEASE);
       }
     }
@@ -69,8 +69,6 @@ export function createHookServer({ port = 0, secret, queue, isInteractive, reply
         if (it.kind === 'permission' && it.sessionId === sessionId && it.payload?.tool_name === toolName &&
           (it.payload?.agent_id ?? null) === agentId && isDeepStrictEqual(it.payload?.tool_input, body.tool_input)) {
           queue.answer(it.id, RELEASE);
-        } else if (it.kind === 'plan' && it.sessionId === sessionId && toolName === 'ExitPlanMode' && agentId === null) {
-          queue.answer(it.id, RELEASE);
         }
       }
     }
@@ -83,9 +81,9 @@ export function createHookServer({ port = 0, secret, queue, isInteractive, reply
       if (event === 'PermissionRequest' && toolName !== 'ExitPlanMode') kind = 'permission';
     } else
     // AskUserQuestion's PermissionRequest is never held: its PreToolUse already is the choice card (I4).
-    // The plan card rides on planEvent only; the other event for ExitPlanMode is never held.
-    // A subagent's ExitPlanMode (agent_id set) is never held, on either event.
-    if (toolName === 'ExitPlanMode') kind = event === planEvent && (body.agent_id ?? null) === null && isInteractive(sessionId) ? 'plan' : null;
+    // ExitPlanMode is never held, on either event: hosts ignore hook answers to it (Spike 12), so the
+    // HUD only shows a plan notice (the store, from onEvent) and the chat's own dialog answers it.
+    if (toolName === 'ExitPlanMode') kind = null;
     else if (event === 'PermissionRequest' && toolName !== 'AskUserQuestion' && isInteractive(sessionId)) kind = 'permission';
     else if (event === 'PreToolUse' && toolName === 'AskUserQuestion' && isInteractive(sessionId)) kind = 'choice';
     else if (event === 'Stop' && !bgRunning && isInteractive(sessionId) && replyOptIn(sessionId)) kind = 'reply';

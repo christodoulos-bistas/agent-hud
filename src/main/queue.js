@@ -1,12 +1,12 @@
 import { RELEASE } from './answers.js';
 
-export function createQueue({ holdMs = 60000, replyMs = 540000, planMs = 540000, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, onError = (e) => console.error(e) } = {}) {
+export function createQueue({ holdMs = 60000, replyMs = 540000, now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout, onError = (e) => console.error(e) } = {}) {
   const entries = []; // arrival order: { item, resolve, timer }
   let handed = [];
   const listeners = new Set();
   const emit = () => { for (const fn of [...listeners]) { try { fn(); } catch (err) { try { onError(err); } catch { /* never break the queue */ } } } };
 
-  const holdFor = (kind) => (kind === 'reply' ? replyMs : kind === 'plan' ? planMs : holdMs);
+  const holdFor = (kind) => (kind === 'reply' ? replyMs : holdMs);
   const take = (id) => {
     const i = entries.findIndex((e) => e.item.id === id);
     if (i < 0) return null;
@@ -22,7 +22,7 @@ export function createQueue({ holdMs = 60000, replyMs = 540000, planMs = 540000,
   function add(item) {
     item.addedAt = now();
     // The hold travels with the card (R1): the renderers' rings and countdowns read holdMs and
-    // expiresAt, so main's holdMs / replyMs / planMs are the only place a hold is set.
+    // expiresAt, so main's holdMs / replyMs are the only place a hold is set.
     item.holdMs = holdFor(item.kind);
     item.expiresAt = item.addedAt + item.holdMs;
     return new Promise((resolve) => {

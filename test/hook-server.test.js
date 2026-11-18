@@ -443,79 +443,59 @@ test('v2: a codex PostToolUse releases a held codex permission (source-agnostic)
   } finally { await h.srv.close(); }
 });
 
-for (const planEvent of ['PreToolUse', 'PermissionRequest']) {
-  const other = planEvent === 'PreToolUse' ? 'PermissionRequest' : 'PreToolUse';
-  const mkPlan = async (opts = {}) => {
-    const h = await setup(opts); // rebuild with planEvent
-    await h.srv.close();
-    const queue = h.queue;
-    const srv = createHookServer({ port: 0, secret: SECRET, queue, planEvent, isInteractive: opts.isInteractive ?? (() => true), replyOptIn: () => false, onError: () => {} });
-    const port = await srv.listen();
-    const post = (body, headers = { 'X-Agent-HUD': SECRET }) => fetch(`http://127.0.0.1:${port}/agent-hud/hook`, { method: 'POST', headers, body: JSON.stringify(body) });
-    return { queue, srv, post, maxHeld: h.maxHeld };
-  };
-  const plan = (name, extra = {}) => ev(name, { tool_name: 'ExitPlanMode', tool_input: { plan: 'p' }, ...extra });
+// Plans are notice-and-read (Spike 12: VS Code ignores every hook answer for ExitPlanMode): the HUD
+// never holds ExitPlanMode, from Claude or Codex, main thread or subagent, on either event. The event
+// still reaches onEvent, which is how the store shows the plan notice.
+{
+  const plan = (name, extra = {}) => ev(name, { tool_name: 'ExitPlanMode', tool_input: { plan: '# p', planFilePath: 'C:/u/.claude/plans/p.md' }, ...extra });
+  const CODEX = { 'X-Agent-HUD': SECRET, 'X-Agent-HUD-Source': 'codex' };
 
-  test(`plan[${planEvent}]: ExitPlanMode on ${planEvent} from an interactive claude session is held as a plan card`, async () => {
-    const h = await mkPlan();
-    try {
-      const p = h.post(plan(planEvent));
-      await waitFor(() => h.queue.list().length === 1);
-      const it = h.queue.list()[0];
-      assert.equal(it.kind, 'plan'); assert.equal(it.payload.tool_name, 'ExitPlanMode');
-      h.queue.releaseAll(); await p;
-    } finally { await h.srv.close(); }
-  });
+  for (const name of ['PreToolUse', 'PermissionRequest']) {
+    test(`plan: ExitPlanMode on ${name} from an interactive claude main thread is never held; onEvent still sees it`, async () => {
+      const h = await setup();
+      try {
+        const r = await h.post(plan(name));
+        assert.equal(r.status, 200); assert.equal(await r.text(), '');
+        assert.equal(h.maxHeld(), 0);
+        assert.equal(h.events.length, 1);
+        assert.equal(h.events[0].toolName, 'ExitPlanMode'); assert.equal(h.events[0].event, name); assert.equal(h.events[0].source, 'claude');
+        assert.equal(h.events[0].toolInput.planFilePath, 'C:/u/.claude/plans/p.md');
+      } finally { await h.srv.close(); }
+    });
 
-  test(`plan[${planEvent}]: non-interactive session and codex get an empty 200, nothing held`, async () => {
-    const h = await mkPlan({ isInteractive: () => false });
-    const h2 = await mkPlan();
-    try {
-      const r = await h.post(plan(planEvent));
-      assert.equal(r.status, 200); assert.equal(await r.text(), ''); assert.equal(h.queue.list().length, 0);
-      assert.equal(h.maxHeld(), 0);
-      for (const name of ['PermissionRequest', 'PreToolUse']) {
-        const r2 = await h2.post(plan(name), { 'X-Agent-HUD': SECRET, 'X-Agent-HUD-Source': 'codex' });
-        assert.equal(r2.status, 200); assert.equal(await r2.text(), '');
-      }
-      assert.equal(h2.maxHeld(), 0, 'codex ExitPlanMode is never held as any kind');
-    } finally { await h.srv.close(); await h2.srv.close(); }
-  });
-
-  test(`plan[${planEvent}]: a subagent's ExitPlanMode (agent_id set) is never held, on either event`, async () => {
-    const h = await mkPlan();
-    try {
-      for (const name of ['PermissionRequest', 'PreToolUse']) {
+    test(`plan: a subagent's ExitPlanMode on ${name} is never held`, async () => {
+      const h = await setup();
+      try {
         const r = await h.post(plan(name, { agent_id: 'sub' }));
         assert.equal(r.status, 200); assert.equal(await r.text(), '');
-      }
-      assert.equal(h.maxHeld(), 0);
-    } finally { await h.srv.close(); }
-  });
+        assert.equal(h.maxHeld(), 0);
+      } finally { await h.srv.close(); }
+    });
 
-  test(`plan[${planEvent}]: ${other} for ExitPlanMode is never held (not as plan, not as permission)`, async () => {
-    const h = await mkPlan();
+    test(`plan: Codex ExitPlanMode on ${name} is never held (not as permission either)`, async () => {
+      const h = await setup();
+      try {
+        const r = await h.post(plan(name), { headers: CODEX });
+        assert.equal(r.status, 200); assert.equal(await r.text(), '');
+        assert.equal(h.maxHeld(), 0);
+        assert.equal(h.events[0].source, 'codex');
+      } finally { await h.srv.close(); }
+    });
+  }
+
+  test('plan: a held permission is still released by a main-thread Stop, and an ExitPlanMode around it changes nothing', async () => {
+    const h = await setup();
     try {
-      const r = await h.post(plan(other));
-      assert.equal(r.status, 200); assert.equal(await r.text(), '');
+      const p = h.post(ev('PermissionRequest', { tool_name: 'Bash', tool_input: { command: 'ls' } }));
+      await waitFor(() => h.queue.list().length === 1);
+      await h.post(plan('PreToolUse'));
+      await h.post(plan('PermissionRequest'));
+      await h.post(ev('PostToolUse', { tool_name: 'ExitPlanMode' }));
+      assert.equal(h.queue.list().length, 1, 'ExitPlanMode events leave the permission alone');
+      assert.equal(h.queue.list()[0].kind, 'permission');
+      await h.post(ev('Stop', { background_tasks: [] }));
+      const r = await p; assert.equal(await r.text(), '');
       assert.equal(h.queue.list().length, 0);
-    } finally { await h.srv.close(); }
-  });
-
-  test(`plan[${planEvent}]: main-thread PostToolUse, a real prompt, and a Stop each release a held plan; subagent PostToolUse does not`, async () => {
-    const h = await mkPlan();
-    try {
-      const held = async (release, expectGone = true) => {
-        const p = h.post(plan(planEvent));
-        await waitFor(() => h.queue.list().length === 1);
-        await release();
-        if (expectGone) { const r = await p; assert.equal(await r.text(), ''); assert.equal(h.queue.list().length, 0); }
-        else { await sleep(50); assert.equal(h.queue.list().length, 1); h.queue.releaseAll(); await p; }
-      };
-      await held(() => h.post(ev('PostToolUse', { tool_name: 'ExitPlanMode', tool_input: { plan: 'edited' } })));
-      await held(() => h.post(ev('PostToolUse', { tool_name: 'ExitPlanMode', agent_id: 'sub' })), false);
-      await held(() => h.post(ev('UserPromptSubmit', { prompt: 'go' })));
-      await held(() => h.post(ev('Stop', { background_tasks: [] })));
     } finally { await h.srv.close(); }
   });
 }

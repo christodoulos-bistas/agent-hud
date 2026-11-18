@@ -1,5 +1,5 @@
 // The one-line chat records Agent HUD adds to a hook answer (systemMessage), and which sessions show them.
-import { RECORD_HOSTS, PLAN_MODES } from './answers.js';
+import { RECORD_HOSTS } from './answers.js';
 
 const MAX_RECORD = 160;
 const squash = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
@@ -20,8 +20,7 @@ function permissionWhat(payload) {
 
 const pickText = (v) => (Array.isArray(v) ? v.join(', ') : String(v));
 
-// `modes`: whether a plan approve really sets the permission mode; without it the record names no mode.
-export function recordText(item, response, { modes = PLAN_MODES } = {}) {
+export function recordText(item, response) {
   const p = item?.payload || {};
   let body = null;
   switch (item?.kind) {
@@ -36,16 +35,6 @@ export function recordText(item, response, { modes = PLAN_MODES } = {}) {
       if (parts.length) body = `Answered: ${parts.join('; ')}`;
       break;
     }
-    case 'plan':
-      if (response?.approve === 'acceptEdits' || response?.approve === 'default') {
-        if (!modes) body = 'Plan approved';
-        else body = response.approve === 'acceptEdits' ? 'Plan approved (auto-accept edits)' : 'Plan approved (ask before edits)';
-      }
-      else if (response?.keep) {
-        const f = cap(squash(response.feedback), 120);
-        body = f ? `Keep planning: ${f}` : 'Keep planning';
-      }
-      break;
     case 'reply': {
       const t = cap(squash(response?.text), 80);
       if (t) body = `You replied: ${t}`;

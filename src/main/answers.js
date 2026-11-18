@@ -33,30 +33,11 @@ export function stopReply(text) {
   return { decision: 'block', reason: text };
 }
 
-// PROVISIONAL (Task 2): flipped by the user after the hands-on check; see spikes/SPIKES.md "Decisions" (Spikes 12-13).
-export const PLAN_EVENT = 'PermissionRequest'; // which hook event carries ExitPlanMode
-export const PLAN_MODES = false; // whether an approve can set the session's permission mode
+// Final (spikes/SPIKES.md "Decisions", Spike 13): no Claude app shows a hook's systemMessage.
+// There is no plan encoder: plans are notice-and-read and never answered (Spike 12).
 export const RECORD_HOSTS = new Set(); // hosts that show a hook's systemMessage in the chat
 
 // A copy of `response` with a top-level systemMessage (a chat record); `response` itself when there is no text.
 export function withRecord(response, text) {
   return typeof text === 'string' && text ? { ...response, systemMessage: text } : response;
-}
-
-const keepMessage = (feedback) => {
-  const f = typeof feedback === 'string' ? feedback.trim() : '';
-  return f ? `Keep planning: ${f}` : 'Keep planning';
-};
-
-export function planApprove(mode, { event = PLAN_EVENT, modes = PLAN_MODES } = {}) {
-  if (event === 'PreToolUse') return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } };
-  return permissionAllow(modes ? [{ type: 'setMode', mode, destination: 'session' }] : undefined);
-}
-
-export function planKeepPlanning(feedback, { event = PLAN_EVENT } = {}) {
-  const message = keepMessage(feedback);
-  if (event === 'PreToolUse') {
-    return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: message } };
-  }
-  return permissionDeny(message);
 }
