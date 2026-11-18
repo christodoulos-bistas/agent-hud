@@ -281,7 +281,7 @@ test('importing sprites.js and hud.js in Node does not throw', async () => {
 test('R19: replyLeftMs counts down to card.expiresAt when present, else from when the card appeared', () => {
   const r = { ...reply('hi'), expiresAt: 600000 };
   assert.equal(replyLeftMs(r, 100000, 99999), 500000);
-  assert.equal(replyLeftMs(reply('hi'), 100000, 40000), 540000 - 60000);
+  assert.equal(replyLeftMs({ ...reply('hi'), holdMs: 540000 }, 100000, 40000), 540000 - 60000);
   assert.equal(replyLeftMs(permission(), 100000, 0), undefined);
   assert.equal(replyLeftMs(null, 100000, 0), undefined);
 });

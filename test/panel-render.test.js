@@ -154,14 +154,14 @@ test('panel hides "open window" when the session cannot be focused', () => {
 
 const replyCard = (o = {}) => ({
   id: 'c9', kind: 'reply', sessionId: 's1', display: 'arsenal · e0', cls: 'runesmith', canOpen: true,
-  payload: { session_id: 's1', last_assistant_message: 'Done. Ship it?' }, expiresAt: NOW + 125000, ...o,
+  payload: { session_id: 's1', last_assistant_message: 'Done. Ship it?' }, expiresAt: NOW + 125000, holdMs: 540000, ...o,
 });
 const permCard = (o = {}) => ({
-  id: 'c8', kind: 'permission', sessionId: 's1', display: 'arsenal · e0', cls: 'runesmith', canOpen: true, expiresAt: NOW + 60000,
+  id: 'c8', kind: 'permission', sessionId: 's1', display: 'arsenal · e0', cls: 'runesmith', canOpen: true, expiresAt: NOW + 60000, holdMs: 60000,
   payload: { session_id: 's1', tool_name: 'Bash', tool_input: { command: 'rm -rf build && npm run build -- --verbose' }, permission_suggestions: [] }, ...o,
 });
 
-const summ = (c) => ({ id: c.id, kind: c.kind, sessionId: c.sessionId, display: c.display, cls: c.cls, line: 'q', expiresAt: c.expiresAt, source: 'claude' });
+const summ = (c) => ({ id: c.id, kind: c.kind, sessionId: c.sessionId, display: c.display, cls: c.cls, line: 'q', expiresAt: c.expiresAt, holdMs: c.holdMs, source: 'claude' });
 const stackOf = (card, extra = []) => ({ visible: true, cards: [summ(card), ...extra], expanded: card });
 const cardHtml = (card, o = {}) => renderStack(stackOf(card), NOW, o);
 

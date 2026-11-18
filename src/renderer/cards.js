@@ -3,10 +3,10 @@
 // Nothing here touches the DOM at import, so it loads in Node for the tests.
 import { CLASSES, spriteSvg } from './sprites.js';
 
-export const REPLY_MS = 540000; // the reply hold in the main process (queue replyMs)
-export const HOLD_MS = 60000; // the question hold (queue holdMs): then a permission or choice goes back to its window
-export const PLAN_MS = 540000; // the plan hold in the main process
-const holdOf = (card) => (card?.kind === 'plan' ? PLAN_MS : card?.kind === 'reply' ? REPLY_MS : HOLD_MS);
+// The hold comes with each card from main (holdMs, stamped by the queue: R1). The fallback is only for a
+// card without one; main's HOLD_MS / REPLY_MS / PLAN_MS stay the one place a hold is set.
+export const FALLBACK_HOLD_MS = 60000;
+const holdOf = (card) => (Number.isFinite(card?.holdMs) && card.holdMs > 0 ? card.holdMs : FALLBACK_HOLD_MS);
 export const ARM_MS = 500; // a new card's answer buttons stay inert this long (I7)
 const ARMED_ACTS = new Set(['answer', 'allow', 'deny', 'send', 'noreply', 'approve-auto', 'approve-ask', 'approve', 'keep']);
 const NAMES = new Map(CLASSES.map((c) => [c.id, c.name]));
@@ -31,8 +31,8 @@ function clock(ms) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-// The countdown to the end of the card's hold (the 60 s question hold, the 9 min reply hold): a clock
-// and a bar, which mountCards' tick rewrites in place every second.
+// The countdown to the end of the card's own hold (holdMs from main: a question's, a reply's or a
+// plan's): a clock and a bar, which mountCards' tick rewrites in place every second.
 function timer(card, leftMs, label, extra = '') {
   const hold = holdOf(card);
   const left = Math.max(0, Math.min(hold, int(leftMs, hold)));
@@ -173,9 +173,8 @@ export function renderCard(card, { leftMs, arming = false } = {}) {
   return '';
 }
 
-// Time left on a card's hold (a question's 60 s before it goes back to its window, a reply's 9 min):
-// the main process stamps the deadline (expiresAt, R19); without it, fall back to counting from when
-// the card appeared here. Undefined for no card or an unknown kind.
+// Time left on a card's hold: the main process stamps the deadline (expiresAt, R19); without it, count
+// the card's hold (holdMs) down from when the card appeared here. Undefined for no card or an unknown kind.
 export function cardLeftMs(card, nowMs, sinceMs) {
   if (!['permission', 'choice', 'reply', 'plan'].includes(card?.kind)) return undefined;
   return Number.isFinite(card.expiresAt) ? card.expiresAt - nowMs : holdOf(card) - (nowMs - sinceMs);

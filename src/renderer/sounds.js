@@ -7,14 +7,19 @@ const STAGE_OF_MOOD = { needs: 'needs', done: 'turn', working: 'working', idle: 
 // Same rule as hud.js's inTurn: stage turn, or with no stage, mood done.
 const inTurn = (a) => (STAGES.has(a?.stage) ? a.stage : STAGE_OF_MOOD[a?.mood]) === 'turn';
 
+// state: { cards: card ids, turn: agent ids in turn, asking: session ids that had a card }. An agent
+// entering turn because its card went (a reply sent or declined, a question handed back) already chimed
+// "needs" for that card: it is not cued "finished" again (R2).
 export function soundCue(prev, snap) {
-  const cards = new Set((Array.isArray(snap?.cards) ? snap.cards : []).map((c) => String(c.id)));
+  const list = Array.isArray(snap?.cards) ? snap.cards : [];
+  const cards = new Set(list.map((c) => String(c.id)));
+  const asking = new Set(list.filter((c) => c?.sessionId != null).map((c) => String(c.sessionId)));
   const turn = new Set((Array.isArray(snap?.agents) ? snap.agents : []).filter((a) => a && inTurn(a)).map((a) => String(a.id)));
-  const state = { cards, turn };
+  const state = { cards, turn, asking };
   if (prev == null) return { cue: null, state };
   let cue = null;
   if ([...cards].some((id) => !prev.cards.has(id))) cue = 'needs';
-  else if ([...turn].some((id) => !prev.turn.has(id))) cue = 'finished';
+  else if ([...turn].some((id) => !prev.turn.has(id) && !prev.asking?.has(id))) cue = 'finished';
   if (snap?.sound?.muted || snap?.sound?.quiet) cue = null;
   return { cue, state };
 }

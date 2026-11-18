@@ -12,7 +12,7 @@ const isSynthetic = (ev) => String((ev.raw || {}).prompt || '').trim().startsWit
 export { activityLine } from './steps.js';
 
 
-export function createStore({ engine, queue, now = Date.now, holdMs = 60000, replyMs = 540000, stepLog, onError = (e) => console.error(e), canOpen = () => true }) {
+export function createStore({ engine, queue, now = Date.now, stepLog, onError = (e) => console.error(e), canOpen = () => true }) {
   // Whether "open window" can focus this session (main knows where code.cmd is); unknown session → false.
   const openable = (sess) => { try { return !!sess && !!canOpen(sess); } catch { return false; } };
   let sessions = [];
@@ -163,11 +163,12 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
     hidden.set(id, now());
   }
 
-  const expiryOf = (it) => (Number.isFinite(it.expiresAt) ? it.expiresAt : Number.isFinite(it.addedAt) ? it.addedAt + (it.kind === 'reply' ? replyMs : holdMs) : null);
+  // The queue stamps every item's deadline and hold (R1); the renderers read both off the card.
+  const finiteOr = (v) => (Number.isFinite(v) ? v : null);
   const cardBase = (it, t) => ({
     id: it.id, kind: it.kind, sessionId: it.sessionId, display: displayOf(it.sessionId), cls: engine.classOf(it.sessionId, t),
     source: it.source ?? sessions.find((x) => x.sessionId === it.sessionId)?.source ?? 'claude',
-    expiresAt: expiryOf(it), canOpen: openable(sessions.find((x) => x.sessionId === it.sessionId)),
+    expiresAt: finiteOr(it.expiresAt), holdMs: finiteOr(it.holdMs), canOpen: openable(sessions.find((x) => x.sessionId === it.sessionId)),
   });
 
   // The full card (payload included) for one held question, or null once it is gone.

@@ -148,3 +148,20 @@ test('setCustom with a new file revokes the old URL', () => {
   p.setCustom('needs', file);
   assert.deepEqual(revoked, ['blob:1']);
 });
+
+test('R2: an agent whose card just went (reply sent, "No reply", hand-back) entering turn is not cued finished', () => {
+  const s0 = soundCue(null, snap()).state;
+  const asked = soundCue(s0, snap({ cards: [{ id: 'r1', sessionId: 'a' }], agents: [{ id: 'a', stage: 'needs' }, { id: 'b', stage: 'working' }] }));
+  assert.equal(asked.cue, 'needs');
+  assert.deepEqual([...asked.state.asking], ['a']);
+  const gone = soundCue(asked.state, snap({ agents: [{ id: 'a', stage: 'turn' }, { id: 'b', stage: 'working' }] }));
+  assert.equal(gone.cue, null, 'the reply card going away is not a second chime');
+  assert.deepEqual([...gone.state.asking], [], 'the state still advances');
+  assert.deepEqual([...gone.state.turn], ['a']);
+  // Another agent finishing in the same push still chimes.
+  const both = soundCue(asked.state, snap({ agents: [{ id: 'a', stage: 'turn' }, { id: 'b', stage: 'turn' }] }));
+  assert.equal(both.cue, 'finished');
+  // Later, a turn that ends with no card in the snapshot before it chimes as usual.
+  const work = soundCue(gone.state, snap({ agents: [{ id: 'a', stage: 'working' }, { id: 'b', stage: 'working' }] }));
+  assert.equal(soundCue(work.state, snap({ agents: [{ id: 'a', stage: 'turn' }, { id: 'b', stage: 'working' }] })).cue, 'finished');
+});

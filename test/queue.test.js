@@ -172,3 +172,12 @@ test('expiresAt === addedAt + the hold for its kind', () => {
     assert.equal(item.expiresAt, item.addedAt + ms, kind);
   }
 });
+
+test('R1: add stamps the hold for its kind on the item (holdMs), the one place it is set', () => {
+  const f = fake();
+  const q = createQueue({ holdMs: 111, replyMs: 222, planMs: 333, now: f.now, setTimer: f.setTimer, clearTimer: f.clearTimer });
+  for (const [kind, ms] of [['permission', 111], ['choice', 111], ['reply', 222], ['plan', 333]]) {
+    const item = it(kind, kind); q.add(item);
+    assert.equal(item.holdMs, ms, kind);
+  }
+});

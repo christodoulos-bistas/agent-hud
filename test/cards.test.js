@@ -107,8 +107,8 @@ test('renderBubble escapes display and line and carries the data attributes', ()
   assert.match(h, /<button type="button" class="bub" data-act="expand" data-card="b1" data-session="s1" aria-expanded="false">/);
   assert.match(h, /data-ring data-expires="1030000" data-hold="60000" style="--p:50"/);
   assert.match(cards.renderBubble({ ...BUB, expiresAt: 0 }, { nowMs: 1_000_000, expanded: true }), /aria-expanded="true"[^>]*>[\s\S]*--p:0/);
-  assert.match(cards.renderBubble({ ...BUB, kind: 'plan' }, { nowMs: 1_000_000 }), /data-hold="540000"/);
-  assert.match(cards.renderBubble({ ...BUB, kind: 'reply' }, { nowMs: 1_000_000 }), /data-hold="540000"/);
+  assert.match(cards.renderBubble({ ...BUB, kind: 'plan', holdMs: 540000 }, { nowMs: 1_000_000 }), /data-hold="540000"/);
+  assert.match(cards.renderBubble({ ...BUB, kind: 'reply', holdMs: 540000 }, { nowMs: 1_000_000 }), /data-hold="540000"/);
 });
 
 test('plan card escapes, bolds headings, cuts at 20000 with the hint, and varies its approve buttons', () => {
@@ -134,8 +134,7 @@ test('plan: arming, hold and cardLeftMs', () => {
   assert.equal(cards.clickAllowed('keep', 1000, 1100), false);
   assert.equal(cards.clickAllowed('keep', 1000, 1500), true);
   for (const a of ['approve', 'approve-auto', 'approve-ask']) assert.equal(cards.clickAllowed(a, 1000, 1100), false);
-  assert.equal(cards.cardLeftMs({ kind: 'plan' }, 5000, 2000), cards.PLAN_MS - 3000);
-  assert.equal(cards.PLAN_MS, 540000);
+  assert.equal(cards.cardLeftMs({ kind: 'plan', holdMs: 540000 }, 5000, 2000), 540000 - 3000);
 });
 
 test('mounted plan card answers approve / keep and drives onInteractive from the feedback box', () => {
@@ -164,3 +163,22 @@ test('mounted plan card answers approve / keep and drives onInteractive from the
   assert.deepEqual(got[0], ['pl1', { kind: 'plan', keep: true, feedback: 'tighten it' }]);
   assert.equal(inter.at(-1), false);
 });
+
+test('R1: the hold travels with the card (holdMs): the ring, the countdown bar and cardLeftMs read it', () => {
+  const T = 1_000_000;
+  const b = cards.renderBubble({ ...BUB, kind: 'plan', holdMs: 120000, expiresAt: T + 60000 }, { nowMs: T });
+  assert.match(b, /data-hold="120000" style="--p:50"/, "half of the card's own hold, not of a renderer constant");
+  assert.match(cards.renderCard(PLAN('x', { holdMs: 120000 }), { leftMs: 60000 }), /<i data-bar style="width:50\.0%">/);
+  assert.equal(cards.cardLeftMs({ kind: 'reply', holdMs: 120000 }, 5000, 2000), 117000, "no deadline: count down the card's hold");
+  assert.equal(cards.cardLeftMs({ kind: 'plan' }, 5000, 2000), cards.FALLBACK_HOLD_MS - 3000, 'a card without holdMs falls back');
+  for (const k of ['HOLD_MS', 'REPLY_MS', 'PLAN_MS']) assert.equal(k in cards, false, `no renderer copy of main's ${k}`);
+  const bar = { style: { width: '' } };
+  const left = { textContent: '' };
+  const host = { addEventListener() {}, querySelector: (sel) => (sel === '[data-left]' ? left : sel === '[data-bar]' ? bar : null), querySelectorAll: () => [] };
+  const m = cards.mountCards(host, { api: {}, adopt: true });
+  m.show({ id: 'pl9', kind: 'plan', sessionId: 's1', holdMs: 120000, expiresAt: T + 30000, payload: {} }, T);
+  assert.equal(left.textContent, '0:30');
+  assert.equal(bar.style.width, '25.0%');
+  m.clear();
+});
+

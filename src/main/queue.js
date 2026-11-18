@@ -21,7 +21,10 @@ export function createQueue({ holdMs = 60000, replyMs = 540000, planMs = 540000,
 
   function add(item) {
     item.addedAt = now();
-    item.expiresAt = item.addedAt + holdFor(item.kind); // the renderer's countdown reads this (R19)
+    // The hold travels with the card (R1): the renderers' rings and countdowns read holdMs and
+    // expiresAt, so main's holdMs / replyMs / planMs are the only place a hold is set.
+    item.holdMs = holdFor(item.kind);
+    item.expiresAt = item.addedAt + item.holdMs;
     return new Promise((resolve) => {
       const e = { item, resolve, timer: null };
       e.timer = setTimer(() => {
@@ -30,7 +33,7 @@ export function createQueue({ holdMs = 60000, replyMs = 540000, planMs = 540000,
         if (item.kind !== 'reply') handed.push({ sessionId: item.sessionId, agentId: item.payload?.agent_id ?? null, at: now() });
         resolve(RELEASE);
         emit();
-      }, holdFor(item.kind));
+      }, item.holdMs);
       entries.push(e);
       emit();
     });

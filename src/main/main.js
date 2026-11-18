@@ -26,6 +26,8 @@ const INDEX = path.join(SRC, 'renderer', 'index.html');
 const PANEL = path.join(SRC, 'renderer', 'panel.html');
 const PANEL_WIDTH = 340;
 const STAGE_TICK_MS = 1000;
+// The holds (R1): set here only. Each card carries its own (holdMs, expiresAt) to the renderers.
+// PLAN_MS (9 min) is the user's decision; change a hold here and nowhere else.
 const HOLD_MS = 60000;
 const REPLY_MS = 540000;
 const PLAN_MS = 540000;
@@ -94,7 +96,7 @@ const CODE_CMD = resolveCodeCmd({
   exists: (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } },
 });
 const OPEN_OPTS = { codeCmd: CODE_CMD, codexActivate: CODEX_ACTIVATE };
-const store = createStore({ engine, queue, holdMs: HOLD_MS, replyMs: REPLY_MS, onError: (err) => log('step log', err), canOpen: (s) => canOpen(s, OPEN_OPTS) });
+const store = createStore({ engine, queue, onError: (err) => log('step log', err), canOpen: (s) => canOpen(s, OPEN_OPTS) });
 
 // ---------------------------------------------------------------- snapshot
 

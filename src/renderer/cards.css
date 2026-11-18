@@ -70,7 +70,7 @@
 .reply { display: flex; gap: 6px; }
 .reply input { flex: 1; min-width: 0; font: .82rem 'Alegreya Sans', system-ui, sans-serif; background: #fbf5e6; border: 1px solid #c9a86a; border-radius: 7px; padding: 6px 8px; color: #2a211a; user-select: text; }
 .reply input:focus { outline: none; border-color: #8a6a32; }
-/* every card's countdown: a question's 60 s before it goes back to its window, a reply's 9 min */
+/* every card's countdown, over the hold main sent with it (holdMs) */
 .timer { font-size: .7rem; color: var(--sage); margin-top: 6px; display: flex; gap: 6px; align-items: center; }
 .timer .bar { flex: 1; height: 3px; background: rgba(240, 233, 218, .12); border-radius: 3px; overflow: hidden; }
 .timer .bar i { display: block; height: 100%; background: var(--gold-d); }

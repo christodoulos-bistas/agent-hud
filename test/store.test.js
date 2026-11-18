@@ -150,11 +150,26 @@ test('R19: card carries sessionId and expiresAt = addedAt + holdMs (default 60 0
   assert.equal(card.expiresAt, 61000);
 });
 
-test('R19: an item without expiresAt falls back to addedAt + hold', () => {
+test('R1: an item the queue did not stamp has no deadline and no hold on its card (the renderer falls back)', () => {
   const queue = { list: () => [{ id: 'x', kind: 'permission', sessionId: 's1', addedAt: 1000, payload: {} }], onChange: () => () => {}, handedBack: () => [] };
   const store = createStore({ engine: createClassEngine(), queue, now: () => 1500 });
   store.setSessions([S('s1')]);
-  assert.equal(store.snapshot().cards[0].expiresAt, 61000);
+  assert.equal(store.snapshot().cards[0].expiresAt, null);
+  assert.equal(store.snapshot().cards[0].holdMs, null);
+});
+
+test('R1: every card carries its hold (holdMs) from the queue, on the summary and the full card', () => {
+  const t = 100;
+  const queue = createQueue({ holdMs: 5000, replyMs: 9000, planMs: 7000, now: () => t, setTimer: () => 0, clearTimer: () => {} });
+  const store = createStore({ engine: createClassEngine(), queue, now: () => t });
+  store.setSessions([S('s1')]);
+  queue.add({ id: 'c', sessionId: 's1', kind: 'choice', payload: {} });
+  queue.add({ id: 'p', sessionId: 's1', kind: 'plan', payload: {} });
+  queue.add({ id: 'r', sessionId: 's1', kind: 'reply', payload: {} });
+  const holds = Object.fromEntries(store.snapshot().cards.map((c) => [c.id, c.holdMs]));
+  assert.deepEqual(holds, { c: 5000, p: 7000, r: 9000 });
+  assert.equal(store.cardById('p').holdMs, 7000);
+  assert.equal(store.cardById('p').expiresAt, 7100);
 });
 
 test('R19: reply card expiresAt = addedAt + replyMs (default 540 000 ms)', () => {
@@ -592,7 +607,7 @@ test('Task 7: snapshot publishes every held card in queue order, with lines and 
   assert.deepEqual(snap.cards.map((c) => c.id), ['p', 'c', 'r']);
   assert.deepEqual(snap.cards.map((c) => c.kind), ['permission', 'choice', 'reply']);
   assert.deepEqual(snap.cards.map((c) => c.line), ['Bash: ls', 'DB · 3 options', 'Done']);
-  assert.deepEqual(Object.keys(snap.cards[0]).sort(), ['canOpen', 'cls', 'display', 'expiresAt', 'id', 'kind', 'line', 'sessionId', 'source']);
+  assert.deepEqual(Object.keys(snap.cards[0]).sort(), ['canOpen', 'cls', 'display', 'expiresAt', 'holdMs', 'id', 'kind', 'line', 'sessionId', 'source']);
   assert.equal(snap.cards[0].expiresAt, 61000);
   assert.equal(snap.cards[2].expiresAt, 541000);
   assert.equal(snap.card, undefined); assert.equal(snap.next, undefined);
