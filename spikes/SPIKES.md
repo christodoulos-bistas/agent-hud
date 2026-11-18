@@ -307,19 +307,58 @@ to the synthetic moves alone.)
   Not proven: that a real mouse over a `focusable: false` window on Windows is routed to it (synthetic events bypass the OS
   hit-test). A real-mouse hover check is on Spider-Man's live checklist; until it passes, treat the highlight as likely-but-unconfirmed.
 
+## Before Spikes 12 and 13: point the spike folder's hooks at the probe
+
+Spikes 12 and 13 talk to `spikes/hook-probe.mjs`, never to a HUD. Do this once, and undo it at the end (step 5).
+
+1. **Quit the installed Agent HUD** (tray → Quit). Its hooks live in `~/.claude/settings.json` (user level) and fire in every
+   folder, the spike folder included: while it runs it would also hold the same PermissionRequest and show its own card,
+   and the result would not be the probe's. With it quit, its hooks fail fast (Spike 5) and do nothing.
+2. **Point the spike folder at the probe.** The hooks are in `C:\Consortis_projects\agent-hud-spike\.claude\settings.local.json`
+   (all 11 events, PreToolUse and PermissionRequest included). A dev HUD install may have left their URL at the HUD's port
+   (`http://127.0.0.1:47821/agent-hud/hook`); the probe listens on **`http://127.0.0.1:47822`** (any path, no header check).
+   In PowerShell, from `C:\Consortis_projects\agent-hud`:
+   ```powershell
+   $f = 'C:\Consortis_projects\agent-hud-spike\.claude\settings.local.json'
+   Copy-Item $f "$f.spike-bak"
+   (Get-Content $f -Raw) -replace '127\.0\.0\.1:47821', '127.0.0.1:47822' | Set-Content $f -Encoding utf8 -NoNewline
+   Select-String -Path $f -Pattern '4782[12]'   # every url line must now say 47822
+   ```
+3. **One probe per mode.** The mode is fixed when the probe starts, so for every step: stop the probe (Ctrl+C), then start
+   it with the step's mode, in its own terminal: `node spikes/hook-probe.mjs --mode <mode>`. It prints
+   `probe listening on 127.0.0.1:47822 mode=<mode>`; nothing else may be listening on 47822 (`netstat -ano | findstr 47822`).
+4. **One log per step.** Every payload is appended to `spikes/logs/hooks.jsonl` (git-ignored). Before each step move the last
+   one aside so each step's log stands alone:
+   `Move-Item spikes/logs/hooks.jsonl spikes/logs/hooks-<spike>-<host>-<mode>.jsonl` (e.g. `hooks-12-vscode-plan-keep.jsonl`).
+   Start a **new chat** in the host for every step (an earlier answer can colour the next).
+5. **Afterwards:** stop the probe, restore the hooks (`Move-Item -Force "$f.spike-bak" $f`) and start the installed HUD again.
+
+Write every result into the table under its spike in this file (one row per host), and the flips it implies into
+**Decisions** at the end: `PLAN_EVENT`, `PLAN_MODES` and `RECORD_HOSTS` are in `src/main/answers.js`.
+
 ## Spike 12 - ExitPlanMode (hands-on, NOT YET RUN)
 
-Probe modes (`node spikes/hook-probe.mjs --mode <m>`; the scratch folder's hooks must include PreToolUse and PermissionRequest):
-`plan-allow-auto` (allow + `setMode acceptEdits`, session), `plan-keep` (deny with "Keep planning: add a rollback step"),
-`plan-hold --holdMs 60000` (hold ExitPlanMode unanswered). Each also logs every payload to `spikes/logs/hooks.jsonl`.
-Run per host: VS Code panel, Claude desktop app, CLI. Folder: `C:\Consortis_projects\agent-hud-spike`. In each, enter plan mode and ask for a two-step plan.
+Hosts: VS Code panel, Claude desktop app, CLI (`claude` in a terminal), each with the folder `C:\Consortis_projects\agent-hud-spike`
+open. In each, switch to plan mode (Shift+Tab until the mode reads "plan", or the host's mode picker) and send:
+"Make a two-step plan to create notes.txt and write hello in it. Do not run anything yet."
+The probe modes answer only a **PermissionRequest** for `ExitPlanMode`; anything else is logged and passed through.
 
-For each host record:
-1. Which event carries ExitPlanMode (PermissionRequest, PreToolUse or both) and its `tool_input` keys (from hooks.jsonl).
-2. `plan-allow-auto`: does Claude leave plan mode? Is the new mode accept-edits? Does the "Agent HUD · Plan approved" record show?
-3. `plan-keep`: does Claude stay in plan mode and revise using the message (a rollback step)?
-4. `plan-hold`: while the hook is held, does the chat show its own approval dialog? Does answering there end the held request?
-   **If the chat shows nothing to click during the hold: STOP and report before Task 6** (the 9-minute hold would leave the chat blank).
+For each host, with the setup above:
+1. **`--mode log`** (probe answers nothing): when the plan dialog shows, read `spikes/logs/hooks.jsonl` and find the lines with
+   `"tool_name":"ExitPlanMode"`. Record which `hook_event_name` they carry (PermissionRequest, PreToolUse or both) and the keys of
+   their `tool_input` (expected at least `plan`). Answer the dialog in the chat yourself. If ExitPlanMode never shows on a
+   PermissionRequest, the probe can't answer it: write "n/a (PreToolUse only)" in the next three columns and skip to the next host.
+2. **`--mode plan-allow-auto`** (answers allow + `setMode acceptEdits` for the session, with
+   `"systemMessage":"Agent HUD · Plan approved (auto-accept edits)"`): no dialog should appear. Record: did Claude leave plan mode
+   and start the steps; does the host's mode now read accept-edits ("auto-accept edits" / "Accept edits"); does the exact text
+   `Agent HUD · Plan approved (auto-accept edits)` show in the chat.
+3. **`--mode plan-keep`** (answers deny with the message `Keep planning: add a rollback step`, and
+   `"systemMessage":"Agent HUD · Keep planning: add a rollback step"`): record whether Claude stays in plan mode, whether its next
+   plan adds a rollback step, and whether `Agent HUD · Keep planning: add a rollback step` shows in the chat.
+4. **`--mode plan-hold --holdMs 60000`** (holds the request 60 s, then answers empty, which hands the decision back): during the
+   hold, record whether the chat shows its own approval dialog, and whether answering it there ends the hold early (the chat moves
+   on before the 60 s are up). **If the chat shows nothing to click during the hold: STOP and report** (the 9-minute plan hold
+   would leave the chat blank).
 
 | Host | Event(s) | tool_input keys | allow-auto: left plan / acceptEdits / record | keep: stays + revises | hold: native dialog / ends hold |
 | --- | --- | --- | --- | --- | --- |
@@ -330,9 +369,20 @@ For each host record:
 ## Spike 13 - systemMessage per host (hands-on, NOT YET RUN)
 
 Probe `--mode record` answers every PermissionRequest with allow + `"systemMessage":"Agent HUD · Allowed: <tool>"`.
-1. Claude hosts (VS Code, desktop, CLI): ask "Run `echo hi > x.txt` with Bash". Record: does the record show in the chat, and did the command run?
-2. Codex Desktop and Codex TUI: start the Codex receiver as `RECORD=1 node spikes/codex/receiver.mjs` (same body behind the Codex bridge,
-   `spikes/codex/bridge.cjs`), run a shell command needing approval. Record: did the command run, does the record show, any "hook failed" text.
+1. **Claude hosts** (VS Code panel, desktop app, CLI), with the setup above and `node spikes/hook-probe.mjs --mode record`, in a
+   new chat in the spike folder, in default mode (not plan, not accept-edits), send: "Run `echo hi > x.txt` with Bash."
+   Record: does the exact text **`Agent HUD · Allowed: Bash`** show in the chat; did the command run without the chat asking
+   (`x.txt` in the spike folder holds `hi`; delete it before the next host). The log must show one PermissionRequest for Bash.
+2. **Codex TUI**: Codex sends its hooks through the bridge to the spike receiver, not the probe. In one terminal start the receiver
+   with records on: `$env:RECORD = '1'; node spikes/codex/receiver.mjs` (prints `receiver up`, listens on `127.0.0.1:47997`, logs to
+   `spikes/codex/events.jsonl`). In another: `node spikes/codex/tui.mjs allow-me` (an interactive Codex in
+   `agent-hud-spike\codex-proj`, its hooks passed as `-c hooks.*` overrides through `spikes/codex/bridge.cmd`; nothing is written
+   to `~/.codex`). Codex is asked to run `echo allow-me > out-allow-me.txt` with approval. Record: did the command run
+   (`out-allow-me.txt` exists), does **`Agent HUD · Allowed: Bash`** show (Codex's shell tool is Bash, Spike 8), and any
+   "hook failed" text. `events.jsonl` must show a PermissionRequest whose `reply` carries the systemMessage.
+3. **Codex Desktop**: the app reads hooks only from `~/.codex/hooks.json` (no per-run override), and this checklist never edits
+   that file. Write "not run (no override path)" in its row unless the user decides otherwise; `codex` then stays out of
+   `RECORD_HOSTS`.
 
 | Host | Record shows | Command ran | Notes |
 | --- | --- | --- | --- |
@@ -344,9 +394,25 @@ Probe `--mode record` answers every PermissionRequest with allow + `"systemMessa
 
 ## Spike 14 - messaging socket (hands-on, NOT YET RUN)
 
-Use ONLY a throwaway session started in `C:\Consortis_projects\agent-hud-spike`; never any other session. Read its `messagingSocketPath`
-from `~/.claude/sessions/<pid>.json`, connect, and send one newline-terminated JSON line: `{"type":"user_message","text":"Say PINEAPPLE"}`.
-Record the exact response (bytes returned, or none) and whether the chat reacts (shows the message / Claude answers PINEAPPLE). Task 3 builds the script; this section is only the procedure.
+Use ONLY a throwaway session started in `C:\Consortis_projects\agent-hud-spike`; never any other session. No probe and no hook
+change is needed (the socket is the chat's own, not a hook); the installed HUD may keep running.
+
+1. Start a new chat in the spike folder in the host under test (VS Code panel, desktop app, or `claude` in a terminal there) and
+   send "hi" so the session is live.
+2. `node spikes/messaging-socket.mjs` lists the live sessions. Pick the row whose `entrypoint` is the host under test and whose
+   session file (`~/.claude/sessions/<pid>.json`) has `"cwd"` = the spike folder; note its full `sessionId` from that file.
+3. `node spikes/messaging-socket.mjs --send <sessionId>`. The script refuses any session outside the spike folder. It connects to
+   the session's `messagingSocketPath`, writes one line, `{"type":"user_message","text":"Say PINEAPPLE"}` + newline, prints
+   every reply as `recv: <text>` (or `error: <message>`), and exits after 5 s with `done (5s)`.
+4. Record, per host, in the table below: the exact `recv:` / `error:` lines (or "none"), whether the chat shows "Say PINEAPPLE"
+   as a message, and whether Claude answers `PINEAPPLE`. Then set **REPLY_ANYWHERE** below: `yes` if the chat answered
+   PINEAPPLE in that host, `no` if nothing showed in any host.
+
+| Host | Socket reply (recv / error / none) | Message shows in chat | Claude answers PINEAPPLE |
+| --- | --- | --- | --- |
+| VS Code panel | | | |
+| Claude desktop | | | |
+| CLI | | | |
 
 ### listing (automated)
 
