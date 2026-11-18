@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { renderPanel, timeText, arrowOf, shouldScrollTop, panelAction } from '../src/renderer/panel.js';
+import { renderPanel, renderStack, timeText, arrowOf, panelAction } from '../src/renderer/panel.js';
 import { ARM_MS } from '../src/renderer/cards.js';
 
 const NOW = 1_000_000_000;
@@ -64,8 +64,8 @@ test('a chat that never sent the HUD a hook event → "Not connected" with what 
   assert.match(renderPanel(detail({ task: null, connected: true }), NOW), /Started before the HUD/, 'connected but its first prompt was missed');
 });
 
-test('needs with a question queued behind the current one → "Its question opens here after the current one"', () => {
-  assert.match(renderPanel(detail({ stage: 'needs', hasCard: true }), NOW), /Its question opens here after the current one/);
+test('needs with a question in the stack has no queued-behind text', () => {
+  assert.doesNotMatch(renderPanel(detail({ stage: 'needs', hasCard: true }), NOW), /opens here after/);
   assert.doesNotMatch(renderPanel(detail(), NOW), /Its question opens/);
   assert.doesNotMatch(renderPanel(detail({ stage: 'needs', hasCard: true }), NOW), /in the HUD/, 'the HUD holds no cards any more');
 });
@@ -124,7 +124,7 @@ test('M2: the long-step line names the flagged step from stuck, not the current 
 
 test('M3: the needs line says where the answer is waiting', () => {
   const at = (o) => renderPanel(detail({ stage: 'needs', ...o }), NOW);
-  assert.match(at({ hasCard: true, handedBack: true }), /class="needs-note">Its question opens here after the current one</);
+  assert.doesNotMatch(at({ hasCard: true, handedBack: true }), /needs-note/, 'the stack shows the question, no note');
   assert.match(at({ hasCard: false, handedBack: true }), /class="needs-note">Waiting in its window — open ↗</);
   assert.match(at({ hasCard: false, handedBack: false }), /class="needs-note">Waiting for you in its window</);
   assert.doesNotMatch(renderPanel(detail({ hasCard: true }), NOW), /needs-note/, 'only while it needs you');
@@ -161,24 +161,26 @@ const permCard = (o = {}) => ({
   payload: { session_id: 's1', tool_name: 'Bash', tool_input: { command: 'rm -rf build && npm run build -- --verbose' }, permission_suggestions: [] }, ...o,
 });
 
-test('renderPanel with detail.card renders the card above the task, with the countdown', () => {
-  const h = renderPanel(detail({ stage: 'needs', hasCard: true, card: replyCard() }), NOW);
+const summ = (c) => ({ id: c.id, kind: c.kind, sessionId: c.sessionId, display: c.display, cls: c.cls, line: 'q', expiresAt: c.expiresAt, source: 'claude' });
+const stackOf = (card, extra = []) => ({ visible: true, cards: [summ(card), ...extra], expanded: card });
+const cardHtml = (card, o = {}) => renderStack(stackOf(card), NOW, o);
+
+test('the stack renders the expanded card after its bubble, with the countdown', () => {
+  const h = cardHtml(replyCard());
   const at = h.indexOf('class="ans');
   assert.ok(at > 0, h);
-  assert.ok(at < h.indexOf('>Task<'), 'the card sits above the task');
-  assert.ok(h.indexOf('class="fly-top"') < at, 'below the agent header (sprite, name, chip, close)');
+  assert.ok(h.indexOf('class="bub"') < h.indexOf('class="ans'), 'the card follows its bubble');
   assert.match(h, /<span data-left>2:05<\/span>/, 'the reply countdown runs to the main process deadline (expiresAt)');
   assert.match(h, /data-key="card:c9" data-sticky/, 'the card slot is keyed and sticky, so a new detail does not replace it');
-  assert.doesNotMatch(h, /needs-note/, 'the card is the note');
-  assert.match(renderPanel(detail({ card: replyCard() }), NOW, { leftMs: 61000 }), /<span data-left>1:01<\/span>/, "the mounted card's own clock wins");
+  assert.match(cardHtml(replyCard(), { leftMs: 61000 }), /<span data-left>1:01<\/span>/, "the mounted card's own clock wins");
 
-  const p = renderPanel(detail({ stage: 'needs', hasCard: true, card: permCard() }), NOW);
+  const p = cardHtml(permCard());
   assert.ok(p.includes('rm -rf build &amp;&amp; npm run build -- --verbose'), 'the full command');
   assert.match(p, /data-act="allow"/); assert.match(p, /data-act="deny"/);
   assert.match(p, /data-act="open-card"/);
-  assert.match(renderPanel(detail({ card: permCard() }), NOW, { arming: true }), /<div class="ans arming"/, `inert for ${ARM_MS} ms after it appears`);
+  assert.match(cardHtml(permCard(), { arming: true }), /<div class="ans arming"/, `inert for ${ARM_MS} ms after it appears`);
   assert.doesNotMatch(p, /arming/);
-  assert.doesNotMatch(renderPanel(detail({ card: permCard({ display: XSS, payload: { tool_name: 'Bash', tool_input: { command: XSS } } }) }), NOW), /<img/);
+  assert.doesNotMatch(cardHtml(permCard({ display: XSS, payload: { tool_name: 'Bash', tool_input: { command: XSS } } })), /<img/);
 });
 
 test('renderPanel without card unchanged', () => {
@@ -198,12 +200,6 @@ test('renderPanel shows Finished with the escaped last message only for stage tu
   assert.ok(!renderPanel(detail({ stage: 'working', lastMessage: 'hello' }), NOW).includes('Finished'));
 });
 
-test('R5: a fresh card id scrolls the panel to the top, the same card does not', () => {
-  assert.equal(shouldScrollTop(null, { id: 'c1' }), true);
-  assert.equal(shouldScrollTop('c1', { id: 'c2' }), true);
-  assert.equal(shouldScrollTop('c1', { id: 'c1' }), false);
-  assert.equal(shouldScrollTop('c1', null), false);
-});
 
 test('v1.2 M1/M2: the header ✕ and the footer "open window ↗" name the agent on show, not whatever main has selected by then', () => {
   const d = detail({ id: 's7' });
@@ -214,16 +210,16 @@ test('v1.2 M1/M2: the header ✕ and the footer "open window ↗" name the agent
 });
 
 test('v1.2 M6: permission and choice cards show the countdown to the 60 s hand-back, from expiresAt', () => {
-  const p = renderPanel(detail({ stage: 'needs', hasCard: true, card: permCard({ expiresAt: NOW + 42000 }) }), NOW);
+  const p = cardHtml(permCard({ expiresAt: NOW + 42000 }));
   assert.match(p, /Back to its window in <span data-left>0:42<\/span>/);
   assert.match(p, /<i data-bar style="width:70\.0%"><\/i>/, '42 s of the 60 s hold');
-  assert.match(renderPanel(detail({ card: permCard() }), NOW), /<span data-left>1:00<\/span>/);
-  assert.match(renderPanel(detail({ card: permCard({ expiresAt: NOW - 5000 }) }), NOW), /<span data-left>0:00<\/span>/, 'never below zero');
-  assert.match(renderPanel(detail({ card: permCard() }), NOW, { leftMs: 9000 }), /<span data-left>0:09<\/span>/, "the mounted card's own clock wins");
+  assert.match(cardHtml(permCard()), /<span data-left>1:00<\/span>/);
+  assert.match(cardHtml(permCard({ expiresAt: NOW - 5000 })), /<span data-left>0:00<\/span>/, 'never below zero');
+  assert.match(cardHtml(permCard(), { leftMs: 9000 }), /<span data-left>0:09<\/span>/, "the mounted card's own clock wins");
   const choiceCard = { id: 'c7', kind: 'choice', sessionId: 's1', display: 'a', cls: 'runesmith', canOpen: true, expiresAt: NOW + 30000,
     payload: { session_id: 's1', tool_input: { questions: [{ question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] }] } } };
-  assert.match(renderPanel(detail({ card: choiceCard }), NOW), /Back to its window in <span data-left>0:30<\/span>/);
-  assert.match(renderPanel(detail({ card: replyCard() }), NOW), /Reply open <span data-left>2:05<\/span>/,'the reply card keeps its own words');
+  assert.match(cardHtml(choiceCard), /Back to its window in <span data-left>0:30<\/span>/);
+  assert.match(cardHtml(replyCard()), /Reply open <span data-left>2:05<\/span>/,'the reply card keeps its own words');
 });
 
 test('Codex detail: class line starts with the Codex tag and the Codex sprite; Claude has neither', () => {
@@ -233,4 +229,51 @@ test('Codex detail: class line starts with the Codex tag and the Codex sprite; C
   const cl = renderPanel(detail(), NOW);
   assert.ok(!cl.includes('class="src"'));
   assert.ok(!cl.includes('#8ef5c6'));
+});
+
+const sum = (i, o = {}) => ({ id: 'c' + i, kind: 'permission', sessionId: 's' + i, display: 'a' + i, cls: 'runesmith', line: 'Run npm test', expiresAt: NOW + 30000, source: 'claude', ...o });
+
+test('Task 11: 9 summaries render 9 bubbles; only the expanded one has a card slot, right after its bubble', () => {
+  const cards = Array.from({ length: 9 }, (_, i) => sum(i));
+  const h = renderStack({ visible: true, cards, expanded: permCard({ id: 'c3' }) }, NOW);
+  assert.equal((h.match(/<button[^>]*class="bub"/g) || []).length, 9);
+  assert.match(h, /<span>9 waiting<\/span><button[^>]*data-act="hide-stack" aria-label="Hide the questions"[^>]*>✕<\/button>/);
+  assert.match(h, /^<div class="stack" data-key="stack" data-deep>/);
+  assert.equal((h.match(/class="card-slot"/g) || []).length, 1);
+  assert.match(h, /data-key="bub:c3" data-deep>/);
+  assert.match(h, /<\/button><div class="card-slot" data-key="card:c3" data-sticky>/);
+  assert.match(h, /data-card="c3"[^>]*aria-expanded="true"/);
+  assert.match(h, /data-card="c2"[^>]*aria-expanded="false"/);
+});
+
+test('Task 11: an invisible or missing stack renders nothing', () => {
+  assert.equal(renderStack({ visible: false, cards: [sum(1)], expanded: null }, NOW), '');
+  assert.equal(renderStack(null, NOW), '');
+});
+
+test('Task 11: renderPanel with hasCard has no needs note and no card slot; other notes stay', () => {
+  const h = renderPanel(detail({ stage: 'needs', hasCard: true }), NOW);
+  assert.doesNotMatch(h, /needs-note|card-slot|opens here/);
+  assert.match(renderPanel(detail({ stage: 'needs', handedBack: true }), NOW), /Waiting in its window/);
+  assert.match(renderPanel(detail({ stage: 'needs' }), NOW), /Waiting for you in its window/);
+});
+
+test('Task 11: panelAction expand and hide-stack', () => {
+  assert.deepEqual(panelAction('expand', null, { card: 'c4' }), { call: 'expandCard', id: 'c4' });
+  assert.deepEqual(panelAction('hide-stack', null, {}), { call: 'hideStack' });
+  assert.deepEqual(panelAction('close', { id: 's1' }, {}), { call: 'close', id: 's1' });
+});
+
+test('Task 11: recap shows under Finished, before the last message, escaped; alone when there is no message', () => {
+  const h = renderPanel(detail({ stage: 'turn', current: null, lastMessage: 'All done', recap: 'Done in 8s · 1 file edited' }), NOW);
+  assert.match(h, /<p class="lbl">Finished<\/p><p class="recap">Done in 8s · 1 file edited<\/p><p class="finished">All done<\/p>/);
+  const x = renderPanel(detail({ stage: 'turn', current: null, lastMessage: '', recap: XSS }), NOW);
+  assert.match(x, /<p class="lbl">Finished<\/p><p class="recap">&lt;img/);
+  assert.doesNotMatch(x, /<img|class="finished"/);
+});
+
+test('Task 11: root markup is the stack alone when there is no detail', () => {
+  const stack = { visible: true, cards: [sum(1)], expanded: null };
+  assert.equal(renderStack(stack, NOW) + (null ? 'x' : ''), renderStack(stack, NOW));
+  assert.doesNotMatch(renderStack(stack, NOW), /class="fly"/);
 });

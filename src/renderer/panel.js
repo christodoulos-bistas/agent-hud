@@ -3,7 +3,7 @@
 // comes from the detail goes through esc() before it reaches markup.
 import { spriteSvg } from './sprites.js';
 import { esc, renderChip, chipOf, className, createRenderGate, patch, sourceOf, srcTag } from './hud.js';
-import { renderCard, cardLeftMs, mountCards } from './cards.js';
+import { renderBubble, renderCard, cardLeftMs, mountCards } from './cards.js';
 import { fmtDuration } from './format.js';
 
 const MAX_STEPS = 5;
@@ -44,7 +44,7 @@ function stuckLine(d, nowMs) {
 // current question (it opens here next); handed back to its window (the footer's "open window ↗"
 // opens it); or a native prompt the HUD never held.
 function needsNote(d) {
-  if (d.hasCard) return 'Its question opens here after the current one';
+  if (d.hasCard) return '';
   if (d.handedBack) return d.canOpen === false ? 'Waiting in its window' : 'Waiting in its window — open ↗';
   return 'Waiting for you in its window';
 }
@@ -76,29 +76,38 @@ function nowBlock(d, nowMs) {
   return '';
 }
 
-// The agent's open question (detail.card), under the header and above the task. Keyed and sticky: the
-// keyed patch keeps the live card (its typed text, picks and focus) while new details re-render the
-// rest. `leftMs` and `arming` come from the mounted card (bootPanel); without them the countdown (every
-// card has one: the 60 s question hold, the 9 min reply hold) runs to the main process deadline.
-function cardSlot(card, nowMs, { leftMs, arming = false } = {}) {
-  if (!card) return '';
-  const left = leftMs ?? cardLeftMs(card, nowMs, nowMs);
-  return `<div class="card-slot" data-key="card:${esc(card.id)}" data-sticky>${renderCard(card, { leftMs: left, arming })}</div>`;
+// The bubble stack above the details: one compact bubble per waiting question, the expanded one followed
+// by its full card. Keyed and sticky: the keyed patch keeps the live card (typed text, picks, focus) while
+// the bubbles around it update. `leftMs` and `arming` come from the mounted card (bootPanel); without
+// them the countdown runs to the main process deadline.
+export function renderStack(stack, nowMs = Date.now(), cardOpts = {}) {
+  if (!stack?.visible) return '';
+  const cards = Array.isArray(stack.cards) ? stack.cards : [];
+  const open = stack.expanded && typeof stack.expanded === 'object' ? stack.expanded : null;
+  const wraps = cards.map((c) => {
+    const isOpen = !!open && String(open.id) === String(c.id);
+    const bub = renderBubble(c, { nowMs, expanded: isOpen }).replace('<button ', '<button data-key="bub" ');
+    const slot = isOpen
+      ? `<div class="card-slot" data-key="card:${esc(open.id)}" data-sticky>${renderCard(open, { leftMs: cardOpts.leftMs ?? cardLeftMs(open, nowMs, nowMs), arming: !!cardOpts.arming })}</div>` : '';
+    return `<div class="bub-wrap" data-key="bub:${esc(c.id)}" data-deep>${bub}${slot}</div>`;
+  }).join('');
+  return '<div class="stack" data-key="stack" data-deep>' +
+    `<div class="stack-h" data-key="stack-h"><span>${cards.length} waiting</span>` +
+    '<button type="button" class="x" data-act="hide-stack" aria-label="Hide the questions">✕</button></div>' +
+    wraps + '</div>';
 }
 
-// Claude's last message, while it is the user's turn (main sends lastMessage only then).
+// Claude's last message, while it is the user's turn (main sends lastMessage only then), under the
+// recap of the turn (main sends recap with it).
 function finishedBlock(d) {
   const m = typeof d.lastMessage === 'string' ? d.lastMessage : '';
-  return d.stage === 'turn' && m ? `<p class="lbl">Finished</p><p class="finished">${esc(m)}</p>` : '';
+  const r = typeof d.recap === 'string' ? d.recap : '';
+  if (d.stage !== 'turn' || (!m && !r)) return '';
+  return '<p class="lbl">Finished</p>' + (r ? `<p class="recap">${esc(r)}</p>` : '') + (m ? `<p class="finished">${esc(m)}</p>` : '');
 }
 
-// A question that was not on show before brings the panel back to the top, so it is in view even if the
-// previous agent's details were scrolled down.
-export const shouldScrollTop = (prevCardId, card) => !!card && card.id != null && String(card.id) !== String(prevCardId);
-
-export function renderPanel(detail, nowMs = Date.now(), cardOpts = {}) {
+export function renderPanel(detail, nowMs = Date.now()) {
   const d = detail || {};
-  const card = d.card && typeof d.card === 'object' ? d.card : null;
   const steps = (Array.isArray(d.steps) ? d.steps : []).slice(0, MAX_STEPS);
   const helpers = Array.isArray(d.helpers) ? d.helpers : [];
   // No task: either the chat's first prompt came before the HUD, or the chat never reached the HUD at all
@@ -128,11 +137,10 @@ export function renderPanel(detail, nowMs = Date.now(), cardOpts = {}) {
       renderChip(d, nowMs) +
       '<button type="button" class="x" data-act="close" aria-label="Close">✕</button>' +
     '</div>' +
-    cardSlot(card, nowMs, cardOpts) +
     '<div class="det" data-key="det">' +
       stuckLine(d, nowMs) +
       finishedBlock(d) +
-      (d.stage === 'needs' && !card ? `<div class="needs-note">${needsNote(d)}</div>` : '') +
+      (d.stage === 'needs' && needsNote(d) ?`<div class="needs-note">${needsNote(d)}</div>` : '') +
       '<p class="lbl">Task</p>' + task +
       nowBlock(d, nowMs) +
       list + help +
@@ -155,8 +163,11 @@ export function arrowOf(place) {
 // The header's ✕ and the footer's "open window ↗" act on the agent on show (the detail rendered), never
 // on whatever main has selected by the time the click lands: a question can switch the panel while the
 // pointer is down (M1, M2). The card's own buttons are cards.js's.
-export function panelAction(act, detail) {
+// A bubble names its own card (data-card); the stack's ✕ names nothing.
+export function panelAction(act, detail, ds = {}) {
   const id = detail?.id != null ? String(detail.id) : null;
+  if (act === 'expand') return { call: 'expandCard', id: ds?.card != null ? String(ds.card) : null };
+  if (act === 'hide-stack') return { call: 'hideStack' };
   if (act === 'close') return { call: 'close', id };
   if (act === 'open') return { call: 'openWindow', id };
   return null;
@@ -167,8 +178,11 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   const call = (name, ...args) => (typeof api?.[name] === 'function' ? api[name](...args) : undefined);
   const rendered = new WeakMap();
   let detail = null;
+  let stack = null;
+  let latest = { detail: null, stack: null }; // newest of each message, applied through the gate
   let timer = null;
-  let lastCardId = null;
+  let lastExpanded = null;
+  let hovered = null;
 
   // The panel takes the keyboard focus only while the user types into a card's text box, and gives it
   // back as soon as the answer is sent or released, or the card goes (main: panel:setInteractive).
@@ -195,31 +209,47 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   // card being answered. Between details the 1 s tick rewrites the time texts, the chip's clock and the
   // card's countdown in place (and swaps the stuck line, which holds no buttons), so a click that
   // straddles a tick still lands and a focused button keeps its focus.
+  const stackOn = () => !!stack?.visible;
+  // Hover on a bubble previews its card in main (hoverCard); if the OS never routes it, nothing happens.
+  const setHover = (id) => { if (hovered !== id) { hovered = id; call('hoverCard', id); } };
   const render = () => {
     const now = Date.now();
-    const { arming } = cards.show(detail?.card ?? null, now);
-    if (!detail) { root.innerHTML = ''; lastCardId = null; return; }
+    if (!stackOn()) setHover(null);
+    const open = stackOn() ? stack.expanded ?? null : null;
+    const { arming } = cards.show(open, now);
+    if (!stackOn() && !detail) { root.innerHTML = ''; lastExpanded = null; return; }
     const tpl = doc.createElement('template');
-    tpl.innerHTML = renderPanel(detail, now, { leftMs: cards.leftMs(now), arming });
+    tpl.innerHTML = renderStack(stackOn() ? stack : null, now, { leftMs: cards.leftMs(now), arming }) +
+      (detail ? renderPanel(detail, now) : '');
     patch(root, tpl.content, rendered);
     cards.refresh();
     cards.tick(now);
-    const c = detail.card ?? null;
-    if (shouldScrollTop(lastCardId, c)) { const sc = doc.getElementById('panel'); if (sc) sc.scrollTop = 0; }
-    lastCardId = c ? String(c.id) : null;
+    const id = open ? String(open.id) : null;
+    if (id && id !== lastExpanded) {
+      [...root.querySelectorAll('.bub')].find((el) => el.dataset.card === id)?.scrollIntoView?.({ block: 'nearest' });
+    }
+    lastExpanded = id;
   };
   const swap = (el, html) => { if (el && html && el.outerHTML !== html) el.outerHTML = html; };
   const tick = () => {
-    if (!detail) return;
+    if (!detail && !stackOn()) return;
     const now = Date.now();
-    for (const el of root.querySelectorAll('[data-since]')) {
-      const text = timeText(el.dataset, now);
-      if (el.textContent !== text) el.textContent = text;
+    for (const el of root.querySelectorAll('[data-ring]')) {
+      const hold = Number(el.dataset.hold);
+      const exp = Number(el.dataset.expires);
+      if (!(hold > 0) || !Number.isFinite(exp)) continue;
+      el.style.setProperty('--p', String(Math.max(0, Math.min(100, Math.round(((exp - now) / hold) * 100)))));
     }
-    const chip = root.querySelector('.fly-top > .st');
-    const c = chipOf(detail, now);
-    if (chip && chip.classList.contains(c.cls)) { if (chip.textContent !== c.text) chip.textContent = c.text; } else swap(chip, renderChip(detail, now));
-    swap(root.querySelector('.det > .warn'), stuckLine(detail, now));
+    if (detail) {
+      for (const el of root.querySelectorAll('[data-since]')) {
+        const text = timeText(el.dataset, now);
+        if (el.textContent !== text) el.textContent = text;
+      }
+      const chip = root.querySelector('.fly-top > .st');
+      const c = chipOf(detail, now);
+      if (chip && chip.classList.contains(c.cls)) { if (chip.textContent !== c.text) chip.textContent = c.text; } else swap(chip, renderChip(detail, now));
+      swap(root.querySelector('.det > .warn'), stuckLine(detail, now));
+    }
     cards.tick(now);
   };
 
@@ -235,7 +265,7 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   root.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');
     if (!el || !root.contains(el)) return;
-    const a = panelAction(el.dataset.act, detail);
+    const a = panelAction(el.dataset.act, detail, el.dataset);
     if (a) call(a.call, a.id);
   });
 
@@ -245,19 +275,25 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
     if (h !== lastHeight) { lastHeight = h; api.reportHeight?.(h); }
   }).observe(root);
 
-  // A new detail arrives on nearly every event of a busy agent: it waits while a pointer is down in the
-  // panel (createRenderGate), so ✕, "open window ↗" and the card's buttons are not replaced while being clicked.
+  root.addEventListener('pointerenter', (e) => { const b = e.target.closest?.('.bub'); if (b && root.contains(b)) setHover(b.dataset.card); }, true);
+  root.addEventListener('pointerleave', (e) => { if (e.target.closest?.('.bub')) setHover(null); }, true);
+
+  // A new stack or detail arrives on nearly every event of a busy agent: it waits while a pointer is down
+  // in the panel (createRenderGate), so ✕, "open window ↗", the bubbles and the card's buttons are not
+  // replaced while being clicked. The gate keeps one value, so both messages offer the newest pair.
   const gate = createRenderGate((next) => {
-    detail = next || null;
+    detail = next.detail;
+    stack = next.stack;
     render();
-    if (detail && !timer) timer = setInterval(tick, 1000);
-    else if (!detail && timer) { clearInterval(timer); timer = null; }
+    if ((detail || stackOn()) && !timer) timer = setInterval(tick, 1000);
+    else if (!detail && !stackOn() && timer) { clearInterval(timer); timer = null; }
   });
   root.addEventListener('pointerdown', () => gate.down());
   doc.addEventListener('pointerup', () => gate.up());
   doc.addEventListener('pointercancel', () => gate.up());
 
-  api.onDetail?.((next) => gate.offer(next));
+  api.onDetail?.((next) => { latest = { ...latest, detail: next || null }; gate.offer(latest); });
+  api.onStack?.((next) => { latest = { ...latest, stack: next || null }; gate.offer(latest); });
 }
 
 if (typeof document !== 'undefined' && globalThis.panel) bootPanel();
