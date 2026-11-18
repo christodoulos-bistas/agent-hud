@@ -336,7 +336,7 @@ Spikes 12 and 13 talk to `spikes/hook-probe.mjs`, never to a HUD. Do this once, 
 Write every result into the table under its spike in this file (one row per host), and the flips it implies into
 **Decisions** at the end: `PLAN_EVENT`, `PLAN_MODES` and `RECORD_HOSTS` are in `src/main/answers.js`.
 
-## Spike 12 - ExitPlanMode (hands-on, NOT YET RUN)
+## Spike 12 - ExitPlanMode (hands-on, RUN 2026-11-18 in VS Code)
 
 Hosts: VS Code panel, Claude desktop app, CLI (`claude` in a terminal), each with the folder `C:\Consortis_projects\agent-hud-spike`
 open. In each, switch to plan mode (Shift+Tab until the mode reads "plan", or the host's mode picker) and send:
@@ -362,11 +362,11 @@ For each host, with the setup above:
 
 | Host | Event(s) | tool_input keys | allow-auto: left plan / acceptEdits / record | keep: stays + revises | hold: native dialog / ends hold |
 | --- | --- | --- | --- | --- | --- |
-| VS Code panel | | | | | |
-| Claude desktop | | | | | |
-| CLI | | | | | |
+| VS Code panel | PreToolUse then PermissionRequest (both carry ExitPlanMode) | `plan`, `planFilePath` (no permission_suggestions) | **ignored**: allow+setMode+systemMessage, plain allow, and a PreToolUse allow all still showed "Accept this plan?" (clean re-run with the installed HUD quit) | not run (answers ignored) | native dialog shows while a hook is held - the chat is never blank |
+| Claude desktop | not run (decision below) | | | | |
+| CLI | not run (decision below) | | | | |
 
-## Spike 13 - systemMessage per host (hands-on, NOT YET RUN)
+## Spike 13 - systemMessage per host (hands-on, RUN 2026-11-18)
 
 Probe `--mode record` answers every PermissionRequest with allow + `"systemMessage":"Agent HUD · Allowed: <tool>"`.
 1. **Claude hosts** (VS Code panel, desktop app, CLI), with the setup above and `node spikes/hook-probe.mjs --mode record`, in a
@@ -386,13 +386,13 @@ Probe `--mode record` answers every PermissionRequest with allow + `"systemMessa
 
 | Host | Record shows | Command ran | Notes |
 | --- | --- | --- | --- |
-| claude-vscode | | | |
-| claude-desktop | | | |
-| cli | | | |
-| codex desktop | | | |
-| codex tui | | | |
+| claude-vscode | no | yes (no dialog) | |
+| claude-desktop | no | yes (no dialog) | with the HUD closed, the app shows "Claude Code notice - A hook gave no usable answer" for the HUD's failing hooks |
+| cli | no | yes (no dialog) | the CLI prints its own "Allowed by PermissionRequest hook"; with the HUD closed it prints red "hook failed · ECONNREFUSED 127.0.0.1:47821" lines |
+| codex desktop | not run (no override path) | | |
+| codex tui | skipped (records off everywhere) | | |
 
-## Spike 14 - messaging socket (hands-on, NOT YET RUN)
+## Spike 14 - messaging socket (hands-on, RUN 2026-11-18 in VS Code)
 
 Use ONLY a throwaway session started in `C:\Consortis_projects\agent-hud-spike`; never any other session. No probe and no hook
 change is needed (the socket is the chat's own, not a hook); the installed HUD may keep running.
@@ -410,7 +410,7 @@ change is needed (the socket is the chat's own, not a hook); the installed HUD m
 
 | Host | Socket reply (recv / error / none) | Message shows in chat | Claude answers PINEAPPLE |
 | --- | --- | --- | --- |
-| VS Code panel | | | |
+| VS Code panel | none (connected, no reply, `done (5s)`) | no | no |
 | Claude desktop | | | |
 | CLI | | | |
 
@@ -428,10 +428,12 @@ change is needed (the socket is the chat's own, not a hook); the installed HUD m
 Every live session advertises a per-session named pipe that exists. Whether it accepts input is untested; the hands-on send is below.
 Run it with `node spikes/messaging-socket.mjs --send <sessionId>` (refuses unless the session cwd is the spike dir).
 
-REPLY_ANYWHERE = unclear (pending the hands-on send)
+REPLY_ANYWHERE = no. The pipe is Claude Code's private session-to-session channel (session file: `peerProtocol: 1`, `peerFeatures: ["notify_idle","artifact_yield"]`); its message format is undocumented and a guessed one is silently ignored. Reverse-engineering it would break on any update: release 2 ("reply to any agent") is dropped; "wait for my reply" stays the way to reply.
 
-## Decisions (provisional - the build uses these until the checklists above are run)
+## Decisions (after the 2026-11-18 checklist)
 
-- `PLAN_EVENT = 'PermissionRequest'` - provisional - flip after the checklist. Flips to `'PreToolUse'` if only PreToolUse carries ExitPlanMode or only it accepts the answer.
-- `PLAN_MODES = false` - provisional - flip after the checklist. Flips to `true` if `plan-allow-auto` left plan mode and the mode became accept-edits.
-- `RECORD_HOSTS = new Set()` (no records) - provisional - flip after the checklist. Add each of `claude-vscode`, `claude-desktop`, `cli`, `codex` where Spike 13 showed the record AND the allow still took effect.
+- **Plans: notice-and-read** (user's decision). VS Code ignores every hook answer for ExitPlanMode, so the HUD never holds a plan and never answers one, in any app: a plan bubble (chime, title, step headings, line count) with "Read plan ↗" (opens `planFilePath`) and "Open chat ↗". `PLAN_EVENT` / `PLAN_MODES` and the plan encoders become unused.
+- `RECORD_HOSTS = new Set()` stays (final): no Claude app shows a hook `systemMessage`. Chat notes stay off everywhere.
+- Release 2 ("reply to any agent"): dropped (Spike 14).
+- New issue: with the HUD closed, its HTTP hooks show red "hook failed" lines in the CLI and a "hook gave no usable answer" notice in the desktop app. To fix separately.
+

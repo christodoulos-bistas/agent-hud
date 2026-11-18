@@ -67,6 +67,12 @@ http.createServer((req, res) => {
     if (mode === 'hold' && ev === 'Stop') {
       return setTimeout(() => send(res), holdMs);
     }
+    // Spike 12b: answer ExitPlanMode at PreToolUse (as AskUserQuestion is answered), not at PermissionRequest.
+    if (mode === 'plan-pre-allow' && ev === 'PreToolUse' && tool === 'ExitPlanMode') {
+      return send(res, {
+        hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: 'Agent HUD · Plan approved' },
+      });
+    }
     if (mode === 'allow' && ev === 'PermissionRequest') {
       return send(res, { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
     }
