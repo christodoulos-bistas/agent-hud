@@ -36,6 +36,10 @@ quit. The plan card's Approve / Keep planning buttons would do nothing. The user
 - A **plan bubble** (chime, title, step headings, line count) appears while a plan waits for approval.
 - **Read plan ↗** opens the plan file (`tool_input.planFilePath`); **Open chat ↗** jumps to the chat.
 - No chat note for plans (none show anywhere anyway: Spike 13).
+- **Dismiss** on the plan card clears the notice (added after review): Esc on the chat's plan dialog sends the HUD no event,
+  so without it the bubble and the gold glow would stay until the next prompt. A later plan is a new notice and chimes again.
+- Re-checked with the user on the installed v1.3 HUD (plan as a plain permission card, Allow from the HUD): VS Code still
+  waited on "Accept this plan?". Accept stays out; plans in the CLI and the desktop app are untested (the user is researching).
 
 ## Claude's calls
 - **Plan notices live in the store**, not the queue (nothing is held). `createPlanNotices()` (new
