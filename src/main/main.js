@@ -234,11 +234,14 @@ function resetPosition() {
   refreshMenu();
 }
 
+// Shown again: one push, so the HUD (sounds no longer quiet) and the panel catch up with what changed
+// while it was hidden (M6).
 function showWindow() {
   if (!win || win.isDestroyed()) return;
   dock();
   win.showInactive();
   placePanel();
+  push();
   refreshMenu();
 }
 // A hidden HUD can't be answered: let every held question go back to its own window (a release, not a

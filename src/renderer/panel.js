@@ -3,7 +3,7 @@
 // comes from the detail goes through esc() before it reaches markup.
 import { spriteSvg } from './sprites.js';
 import { esc, renderChip, chipOf, className, createRenderGate, patch, sourceOf, srcTag } from './hud.js';
-import { renderBubble, renderCard, cardLeftMs, mountCards } from './cards.js';
+import { renderBubble, renderCard, cardLeftMs, mountCards, actionsArmed } from './cards.js';
 import { fmtDuration } from './format.js';
 
 const MAX_STEPS = 5;
@@ -173,6 +173,32 @@ export function panelAction(act, detail, ds = {}) {
   return null;
 }
 
+// The 500 ms arming, for the stack (spec: a bubble appearing under the cursor must not take a click). A
+// bubble takes no "expand" until ARM_MS after it first rendered, the stack's ✕ no "hide-stack" until
+// ARM_MS after the stack became visible. seen() runs on every render with the stack drawn (null or
+// invisible: nothing on screen, so everything arms afresh next time).
+export function createStackArming() {
+  let stackSince = null;
+  const bubbleSince = new Map(); // card id -> when its bubble first rendered
+  return {
+    seen(stack, now) {
+      if (!stack?.visible) { stackSince = null; bubbleSince.clear(); return; }
+      stackSince ??= now;
+      const ids = new Set((Array.isArray(stack.cards) ? stack.cards : []).map((c) => String(c?.id)));
+      for (const id of [...bubbleSince.keys()]) if (!ids.has(id)) bubbleSince.delete(id);
+      for (const id of ids) if (!bubbleSince.has(id)) bubbleSince.set(id, now);
+    },
+    allowed(act, ds = {}, now = Date.now()) {
+      if (act === 'expand') {
+        const since = ds?.card != null ? bubbleSince.get(String(ds.card)) : undefined;
+        return since === undefined || actionsArmed(since, now);
+      }
+      if (act === 'hide-stack') return stackSince === null || actionsArmed(stackSince, now);
+      return true;
+    },
+  };
+}
+
 export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   const root = doc.getElementById('panel-root');
   const call = (name, ...args) => (typeof api?.[name] === 'function' ? api[name](...args) : undefined);
@@ -183,6 +209,7 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   let timer = null;
   let lastExpanded = null;
   let hovered = null;
+  const arm = createStackArming(); // bubbles and the stack's ✕ arm like a card's buttons (I4)
 
   // The panel takes the keyboard focus only while the user types into a card's text box, and gives it
   // back as soon as the answer is sent or released, or the card goes (main: panel:setInteractive).
@@ -217,16 +244,17 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
     if (!stackOn()) setHover(null);
     const open = stackOn() ? stack.expanded ?? null : null;
     const { arming } = cards.show(open, now);
-    if (!stackOn() && !detail) { root.innerHTML = ''; lastExpanded = null; return; }
+    if (!stackOn() && !detail) { root.innerHTML = ''; lastExpanded = null; arm.seen(null, now); return; }
     const tpl = doc.createElement('template');
     tpl.innerHTML = renderStack(stackOn() ? stack : null, now, { leftMs: cards.leftMs(now), arming }) +
       (detail ? renderPanel(detail, now) : '');
     patch(root, tpl.content, rendered);
+    arm.seen(stackOn() ? stack : null, now);
     cards.refresh();
     cards.tick(now);
     const id = open ? String(open.id) : null;
     if (id && id !== lastExpanded) {
-      [...root.querySelectorAll('.bub')].find((el) => el.dataset.card === id)?.scrollIntoView?.({ block: 'nearest' });
+      [...root.querySelectorAll('.bub')].find((el) => el.dataset.card === id)?.closest('.bub-wrap')?.scrollIntoView?.({ block: 'nearest' });
     }
     lastExpanded = id;
   };
@@ -266,7 +294,7 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
     const el = e.target.closest('[data-act]');
     if (!el || !root.contains(el)) return;
     const a = panelAction(el.dataset.act, detail, el.dataset);
-    if (a) call(a.call, a.id);
+    if (a && arm.allowed(el.dataset.act, el.dataset, Date.now())) call(a.call, a.id);
   });
 
   let lastHeight = -1;

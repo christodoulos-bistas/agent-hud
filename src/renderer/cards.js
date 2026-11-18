@@ -136,11 +136,13 @@ function planCard(card, leftMs, arming) {
     ? '<button type="button" class="btn gold" data-act="approve-auto">Approve · auto-accept edits</button>' +
       '<button type="button" class="btn gold" data-act="approve-ask">Approve · ask before edits</button>'
     : '<button type="button" class="btn gold" data-act="approve">Approve</button>';
+  // Without mode switching (PLAN_MODES false) the one Approve leaves the chat's own edit mode (spec, M3).
+  const modeNote = card.planModes ? '' : '<p class="plan-mode">Edit mode stays as set in the chat.</p>';
   return cardOpen(card, 'plan', { arming }) +
     cardTop(card, '<span class="ans-seal" aria-hidden="true">▤</span>') +
     `<div class="plan">${body}</div>` +
     (cut ? '<p class="plan-more">Open the window to read the rest.</p>' : '') +
-    `<div class="btns">${approve}</div>` +
+    `<div class="btns">${approve}</div>${modeNote}` +
     '<div class="reply"><input data-feedback placeholder="What should change?" aria-label="What should change?">' +
     '<button type="button" class="btn ghost" data-act="keep">Keep planning</button></div>' +
     timer(card, leftMs, 'Back to its window in') +
@@ -382,6 +384,8 @@ export function mountCards(host, { api, doc, onInteractive, adopt = false, draft
     const cardEl = cardOf(e.target);
     if (!cardEl) return;
     const act = e.target.matches('[data-reply]') ? 'send' : e.target.matches('[data-feedback]') ? 'keep' : e.target.matches('.other') ? 'answer' : null;
+    // Enter in an empty feedback box is not "Keep planning" (M5); the button still sends it empty.
+    if (act === 'keep' && !String(e.target.value ?? '').trim()) return;
     const btn = act && cardEl.querySelector(`[data-act="${act}"]`);
     if (btn && !btn.disabled && clickAllowed(act, st.cardSince, Date.now())) { e.preventDefault(); btn.click(); }
   });

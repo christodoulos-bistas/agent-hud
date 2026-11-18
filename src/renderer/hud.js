@@ -202,10 +202,12 @@ export function renderRow(agent, { ask, selected = false, tucked = false, highli
 }
 
 
-function face(a) {
+function face(a, cards = []) {
   const mood = moodOf(a);
-  // A needs face reopens the bubble stack; any other face expands the HUD.
-  return `<button type="button" class="face ${mood}" data-key="face:${esc(a.id)}" data-act="${mood === 'needs' ? 'ask' : 'expand'}" style="--d:${bobDelay(a.id)}" ` +
+  // A needs face whose question is held here reopens the bubble stack; any other face expands the HUD
+  // (a question handed back, or a native prompt, has no bubble to show: I3).
+  const ask = mood === 'needs' && cards.some((c) => sessionOf(c) === String(a.id));
+  return `<button type="button" class="face ${mood}" data-key="face:${esc(a.id)}" data-act="${ask ? 'ask' : 'expand'}" style="--d:${bobDelay(a.id)}" ` +
     `title="${esc(a.display)}" aria-label="${esc(a.display)}, ${mood}">` +
     `<span class="sprite-box">${sprite(a.cls, sourceOf(a))}${mood === 'needs' ? SEAL() : ''}</span></button>`;
 }
@@ -215,13 +217,13 @@ function face(a) {
 export function renderParty(snapshot, { collapsed = false } = {}) {
   const selectedId = snapshot?.selected != null ? String(snapshot.selected) : null;
   const agents = Array.isArray(snapshot?.agents) ? snapshot.agents : [];
+  const cards = Array.isArray(snapshot?.cards) ? snapshot.cards : [];
   if (collapsed) {
     return '<div class="party collapsed" data-key="party" data-deep>' +
       '<div class="party-top" data-key="top"><button type="button" class="min" data-act="collapse" title="Expand" aria-label="Expand the HUD">+</button></div>' +
-      `<div class="party-body" data-key="body" data-deep>${agents.map(face).join('')}</div>` +
+      `<div class="party-body" data-key="body" data-deep>${agents.map((a) => face(a, cards)).join('')}</div>` +
     '</div>';
   }
-  const cards = Array.isArray(snapshot?.cards) ? snapshot.cards : [];
   const highlight = snapshot?.highlight != null ? String(snapshot.highlight) : null;
   const parts = [];
   for (const a of agents) {

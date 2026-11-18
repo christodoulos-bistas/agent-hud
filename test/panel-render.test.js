@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { renderPanel, renderStack, timeText, arrowOf, panelAction } from '../src/renderer/panel.js';
+import { renderPanel, renderStack, timeText, arrowOf, panelAction, createStackArming } from '../src/renderer/panel.js';
 import { ARM_MS } from '../src/renderer/cards.js';
 
 const NOW = 1_000_000_000;
@@ -276,4 +276,37 @@ test('Task 11: root markup is the stack alone when there is no detail', () => {
   const stack = { visible: true, cards: [sum(1)], expanded: null };
   assert.equal(renderStack(stack, NOW) + (null ? 'x' : ''), renderStack(stack, NOW));
   assert.doesNotMatch(renderStack(stack, NOW), /class="fly"/);
+});
+
+test('I4: a bubble takes no "expand" for ARM_MS after it first renders; the stack ✕ none after the stack shows', () => {
+  const arm = createStackArming();
+  const T = 5_000_000;
+  const stack = (ids, visible = true) => ({ visible, cards: ids.map((id) => ({ id, sessionId: 's1' })) });
+  const ok = (act, card, now) => arm.allowed(act, card == null ? {} : { card }, now);
+  arm.seen(stack(['a']), T);
+  assert.equal(ok('expand', 'a', T + ARM_MS - 1), false, 'a bubble that appeared under the pointer');
+  assert.equal(ok('hide-stack', null, T + ARM_MS - 1), false, 'the stack ✕ that appeared under the pointer');
+  assert.equal(ok('expand', 'a', T + ARM_MS), true);
+  assert.equal(ok('hide-stack', null, T + ARM_MS), true);
+  // A new bubble arms on its own; the old one and the ✕ stay armed.
+  arm.seen(stack(['a', 'b']), T + 2000);
+  assert.equal(ok('expand', 'b', T + 2100), false);
+  assert.equal(ok('expand', 'a', T + 2100), true);
+  assert.equal(ok('hide-stack', null, T + 2100), true);
+  // A re-render does not restart a bubble's clock.
+  arm.seen(stack(['a', 'b']), T + 2400);
+  assert.equal(ok('expand', 'b', T + 2000 + ARM_MS), true);
+  // Hidden, then shown again: the stack and every bubble arm afresh.
+  arm.seen(stack(['a', 'b'], false), T + 3000);
+  arm.seen(null, T + 3100);
+  arm.seen(stack(['a', 'b']), T + 4000);
+  assert.equal(ok('hide-stack', null, T + 4100), false);
+  assert.equal(ok('expand', 'a', T + 4100), false);
+  assert.equal(ok('expand', 'a', T + 4000 + ARM_MS), true);
+  // A bubble that went and came back arms again.
+  arm.seen(stack(['b']), T + 5000);
+  arm.seen(stack(['a', 'b']), T + 5100);
+  assert.equal(ok('expand', 'a', T + 5200), false);
+  // Other panel actions are never held back.
+  for (const act of ['close', 'open']) assert.equal(arm.allowed(act, {}, T + 5101), true, act);
 });

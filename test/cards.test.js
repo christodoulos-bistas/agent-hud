@@ -116,7 +116,7 @@ test('plan card escapes, bolds headings, cuts at 20000 with the hint, and varies
   assert.ok(!h.includes('<script>'));
   assert.match(h, /<b>#? ?Heading<\/b>|<b># Heading<\/b>/);
   assert.ok(!h.includes('plan-more'));
-  assert.match(h, /data-act="approve"[^>]*>Approve</);
+  assert.ok(h.includes('data-act="approve">Approve</button></div><p class="plan-mode">Edit mode stays as set in the chat.</p>'), 'M3: one Approve says the mode stays as set');
   assert.ok(!h.includes('approve-auto'));
   assert.match(h, /<input data-feedback placeholder="What should change\?"/);
   assert.match(h, /data-act="keep"[^>]*>Keep planning</);
@@ -124,6 +124,7 @@ test('plan card escapes, bolds headings, cuts at 20000 with the hint, and varies
   const two = cards.renderCard(PLAN('x', { planModes: ['acceptEdits', 'default'] }), {});
   assert.match(two, /data-act="approve-auto"[^>]*>Approve · auto-accept edits</);
   assert.match(two, /data-act="approve-ask"[^>]*>Approve · ask before edits</);
+  assert.ok(!two.includes('plan-mode'), 'the two approves set the mode themselves');
   const long = cards.renderCard(PLAN('a'.repeat(20001)), {});
   assert.ok(long.includes('<p class="plan-more">Open the window to read the rest.</p>'));
   assert.ok(!long.includes('a'.repeat(20001)) && long.includes('a'.repeat(20000)));
@@ -182,3 +183,23 @@ test('R1: the hold travels with the card (holdMs): the ring, the countdown bar a
   m.clear();
 });
 
+test('M5: Enter in an empty feedback box does not send "Keep planning"; with text it does; the button still sends empty', () => {
+  const L = {};
+  const input = { value: '', dataset: {}, matches: (sel) => sel === '[data-feedback]' };
+  let clicks = 0;
+  const keep = { dataset: { act: 'keep' }, disabled: false, click: () => { clicks++; } };
+  const cardEl = { dataset: { card: 'pl1', session: 's1' }, querySelector: (sel) => (sel === '[data-feedback]' ? input : sel === '[data-act="keep"]' ? keep : null), querySelectorAll: () => [] };
+  input.closest = (sel) => (sel === '.ans' ? cardEl : null);
+  const host = { addEventListener: (t, f) => { L[t] = f; }, contains: () => true, querySelector: () => null, querySelectorAll: () => [] };
+  const m = cards.mountCards(host, { api: {}, adopt: true });
+  m.show({ id: 'pl1', kind: 'plan', sessionId: 's1', holdMs: 540000 }, Date.now() - 10_000);
+  let prevented = 0;
+  const enter = () => L.keydown({ key: 'Enter', isComposing: false, target: input, preventDefault: () => { prevented++; } });
+  for (const v of ['', '   ']) { input.value = v; enter(); }
+  assert.equal(clicks, 0, 'an empty box: Enter does nothing');
+  assert.equal(prevented, 0);
+  input.value = 'add a rollback step';
+  enter();
+  assert.equal(clicks, 1, 'with text, Enter sends Keep planning');
+  m.clear();
+});

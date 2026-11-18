@@ -426,9 +426,18 @@ test('a turn row with a recap reads "<cls> · <recap>" instead of finished', () 
 });
 
 test('a needs face in the collapsed HUD opens the stack (data-act="ask"); others expand', () => {
-  const html = renderParty({ agents: [agent({ id: 's1', mood: 'needs' }), agent({ id: 's2' })] }, { collapsed: true });
+  const cards = [{ id: 'c1', kind: 'permission', sessionId: 's1' }];
+  const html = renderParty({ agents: [agent({ id: 's1', mood: 'needs' }), agent({ id: 's2' })], cards }, { collapsed: true });
   assert.match(html, /data-key="face:s1" data-act="ask"/);
   assert.match(html, /data-key="face:s2" data-act="expand"/);
+});
+
+test('I3: a needs face with no held card (handed back, or a native prompt) expands the HUD instead of a dead "ask"', () => {
+  const agents = [agent({ id: 's1', mood: 'needs', handedBack: true }), agent({ id: 's2', mood: 'needs' })];
+  const html = renderParty({ agents, cards: [{ id: 'c9', kind: 'permission', sessionId: 's3' }] }, { collapsed: true });
+  assert.match(html, /data-key="face:s1" data-act="expand"/);
+  assert.match(html, /data-key="face:s2" data-act="expand"/);
+  assert.match(renderParty({ agents }, { collapsed: true }), /data-key="face:s1" data-act="expand"/, 'no cards at all');
 });
 
 test('the HUD page allows blob: media in its CSP', async () => {
