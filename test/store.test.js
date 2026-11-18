@@ -620,12 +620,13 @@ test('Task 7: snapshot publishes every held card in queue order, with lines and 
   assert.equal(d.card, undefined); assert.equal(d.hasCard, true);
 });
 
-test('Task 7: plan card carries planModes', async () => {
-  const { PLAN_MODES } = await import('../src/main/answers.js');
-  const { queue, store } = setup();
+test('plan notice: no planModes on the card; a plan without headings counts lines', () => {
+  const { store } = setup();
   store.setSessions([S('s1')]);
-  queue.add({ id: 'pl', sessionId: 's1', kind: 'plan', payload: { tool_name: 'ExitPlanMode', tool_input: { plan: 'a' + String.fromCharCode(10) + 'b' } } });
-  assert.equal(store.cardById('pl').planModes, PLAN_MODES);
+  const input = { plan: 'a' + String.fromCharCode(10) + 'b' };
+  store.onEvent(ev('s1', 'PreToolUse', 1000, { toolName: 'ExitPlanMode', toolInput: input, raw: { tool_name: 'ExitPlanMode', tool_input: input } }));
+  assert.equal('planModes' in store.cardById('plan:s1:1'), false);
+  assert.equal(store.cardById('plan:s1:1').payload.tool_input.planFilePath, null);
   assert.equal(store.snapshot().cards[0].line, 'Plan ready · 2 lines');
 });
 
@@ -635,4 +636,118 @@ test('Task 7: a card whose session is not in the session list still appears in c
   queue.add({ id: 'z', sessionId: 'zz', kind: 'permission', payload: { tool_name: 'Bash' } });
   const c = store.snapshot().cards;
   assert.equal(c.length, 1); assert.equal(c[0].id, 'z'); assert.equal(c[0].display, 'unknown');
+});
+
+// Plan notices (notice-and-read): nothing is held, the store shows the plan from Claude's events.
+const PLAN_MD = '# Ship it\n## Step one\n## Step two\ntext';
+const PLAN_PATH = 'C:\\Users\\u\\.claude\\plans\\ship.md';
+const planEv = (sessionId, event, at, extra = {}) => ev(sessionId, event, at, {
+  toolName: 'ExitPlanMode', toolInput: { plan: PLAN_MD, planFilePath: PLAN_PATH }, source: 'claude',
+  raw: { tool_name: 'ExitPlanMode', tool_input: { plan: PLAN_MD, planFilePath: PLAN_PATH } }, ...extra,
+});
+
+test('plan notice: snapshot cards are the queue summaries, then the notice summaries', () => {
+  const { queue, store } = setup(1000);
+  store.setSessions([S('s1'), S('s2')]);
+  store.onEvent(planEv('s1', 'PreToolUse', 1000));
+  queue.add({ id: 'a', sessionId: 's2', kind: 'permission', payload: { tool_name: 'Bash', tool_input: { command: 'ls' } } });
+  const snap = store.snapshot();
+  assert.deepEqual(snap.cards.map((c) => c.id), ['a', 'plan:s1:1']);
+  const n = snap.cards[1];
+  assert.deepEqual(n, { id: 'plan:s1:1', kind: 'plan', sessionId: 's1', display: 's1 · e0', cls: n.cls, source: 'claude', line: 'Plan ready · 3 steps', expiresAt: null, holdMs: null, canOpen: true });
+  assert.equal(typeof n.cls, 'string');
+  assert.deepEqual(Object.keys(n).sort(), Object.keys(snap.cards[0]).sort(), 'same CardSummary keys as a held card');
+});
+
+test('plan notice: cardById returns the full card with tool_input { plan, planFilePath }', () => {
+  const { store } = setup(1000);
+  store.setSessions([S('s1')]);
+  store.onEvent(planEv('s1', 'PermissionRequest', 1000));
+  const c = store.cardById('plan:s1:1');
+  assert.deepEqual(c, { id: 'plan:s1:1', kind: 'plan', sessionId: 's1', display: 's1 · e0', cls: c.cls, source: 'claude', payload: { tool_input: { plan: PLAN_MD, planFilePath: PLAN_PATH } }, expiresAt: null, holdMs: null, canOpen: true });
+  assert.equal('planModes' in c, false);
+  assert.equal(store.cardById('plan:s1:2'), null);
+});
+
+test('plan notice: canOpen follows the session; a session not listed shows "unknown"', () => {
+  const engine = createClassEngine();
+  const queue = createQueue({ now: () => 1, setTimer: () => 0, clearTimer: () => {} });
+  const store = createStore({ engine, queue, now: () => 1, canOpen: () => false });
+  store.setSessions([S('s1')]);
+  store.onEvent(planEv('s1', 'PreToolUse', 1));
+  store.onEvent(planEv('zz', 'PreToolUse', 1));
+  const [a, b] = store.snapshot().cards;
+  assert.equal(a.canOpen, false);
+  assert.equal(b.display, 'unknown'); assert.equal(b.canOpen, false);
+});
+
+test('plan notice: the chat is stage needs, counted in needs, and detail.hasCard is true', () => {
+  const { store } = setup(1000);
+  store.setSessions([S('s1'), S('s2')]);
+  store.onEvent(planEv('s1', 'PreToolUse', 1000));
+  const snap = store.snapshot();
+  const a = snap.agents.find((x) => x.id === 's1');
+  assert.equal(a.stage, 'needs'); assert.equal(a.mood, 'needs');
+  assert.equal(snap.counts.needs, 1);
+  assert.equal(store.detail('s1').hasCard, true);
+  assert.equal(store.detail('s2').hasCard, false);
+});
+
+test('plan notice: Claude moving on clears the card and the needs stage', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1')]);
+  store.onEvent(planEv('s1', 'PreToolUse', 1000));
+  set(2000); store.onEvent(planEv('s1', 'PostToolUse', 2000));
+  const snap = store.snapshot();
+  assert.deepEqual(snap.cards, []);
+  assert.notEqual(snap.agents[0].stage, 'needs');
+  assert.equal(store.detail('s1').hasCard, false);
+  assert.equal(store.cardById('plan:s1:1'), null);
+});
+
+test('plan notice: a subagent or Codex ExitPlanMode never shows one', () => {
+  const { store } = setup(1000);
+  store.setSessions([S('s1')]);
+  store.onEvent(planEv('s1', 'PreToolUse', 1000, { raw: { tool_name: 'ExitPlanMode', agent_id: 'sub' } }));
+  store.onEvent(planEv('s1', 'PermissionRequest', 1000, { source: 'codex' }));
+  assert.deepEqual(store.snapshot().cards, []);
+});
+
+test('plan notice: a tucked (idle an hour) chat comes back on a plan', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1', { status: 'idle', statusSince: 1000 })]);
+  set(1000 + 3_600_000);
+  assert.equal(store.snapshot().tucked.length, 1);
+  store.onEvent(planEv('s1', 'PreToolUse', 1000 + 3_600_000));
+  const snap = store.snapshot();
+  assert.deepEqual(snap.agents.map((a) => a.id), ['s1']); assert.equal(snap.tucked.length, 0);
+});
+
+test('plan notice: a ✕-hidden chat comes back on a plan; hide is ignored while it shows', () => {
+  const { store } = setup(1000);
+  store.setSessions([S('s1')]);
+  store.hide('s1');
+  assert.equal(store.snapshot().tucked.length, 1);
+  store.onEvent(planEv('s1', 'PreToolUse', 1000));
+  assert.deepEqual(store.snapshot().agents.map((a) => a.id), ['s1']);
+  store.hide('s1');
+  assert.equal(store.snapshot().tucked.length, 0, 'no hiding a chat whose plan waits');
+});
+
+test('plan notice: forgetting the session drops its notice', () => {
+  const { store } = setup(1000);
+  store.setSessions([S('s1')]);
+  store.onEvent(planEv('s1', 'PreToolUse', 1000));
+  store.setSessions([]); store.setSessions([]);
+  assert.deepEqual(store.snapshot().cards, []);
+  assert.equal(store.cardById('plan:s1:1'), null);
+});
+
+test('plan notice: stageKey changes when a plan shows (the push sees it)', () => {
+  const { store } = setup(1000);
+  store.setSessions([S('s1')]);
+  const before = store.stageKey();
+  store.onEvent(planEv('s1', 'PreToolUse', 1000));
+  assert.notEqual(store.stageKey(), before);
+  assert.match(store.stageKey(), /s1:needs/);
 });

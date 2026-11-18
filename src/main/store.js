@@ -3,7 +3,7 @@ import { displayName, baseOf, knownTime } from './sessions.js';
 import { activityLine, createStepLog, recapOf } from './steps.js';
 import { stageOf, stuckOf, currentOf } from './stages.js';
 import { bubbleLine } from './bubbles.js';
-import { PLAN_MODES } from './answers.js';
+import { createPlanNotices } from './plans.js';
 import { quietSince, tuckOf } from './tuck.js';
 
 const NEEDS_NOTIFS = new Set(['permission_prompt', 'elicitation_dialog', 'agent_needs_input']);
@@ -12,7 +12,7 @@ const isSynthetic = (ev) => String((ev.raw || {}).prompt || '').trim().startsWit
 export { activityLine } from './steps.js';
 
 
-export function createStore({ engine, queue, now = Date.now, stepLog, onError = (e) => console.error(e), canOpen = () => true }) {
+export function createStore({ engine, queue, now = Date.now, stepLog, plans = createPlanNotices(), onError = (e) => console.error(e), canOpen = () => true }) {
   // Whether "open window" can focus this session (main knows where code.cmd is); unknown session → false.
   const openable = (sess) => { try { return !!sess && !!canOpen(sess); } catch { return false; } };
   let sessions = [];
@@ -57,6 +57,7 @@ export function createStore({ engine, queue, now = Date.now, stepLog, onError = 
       s.notif = { type: (ev.raw || {}).notification_type, at: ev.at };
     }
     if (e !== 'Notification') queue.clearHandedBack(ev.sessionId, agentId);
+    plans.onEvent(ev); // a plan waiting on "Accept this plan?": a notice only, nothing is held
     // The v1.1 step log goes last, on its own: a throw there can't skip the bookkeeping above (M6).
     try { steps.push(ev); } catch (err) { try { onError(err); } catch { /* never break onEvent */ } }
   }
@@ -76,7 +77,7 @@ export function createStore({ engine, queue, now = Date.now, stepLog, onError = 
       if (n < 2) { missed.set(old.sessionId, n); held.push(old); continue; }
       missed.delete(old.sessionId);
       engine.forget(old.sessionId); steps.forget(old.sessionId); stages.delete(old.sessionId); state.delete(old.sessionId); optIn.delete(old.sessionId);
-      hidden.delete(old.sessionId);
+      hidden.delete(old.sessionId); plans.forget(old.sessionId);
     }
     if (poll) for (const id of keep) missed.delete(id);
     // A chat without hooks starts a new turn when its file turns busy: that wakes a ✕-hidden one. A chat
@@ -128,7 +129,8 @@ export function createStore({ engine, queue, now = Date.now, stepLog, onError = 
       const s = st(id);
       const handedBack = handed.some((h) => h.sessionId === id);
       const notifPending = !!s.notif && NEEDS_NOTIFS.has(s.notif.type) && s.notif.at >= (s.lastMainActivityAt ?? -Infinity);
-      const pending = items.some((it) => it.sessionId === id) || handedBack || notifPending;
+      // A plan notice waits on the user too (in the chat's own dialog): stage needs.
+      const pending = items.some((it) => it.sessionId === id) || handedBack || notifPending || !!plans.get(id);
       const view = steps.view(id);
       const baseMood = moodOf({ pending, stoppedAt: s.stoppedAt, lastActivityAt: s.lastActivityAt, status: sess.status }, t);
       const stage = stageOf({ mood: baseMood, view, status: sess.status, now: t });
@@ -171,14 +173,19 @@ export function createStore({ engine, queue, now = Date.now, stepLog, onError = 
     expiresAt: finiteOr(it.expiresAt), holdMs: finiteOr(it.holdMs), canOpen: openable(sessions.find((x) => x.sessionId === it.sessionId)),
   });
 
-  // The full card (payload included) for one held question, or null once it is gone.
+  // A plan notice rides the stack like a held card, but read-only: no hold, no deadline, no answer.
+  const noticeBase = (n, t) => ({
+    id: n.id, kind: 'plan', sessionId: n.sessionId, display: displayOf(n.sessionId), cls: engine.classOf(n.sessionId, t),
+    source: 'claude', expiresAt: null, holdMs: null, canOpen: openable(sessions.find((x) => x.sessionId === n.sessionId)),
+  });
+
+  // The full card (payload included) for one held question or plan notice, or null once it is gone.
   function cardById(id) {
     const it = queue.list().find((x) => x.id === id);
-    if (!it) return null;
-    const c = cardBase(it, now());
-    const full = { ...c, payload: it.payload };
-    if (it.kind === 'plan') full.planModes = PLAN_MODES;
-    return full;
+    if (it) return { ...cardBase(it, now()), payload: it.payload };
+    const n = plans.list().find((x) => x.id === id);
+    if (!n) return null;
+    return { ...noticeBase(n, now()), payload: { tool_input: { plan: n.plan, planFilePath: n.planFilePath } } };
   }
 
   function snapshot() {
@@ -186,7 +193,10 @@ export function createStore({ engine, queue, now = Date.now, stepLog, onError = 
     const all = computeAgents(t);
     const agents = all.filter((x) => !x.tuck);
     const tucked = all.filter((x) => x.tuck);
-    const cards = queue.list().map((it) => ({ ...cardBase(it, t), line: bubbleLine(it) }));
+    const cards = [
+      ...queue.list().map((it) => ({ ...cardBase(it, t), line: bubbleLine(it) })),
+      ...plans.list().map((n) => ({ ...noticeBase(n, t), line: bubbleLine({ kind: 'plan', payload: { tool_input: { plan: n.plan } } }) })),
+    ];
     return { agents, tucked, cards, counts: { total: agents.length, needs: agents.filter((x) => x.mood === 'needs').length } };
   }
 
@@ -203,7 +213,7 @@ export function createStore({ engine, queue, now = Date.now, stepLog, onError = 
       connected: !!state.get(id)?.connected,
       stepCount: view.stepCount, current: currentOf(view, sess.status), steps: view.steps, helpers: view.helpers,
       // Where a "needs you" is waiting, for the panel's line (M3): a card in the panel, or its own window.
-      handedBack: a.handedBack, hasCard: queue.list().some((it) => it.sessionId === id), canOpen: a.canOpen,
+      handedBack: a.handedBack, hasCard: queue.list().some((it) => it.sessionId === id) || !!plans.get(id), canOpen: a.canOpen,
       lastMessage: a.stage === 'turn' ? (view.lastMessage ?? null) : null,
       recap: a.stage === 'turn' ? recapOf(view.recap, view.taskAt) : null,
     };
