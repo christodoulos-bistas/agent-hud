@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { approvalState } from './codex-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply, planApprove, planKeepPlanning, withRecord, PLAN_MODES } from './answers.js';
 import { recordText } from './records.js';
@@ -340,8 +341,31 @@ export function loadConfig(file) {
   let dirty = false;
   if (!Number.isInteger(cfg.port) || cfg.port < 1 || cfg.port > 65535) { cfg.port = DEFAULT_PORT; dirty = true; }
   if (typeof cfg.secret !== 'string' || !/^[0-9a-f]{32}$/.test(cfg.secret)) { cfg.secret = crypto.randomBytes(16).toString('hex'); dirty = true; }
+  const s = cfg.sounds;
+  const okPath = (v) => (typeof v === 'string' && v ? v : null);
+  const sounds = { muted: s?.muted === true, needs: okPath(s?.needs), finished: okPath(s?.finished) };
+  if (!isDeepStrictEqual(s, sounds)) { cfg.sounds = sounds; dirty = true; }
   if (dirty) saveConfig(file, cfg);
   return cfg;
+}
+
+// Custom attention sounds: .wav, .mp3 or .ogg, at most 2 MiB.
+export const SOUND_MAX_BYTES = 2 * 1024 * 1024;
+const SOUND_MIME = { '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg' };
+export function soundFileOk(filePath, size) {
+  const mime = SOUND_MIME[path.extname(String(filePath)).toLowerCase()];
+  if (!mime) return { ok: false, reason: 'type' };
+  if (!(size <= SOUND_MAX_BYTES)) return { ok: false, reason: 'size' };
+  return { ok: true, mime };
+}
+
+// { bytes: Uint8Array, mime } for a usable sound file, else null. Stats before reading; never throws.
+export function readSoundFile(filePath, { readFile = fs.readFileSync, stat = fs.statSync } = {}) {
+  try {
+    const verdict = soundFileOk(filePath, stat(filePath).size);
+    if (!verdict.ok) return null;
+    return { bytes: new Uint8Array(readFile(filePath)), mime: verdict.mime };
+  } catch { return null; }
 }
 
 export function saveConfig(file, cfg) {

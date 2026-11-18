@@ -19,7 +19,7 @@ import { readSessionFiles, listSessions } from './sessions.js';
 import { createCodexSessions, readRolloutMeta } from './codex-sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor, resolveCodeCmd, canOpen, CODEX_ACTIVATE, chatLinkFor, createChatOpener, VSCODE_TITLES_PS } from './focus.js';
-import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, panelShows, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies } from './wiring.js';
+import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, panelShows, createThrottle, createInteractiveCheck, loadConfig, saveConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
@@ -123,7 +123,7 @@ const pushNow = guarded('push', () => {
   // The hovered bubble went: so does its row's highlight.
   if (highlight != null && !snap.cards.some((c) => String(c.sessionId) === highlight)) highlight = null;
   const anchor = anchorFor(snap, panelNow(snap));
-  try { win.webContents.send('snapshot', { ...snap, collapsed, tuckOpen, selected: pick.selected?.id ?? null, anchor, highlight }); } catch (err) { log('push', err); }
+  try { win.webContents.send('snapshot', { ...snap, sound: { muted: !!cfg?.sounds?.muted, quiet: !hudState().visible }, collapsed, tuckOpen, selected: pick.selected?.id ?? null, anchor, highlight }); } catch (err) { log('push', err); }
   placePanel(snap);
   pushDetail();
   pushStack();
@@ -275,16 +275,81 @@ function setCollapsed(on) {
   refreshMenu();
 }
 
+// ---------------------------------------------------------------- sounds
+
+const CUES = [['needs', 'Needs-you sound'], ['finished', 'Finished sound']];
+
+function sendSoundFile(cue, file) {
+  try { if (win && !win.isDestroyed()) win.webContents.send('sound-file', cue, file); } catch (err) { log('sound-file', err); }
+}
+
+// Both saved sounds to the HUD: the file, or null (default synth) when none is saved or it can't be read.
+// An unreadable file keeps its saved path: the user may reconnect a drive.
+function sendSoundFiles() {
+  for (const [cue] of CUES) {
+    const p = cfg?.sounds?.[cue];
+    let file = null;
+    if (p) { file = readSoundFile(p); if (!file) log('sound file unreadable', cue, p); }
+    sendSoundFile(cue, file);
+  }
+}
+
+function setSoundPath(cue, p, file) {
+  cfg.sounds = { ...cfg.sounds, [cue]: p };
+  try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
+  sendSoundFile(cue, file);
+  refreshMenu();
+}
+
+async function chooseSound(cue) {
+  try {
+    const r = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: 'Sounds', extensions: ['wav', 'mp3', 'ogg'] }] });
+    if (r.canceled || !r.filePaths?.[0]) return;
+    const p = r.filePaths[0];
+    const file = readSoundFile(p);
+    if (!file) {
+      let reason = 'read';
+      try { const v = soundFileOk(p, fs.statSync(p).size); if (!v.ok) reason = v.reason; } catch { /* unreadable */ }
+      const detail = reason === 'type' ? 'Use a .wav, .mp3 or .ogg file.' : reason === 'size' ? 'Use a file of 2 MB or less.' : 'The file could not be read.';
+      await dialog.showMessageBox({ type: 'warning', message: "That sound can't be used", detail });
+      return;
+    }
+    setSoundPath(cue, p, file);
+  } catch (err) { log('choose sound', err); }
+}
+
+function soundsMenu() {
+  const s = cfg?.sounds ?? {};
+  return {
+    label: 'Sounds',
+    submenu: [
+      { label: 'Mute', type: 'checkbox', checked: !!s.muted, click: (mi) => {
+        cfg.sounds = { ...cfg.sounds, muted: mi.checked };
+        try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
+        push(); refreshMenu();
+      } },
+      { type: 'separator' },
+      ...CUES.map(([cue, label]) => ({
+        label,
+        submenu: [
+          { label: 'Choose…', click: () => { chooseSound(cue); } },
+          { label: 'Default', type: 'checkbox', checked: !s[cue], click: () => setSoundPath(cue, null, null) },
+        ],
+      })),
+    ],
+  };
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: WIDTH, height: contentHeight, frame: false, transparent: true, alwaysOnTop: true, skipTaskbar: true,
     focusable: false, resizable: false, show: false,
-    webPreferences: { preload: path.join(SRC, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { preload: path.join(SRC, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, autoplayPolicy: 'no-user-gesture-required' },
   });
   const wc = win.webContents;
   wc.setWindowOpenHandler(() => ({ action: 'deny' }));
   wc.on('will-navigate', (e) => e.preventDefault());
-  wc.on('did-finish-load', () => { rendererAlive = true; pushNow(); });
+  wc.on('did-finish-load', () => { rendererAlive = true; pushNow(); sendSoundFiles(); });
   wc.on('console-message', consoleLog('renderer:'));
   wc.on('render-process-gone', (_e, details) => {
     log('renderer gone', details?.reason);
@@ -737,6 +802,7 @@ function refreshMenu() {
     { label: 'Install hooks', click: installFromTray },
     { label: 'Remove hooks', click: doUninstall },
     { type: 'separator' },
+    soundsMenu(),
     { label: 'Start with Windows', type: 'checkbox', checked: atLogin, click: (mi) => { app.setLoginItemSettings({ openAtLogin: mi.checked, ...loginOptions() }); refreshMenu(); } },
     { type: 'separator' },
     { label: 'Quit', click: () => quit() },

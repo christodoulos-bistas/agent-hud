@@ -8,6 +8,12 @@ contextBridge.exposeInMainWorld('hud', {
     ipcRenderer.on('snapshot', listener);
     return () => ipcRenderer.removeListener('snapshot', listener);
   },
+  onSoundFile(fn) {
+    if (typeof fn !== 'function') return undefined;
+    const listener = (_e, cue, file) => fn(cue, file);
+    ipcRenderer.on('sound-file', listener);
+    return () => ipcRenderer.removeListener('sound-file', listener);
+  },
   answer: (id, response) => ipcRenderer.send('hud:answer', String(id), response),
   release: (id) => ipcRenderer.send('hud:release', String(id)),
   setReplyOptIn: (sessionId, on) => ipcRenderer.send('hud:setReplyOptIn', String(sessionId), !!on),

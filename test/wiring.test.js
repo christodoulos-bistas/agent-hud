@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, stackVisible, panelShows, anchorOf, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, stackVisible, panelShows, anchorOf, createThrottle, createInteractiveCheck, loadConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { installCodexHooksFile, removeCodexHooksFile, codexHookCommand } from '../src/main/codex-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply, planApprove, planKeepPlanning, PLAN_MODES } from '../src/main/answers.js';
@@ -672,4 +672,36 @@ test('recordText: an over-long record is exactly 160 characters ending in an ell
   const t = recordText(long, { kind: 'allow' });
   assert.equal(t.length, 160);
   assert.ok(t.endsWith('…'));
+});
+
+test('soundFileOk: wav/mp3/ogg by extension (any case), others and big files refused', () => {
+  assert.deepEqual(soundFileOk('a.WAV', 10), { ok: true, mime: 'audio/wav' });
+  assert.deepEqual(soundFileOk('a.mp3', 10), { ok: true, mime: 'audio/mpeg' });
+  assert.deepEqual(soundFileOk('a.ogg', 10), { ok: true, mime: 'audio/ogg' });
+  assert.deepEqual(soundFileOk('a.flac', 10), { ok: false, reason: 'type' });
+  assert.deepEqual(soundFileOk('a.wav', 2 * 1024 * 1024), { ok: true, mime: 'audio/wav' });
+  assert.deepEqual(soundFileOk('a.wav', 2 * 1024 * 1024 + 1), { ok: false, reason: 'size' });
+});
+
+test('readSoundFile: stats first, reads good files, null on any failure and never throws', () => {
+  let read = false;
+  assert.equal(readSoundFile('a.wav', { stat: () => { throw new Error('x'); }, readFile: () => { read = true; } }), null);
+  assert.equal(read, false);
+  assert.equal(readSoundFile('a.flac', { stat: () => ({ size: 1 }), readFile: () => { read = true; } }), null);
+  assert.equal(readSoundFile('a.wav', { stat: () => ({ size: 3 * 1024 * 1024 }), readFile: () => { read = true; } }), null);
+  assert.equal(read, false);
+  assert.equal(readSoundFile('a.wav', { stat: () => ({ size: 1 }), readFile: () => { throw new Error('x'); } }), null);
+  const r = readSoundFile('a.mp3', { stat: () => ({ size: 3 }), readFile: () => Buffer.from([1, 2, 3]) });
+  assert.equal(r.mime, 'audio/mpeg');
+  assert.deepEqual([...r.bytes], [1, 2, 3]);
+});
+
+test('loadConfig: old configs get the sounds default; saved sounds are kept', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hudcfg-'));
+  const f = path.join(dir, 'config.json');
+  assert.deepEqual(loadConfig(f).sounds, { muted: false, needs: null, finished: null });
+  fs.writeFileSync(f, JSON.stringify({ port: 47821, secret: 'a'.repeat(32), sounds: { muted: true, needs: 'C:/x.wav' } }));
+  assert.deepEqual(loadConfig(f).sounds, { muted: true, needs: 'C:/x.wav', finished: null });
+  fs.writeFileSync(f, JSON.stringify({ port: 47821, secret: 'a'.repeat(32), sounds: 5 }));
+  assert.deepEqual(loadConfig(f).sounds, { muted: false, needs: null, finished: null });
 });
