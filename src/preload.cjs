@@ -19,4 +19,5 @@ contextBridge.exposeInMainWorld('hud', {
   hideAgent: (sessionId) => ipcRenderer.send('hud:hideAgent', String(sessionId)),
   showTucked: (on) => ipcRenderer.send('hud:showTucked', !!on),
   reportHeight: (px) => ipcRenderer.send('hud:reportHeight', Number(px)),
+  showStack: () => ipcRenderer.send('hud:showStack'),
 });

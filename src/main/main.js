@@ -19,7 +19,7 @@ import { readSessionFiles, listSessions } from './sessions.js';
 import { createCodexSessions, readRolloutMeta } from './codex-sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor, resolveCodeCmd, canOpen, CODEX_ACTIVATE, chatLinkFor, createChatOpener, VSCODE_TITLES_PS } from './focus.js';
-import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from './wiring.js';
+import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, panelShows, createThrottle, createInteractiveCheck, loadConfig, saveConfig, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
@@ -70,14 +70,19 @@ let collapsed = false;
 let tuckOpen = false; // v1.3: the HUD's "N tucked away" list is unfolded
 let contentHeight = 120;
 let quitting = null;
-// The detail panel: main owns which agent is selected (pick.selected = { id, rowY }: rowY is the row's
-// centre in px from the HUD's top, null until the HUD reports it), and creates the panel window the
-// first time one is. A question selects its agent by itself (autoSelect, pick.auto) and puts back what
-// was open (pick.before) when it goes; a click or ✕ is the user's choice (userSelect).
-let pick = { selected: null, auto: false, before: null, cardId: null };
+// The side panel: main owns its state (pick, wiring's stack state machine: the selected agent, the
+// expanded card, the hidden stack) and creates the panel window the first time there is something to
+// show, the bubble stack or an agent's details. Expanding a card selects its agent by itself (pick.auto)
+// and puts back what was open (pick.before) when it goes; a click or ✕ is the user's choice (userSelect).
+let pick = STACK_INIT;
+// The row the panel's arrow points at, as the HUD last reported it: { id, rowY } with rowY the row's
+// centre in px from the HUD's top. Used only while it names the snapshot's anchor.
+let anchorRow = null;
+let highlight = null; // the session of the bubble under the pointer, for the HUD's row highlight
 let panelWin = null;
 let panelHeight = 200; // until the panel reports its content height
 let sentDetail; // JSON of the last detail sent, so an unchanged one doesn't re-render the panel
+let sentStack; // JSON of the last stack sent
 let place = null; // { side, arrowY } of the last placement, for the panel's arrow
 let sentPlace; // JSON of the last place sent
 
@@ -94,35 +99,58 @@ const store = createStore({ engine, queue, holdMs: HOLD_MS, replyMs: REPLY_MS, o
 // ---------------------------------------------------------------- snapshot
 
 const hudState = () => ({ collapsed, tuckOpen, visible: !!win && !win.isDestroyed() && win.isVisible() });
-// panelTarget's view of the HUD for agent `id`: hasCard when that agent owns the active question.
-const panelHud = (id, snap) => ({ ...hudState(), hasCard: !!snap?.card && String(snap.card.sessionId) === String(id) });
+// What the panel shows for this snapshot (panelShows: { stack, detailId }); nothing once quitting.
+const panelNow = (snap) => (quitting ? { stack: false, detailId: null } : panelShows(pick, snap, hudState()));
+// The row the panel's arrow points at: the agent whose details show, else the first bubble's agent
+// while the stack shows. Never a row that isn't on screen (a tucked chat with the list folded).
+function anchorFor(snap, shows) {
+  const id = shows.detailId ?? (shows.stack ? snap.cards?.[0]?.sessionId : null);
+  return id == null ? null : String(id);
+}
 
 // Every snapshot push also re-places the panel and refreshes its detail (spec 6.3: the same throttle).
 // Run from timers and IPC, so guarded (I4): a throw is logged, never an error box.
 const pushNow = guarded('push', () => {
   if (!win || win.isDestroyed()) return;
   const snap = store.snapshot();
-  // A new question opens the panel on its agent; when it goes, the panel goes back to what was open.
-  pick = autoSelect(pick, snap.card);
+  // An expanded card that went folds (an auto selection goes back to what was open); a card the user
+  // hasn't seen brings a hidden stack back.
+  pick = stackUpdate(pick, snap.cards);
   // A selection the user made closes when its agent left the list, or the HUD was hidden or collapsed.
-  // One the question made stays until the question goes (its agent can be missing from the list for a
-  // poll or two; placePanel keeps the panel hidden meanwhile).
-  if (pick.selected && !pick.auto && !panelTarget(pick.selected.id, snap, panelHud(pick.selected.id, snap))) pick = { ...pick, selected: null };
-  try { win.webContents.send('snapshot', { ...snap, card: hudCard(snap.card), collapsed, tuckOpen, selected: pick.selected?.id ?? null }); } catch (err) { log('push', err); }
+  // One an expanded card made stays until the card goes (its agent can be missing from the list for a
+  // poll or two; the panel shows no details meanwhile).
+  if (pick.selected && !pick.auto && !panelNow(snap).detailId) pick = userSelect(pick, null, snap.cards);
+  // The hovered bubble went: so does its row's highlight.
+  if (highlight != null && !snap.cards.some((c) => String(c.sessionId) === highlight)) highlight = null;
+  const anchor = anchorFor(snap, panelNow(snap));
+  try { win.webContents.send('snapshot', { ...snap, collapsed, tuckOpen, selected: pick.selected?.id ?? null, anchor, highlight }); } catch (err) { log('push', err); }
   placePanel(snap);
   pushDetail();
+  pushStack();
 }, log);
 const push = createThrottle(pushNow, PUSH_MS);
 queue.onChange(push);
 
 const pushDetailNow = guarded('detail', () => {
   if (!panelWin || panelWin.isDestroyed()) return;
-  const d = pick.selected ? store.detail(pick.selected.id) : null; // null empties a hidden panel
+  const { detailId } = panelNow(store.snapshot());
+  const d = detailId ? store.detail(detailId) : null; // null empties the details (stack only, or hidden)
   const json = JSON.stringify(d);
   if (json === sentDetail) return;
   try { panelWin.webContents.send('detail', d); sentDetail = json; } catch (err) { log('detail', err); }
 }, log);
 const pushDetail = createThrottle(pushDetailNow, PUSH_MS);
+
+// The bubble stack: every held question's summary, the expanded one in full, and whether it shows.
+const pushStackNow = guarded('stack', () => {
+  if (!panelWin || panelWin.isDestroyed()) return;
+  const snap = store.snapshot();
+  const stack = { cards: snap.cards, expanded: pick.expandedId ? store.cardById(pick.expandedId) : null, visible: panelNow(snap).stack };
+  const json = JSON.stringify(stack);
+  if (json === sentStack) return;
+  try { panelWin.webContents.send('stack', stack); sentStack = json; } catch (err) { log('stack', err); }
+}, log);
+const pushStack = createThrottle(pushStackNow, PUSH_MS);
 
 // Where the panel's arrow goes: sent on `place` whenever the side or the row's height changes.
 function sendPlace() {
@@ -287,10 +315,11 @@ function consoleLog(tag) {
 
 // The panel: the HUD's window options (frameless, transparent, always on top, no taskbar button,
 // never focusable: SPIKES.md spike 6, PANEL_CLICK_MODE = plain), and not movable, since it follows
-// the HUD. Created the first time an agent is selected, then shown and hidden.
+// the HUD. Created the first time it has something to show (the stack or an agent), then shown and hidden.
 function panelWindow() {
   if (panelWin && !panelWin.isDestroyed()) return panelWin;
   sentDetail = undefined;
+  sentStack = undefined;
   sentPlace = undefined;
   panelWin = new BrowserWindow({
     width: PANEL_WIDTH, height: panelHeight, frame: false, transparent: true, alwaysOnTop: true, skipTaskbar: true,
@@ -303,8 +332,10 @@ function panelWindow() {
   wc.on('will-navigate', (e) => e.preventDefault());
   wc.on('did-finish-load', () => { // anything sent while loading was lost
     sentDetail = undefined;
+    sentStack = undefined;
     sentPlace = undefined;
     pushDetailNow();
+    pushStackNow();
     sendPlace();
   });
   wc.on('console-message', consoleLog('panel:'));
@@ -319,18 +350,19 @@ function panelWindow() {
       pw.loadFile(PANEL).catch((err) => log('panel reload', err));
     }, RELOAD_MS);
   });
-  pw.on('close', (e) => { if (!quitting) { e.preventDefault(); select(null); } });
+  // Closed from its system menu: the whole panel goes, the stack hidden until a new question arrives.
+  pw.on('close', (e) => { if (!quitting) { e.preventDefault(); apply(stackHide(pick, store.snapshot().cards)); } });
   pw.on('closed', () => { if (panelWin === pw) panelWin = null; });
   pw.loadFile(PANEL).catch((err) => log('panel load', err));
   return pw;
 }
 
-// Beside the HUD at the selected row while there is something to show (panelTarget), hidden otherwise.
-// Guarded (I4): it runs from dock, the push and IPC.
+// Beside the HUD at the anchor row while there is something to show (panelShows: the stack or an
+// agent's details), hidden otherwise. Guarded (I4): it runs from dock, the push and IPC.
 const placePanel = guarded('place panel', (snap) => {
   const s = snap ?? store.snapshot();
-  const id = pick.selected && !quitting ? panelTarget(pick.selected.id, s, panelHud(pick.selected.id, s)) : null;
-  if (!id) {
+  const shows = panelNow(s);
+  if (!shows.stack && !shows.detailId) {
     if (panelWin && !panelWin.isDestroyed() && panelWin.isVisible()) {
       releaseFocusOf(panelWin); // a panel hidden while typing gives the focus back first
       panelWin.hide();
@@ -338,7 +370,10 @@ const placePanel = guarded('place panel', (snap) => {
     return;
   }
   const pw = panelWindow();
-  const b = panelBounds(win.getBounds(), workArea(), { width: PANEL_WIDTH, height: panelHeight, rowY: pick.selected.rowY });
+  // The HUD's last reported row counts only while it is the anchor's (another row's y would misplace it).
+  const anchor = anchorFor(s, shows);
+  const rowY = anchorRow && anchor != null && anchorRow.id === anchor ? anchorRow.rowY : null;
+  const b = panelBounds(win.getBounds(), workArea(), { width: PANEL_WIDTH, height: panelHeight, rowY });
   pw.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height });
   place = { side: b.side, arrowY: b.arrowY };
   sendPlace();
@@ -346,13 +381,12 @@ const placePanel = guarded('place panel', (snap) => {
   if (!pw.isVisible() || pw.isMinimized()) pw.showInactive();
 }, log);
 
-// The user's new selection (or none): the HUD highlights the row, the panel moves and gets the agent's
-// detail. It stands until a different question arrives (userSelect).
-function select(next) {
-  pick = userSelect(pick, next);
+// A new panel state from the user (a selection, ✕, a bubble expanded, the stack hidden or shown): the
+// HUD highlights the row, the panel moves and gets its details and stack (pushNow).
+function apply(next) {
+  pick = next;
   placePanel();
   pushNow();
-  pushDetail();
 }
 
 // ---------------------------------------------------------------- opening a session's window
@@ -431,7 +465,7 @@ fromHud('hud:setReplyOptIn', (sessionId, on) => { store.setReplyOptIn(sessionId,
 fromHud('hud:hideAgent', (sessionId) => {
   const id = String(sessionId);
   store.hide(id);
-  if (pick.selected?.id === id) select(null); else push();
+  if (pick.selected?.id === id) apply(userSelect(pick, null, store.snapshot().cards)); else push();
 });
 // v1.3: unfold or fold the "N tucked away" list (folding closes a tucked chat's panel: panelTarget).
 fromHud('hud:showTucked', (on) => { tuckOpen = !!on; push(); });
@@ -447,16 +481,21 @@ fromHud('hud:reportHeight', (px) => {
 // A click on a sprite or name toggles: the selected agent again closes the panel, another switches it.
 fromHud('hud:selectAgent', (id, rowY) => {
   const sid = String(id);
-  select(pick.selected?.id === sid ? null : { id: sid, rowY: Number(rowY) });
+  const y = Number(rowY);
+  if (Number.isFinite(y)) anchorRow = { id: sid, rowY: y };
+  apply(userSelect(pick, pick.selected?.id === sid ? null : { id: sid, rowY: y }, store.snapshot().cards));
 });
-// The selected row moved inside the HUD (rows above it came or went), a question selected an agent
-// whose row main didn't know, or the HUD collapsed (its face, then): the panel and its arrow follow.
+// The anchor row (the snapshot's `anchor`) moved inside the HUD (rows above it came or went), the
+// anchor moved to a row main didn't know, or the HUD collapsed (its face, then): the panel and its
+// arrow follow.
 fromHud('hud:rowOffset', (id, rowY) => {
   const y = Number(rowY);
-  if (!pick.selected || pick.selected.id !== String(id) || !Number.isFinite(y)) return;
-  pick = { ...pick, selected: { ...pick.selected, rowY: y } };
+  if (id == null || !Number.isFinite(y)) return;
+  anchorRow = { id: String(id), rowY: y };
   placePanel();
 });
+// The HUD's "show the questions again": the hidden stack comes back.
+fromHud('hud:showStack', () => apply(stackShow(pick)));
 
 function fromPanel(channel, handler) {
   ipcMain.on(channel, (e, ...args) => {
@@ -467,7 +506,20 @@ function fromPanel(channel, handler) {
 }
 
 // ✕ names the agent it was showing: a question that switched the panel mid-click is not closed (M2).
-fromPanel('panel:close', (id) => { if (closeApplies(id, pick.selected?.id)) select(null); });
+// It closes the details only; the stack stays.
+fromPanel('panel:close', (id) => { if (closeApplies(id, pick.selected?.id)) apply(userSelect(pick, null, store.snapshot().cards)); });
+// A bubble clicked: expanded, its agent's details beside it; the expanded one again folds it back.
+fromPanel('panel:expandCard', (id) => apply(stackExpand(pick, id == null ? null : String(id), store.snapshot().cards)));
+// The stack's ✕: hidden until a question the user hasn't seen arrives.
+fromPanel('panel:hideStack', () => apply(stackHide(pick, store.snapshot().cards)));
+// The pointer over a bubble lights its agent's row in the HUD; off every bubble (null), none.
+fromPanel('panel:hoverCard', (id) => {
+  const card = id == null ? null : store.snapshot().cards.find((c) => String(c.id) === String(id));
+  const next = card ? String(card.sessionId) : null;
+  if (next === highlight) return;
+  highlight = next;
+  push();
+});
 // The id given wins: the footer's is the agent on show (M1), and the card's "open window ↗" names its
 // own session, sent right after the card's release, which can already have put the previous selection
 // back. No id: the selected agent.
@@ -761,7 +813,7 @@ async function firstRun() {
 
 function quit() {
   if (!quitting) {
-    pick = userSelect(pick, null);
+    pick = STACK_INIT; // nothing selected or expanded: the panel shows nothing while quitting
     try { if (panelWin && !panelWin.isDestroyed()) panelWin.destroy(); } catch (err) { log('panel', err); }
     panelWin = null;
     // close() releases every held question, so each waiting agent carries on in its own window.

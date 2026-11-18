@@ -8,6 +8,13 @@ contextBridge.exposeInMainWorld('panel', {
     ipcRenderer.on('detail', listener);
     return () => ipcRenderer.removeListener('detail', listener);
   },
+  // The bubble stack: { cards, expanded, visible }.
+  onStack(fn) {
+    if (typeof fn !== 'function') return undefined;
+    const listener = (_e, stack) => fn(stack);
+    ipcRenderer.on('stack', listener);
+    return () => ipcRenderer.removeListener('stack', listener);
+  },
   onPlace(fn) {
     if (typeof fn !== 'function') return undefined;
     const listener = (_e, place) => fn(place);
@@ -24,4 +31,8 @@ contextBridge.exposeInMainWorld('panel', {
   answer: (id, response) => ipcRenderer.send('panel:answer', String(id), response),
   release: (id) => ipcRenderer.send('panel:release', String(id)),
   setInteractive: (on) => ipcRenderer.send('panel:setInteractive', !!on),
+  // The bubble stack: expand (or fold) a bubble, the pointer over one (null: off every bubble), hide it.
+  expandCard: (id) => ipcRenderer.send('panel:expandCard', String(id)),
+  hoverCard: (id) => ipcRenderer.send('panel:hoverCard', id == null ? null : String(id)),
+  hideStack: () => ipcRenderer.send('panel:hideStack'),
 });
