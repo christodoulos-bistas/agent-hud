@@ -1,5 +1,5 @@
 // Throwaway spike probe: logs Claude Code HTTP hook payloads and answers per --mode.
-// Usage: node spikes/hook-probe.mjs --mode log|hold|allow|answer|reply [--holdMs 30000]
+// Usage: node spikes/hook-probe.mjs --mode log|hold|allow|answer|reply|plan-allow-auto|plan-keep|plan-hold|record [--holdMs 30000]
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -37,6 +37,29 @@ http.createServer((req, res) => {
     fs.appendFileSync(logFile, JSON.stringify({ t: Date.now(), mode, url: req.url, headers: req.headers, body }) + '\n');
     const ev = body.hook_event_name;
     const tool = body.tool_name;
+
+    const isPlan = ev === 'PermissionRequest' && tool === 'ExitPlanMode';
+    if (mode === 'plan-allow-auto' && isPlan) {
+      return send(res, {
+        hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow', updatedPermissions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }] } },
+        systemMessage: 'Agent HUD · Plan approved (auto-accept edits)',
+      });
+    }
+    if (mode === 'plan-keep' && isPlan) {
+      return send(res, {
+        hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message: 'Keep planning: add a rollback step' } },
+        systemMessage: 'Agent HUD · Keep planning: add a rollback step',
+      });
+    }
+    if (mode === 'plan-hold' && isPlan) {
+      return setTimeout(() => send(res), holdMs);
+    }
+    if (mode === 'record' && ev === 'PermissionRequest') {
+      return send(res, {
+        hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } },
+        systemMessage: `Agent HUD · Allowed: ${tool}`,
+      });
+    }
 
     if (mode === 'hold' && (ev === 'PermissionRequest' || (ev === 'PreToolUse' && tool === 'AskUserQuestion'))) {
       return setTimeout(() => send(res), holdMs);
