@@ -23,6 +23,8 @@ test('choice lines', () => {
 
 test('plan and reply lines', () => {
   assert.equal(bubbleLine({ kind: 'plan', payload: { tool_input: { plan: 'a\nb\n\nc' } } }), 'Plan ready · 3 lines');
+  assert.equal(bubbleLine({ kind: 'plan', payload: { tool_input: { plan: 'one' } } }), 'Plan ready · 1 line');
+  assert.equal(bubbleLine({ kind: 'plan', payload: { tool_input: { plan: '' } } }), 'Plan ready · 0 lines');
   assert.equal(bubbleLine({ kind: 'reply', payload: { last_assistant_message: 'All done here' } }), 'All done here');
   assert.equal(bubbleLine({ kind: 'reply', payload: { last_assistant_message: '' } }), 'wants a reply');
 });
@@ -32,6 +34,14 @@ test('never throws on odd payloads', () => {
     null, {}, { kind: 'permission' }, { kind: 'permission', payload: null }, perm('Bash', undefined), perm('WebFetch', { url: 'not a url' }),
     choice('nope'), choice([null, undefined]), { kind: 'choice', payload: {} }, { kind: 'plan', payload: {} }, { kind: 'reply' }, { kind: 'weird', payload: {} },
   ]) assert.equal(typeof bubbleLine(item), 'string');
+});
+
+test('plan line counts markdown headings # to ### as steps', () => {
+  const md = (s) => ({ kind: 'plan', payload: { tool_input: { plan: s } } });
+  assert.equal(bubbleLine(md('# Title\nintro\n## One\ntext\n### Two\n#### deep\n####### no\n#nospace\n  # indented')), 'Plan ready · 4 steps');
+  assert.equal(bubbleLine(md('# Only\nbody\nmore')), 'Plan ready · 1 step');
+  assert.equal(bubbleLine(md('#### Not a step\na\nb')), 'Plan ready · 3 lines');
+  assert.equal(bubbleLine(md('# A\r\n## B\r\n')), 'Plan ready · 2 steps');
 });
 
 test('plan line also reads a top-level plan', () => {

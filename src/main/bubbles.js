@@ -38,10 +38,14 @@ function choiceLine(p) {
   return line;
 }
 
+// Steps are the plan's markdown headings # to ###; a plan without any counts its non-empty lines.
+const HEADING = /^ {0,3}#{1,3}(?:[ \t]|$)/;
 function planLine(p) {
   const i = p.tool_input && typeof p.tool_input === 'object' ? p.tool_input : {};
-  const n = String(String(i.plan ?? '').trim() ? i.plan : (p.plan ?? '')).split(/\r?\n/).filter((l) => l.trim()).length;
-  return `Plan ready · ${n} line${n === 1 ? '' : 's'}`;
+  const lines = String(String(i.plan ?? '').trim() ? i.plan : (p.plan ?? '')).split(/\r?\n/).filter((l) => l.trim());
+  const steps = lines.filter((l) => HEADING.test(l)).length;
+  if (steps) return `Plan ready · ${steps} step${steps === 1 ? '' : 's'}`;
+  return `Plan ready · ${lines.length} line${lines.length === 1 ? '' : 's'}`;
 }
 
 export function bubbleLine(item) {
