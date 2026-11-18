@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, stackVisible, panelShows, createThrottle, createInteractiveCheck, loadConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, stackVisible, panelShows, createThrottle, createInteractiveCheck, loadConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, devOverrides } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { installCodexHooksFile, removeCodexHooksFile, codexHookCommand } from '../src/main/codex-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply, planApprove, planKeepPlanning, PLAN_MODES } from '../src/main/answers.js';
@@ -701,4 +701,23 @@ test('loadConfig: old configs get the sounds default; saved sounds are kept', ()
   assert.deepEqual(loadConfig(f).sounds, { muted: true, needs: 'C:/x.wav', finished: null });
   fs.writeFileSync(f, JSON.stringify({ port: 47821, secret: 'a'.repeat(32), sounds: 5 }));
   assert.deepEqual(loadConfig(f).sounds, { muted: false, needs: null, finished: null });
+});
+
+test('R3: devOverrides: a dev build takes its userData dir and port from AGENT_HUD_USER_DATA / AGENT_HUD_PORT', () => {
+  const env = { AGENT_HUD_USER_DATA: 'C:/tmp/hud-dev', AGENT_HUD_PORT: '47899' };
+  assert.deepEqual(devOverrides({ isPackaged: false, env }), { userData: path.resolve('C:/tmp/hud-dev'), port: 47899 });
+  assert.deepEqual(devOverrides({ isPackaged: false, env: {} }), { userData: null, port: null }, 'unset: the defaults');
+  assert.deepEqual(devOverrides({ isPackaged: false, env: { AGENT_HUD_USER_DATA: '  ', AGENT_HUD_PORT: '' } }), { userData: null, port: null });
+});
+
+test('R3: devOverrides: a packaged build ignores both variables', () => {
+  assert.deepEqual(devOverrides({ isPackaged: true, env: { AGENT_HUD_USER_DATA: 'C:/tmp/x', AGENT_HUD_PORT: '47899' } }), { userData: null, port: null });
+});
+
+test('R3: devOverrides: a port that is not a whole number in 1..65535 is ignored', () => {
+  for (const p of ['0', '65536', '-1', '47899.5', 'abc', '4e4', ' 47899x']) {
+    assert.equal(devOverrides({ isPackaged: false, env: { AGENT_HUD_PORT: p } }).port, null, p);
+  }
+  assert.equal(devOverrides({ isPackaged: false, env: { AGENT_HUD_PORT: ' 1 ' } }).port, 1);
+  assert.equal(devOverrides({ isPackaged: false, env: { AGENT_HUD_PORT: '65535' } }).port, 65535);
 });

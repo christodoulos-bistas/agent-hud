@@ -282,6 +282,17 @@ export function createInteractiveCheck({ current, reread }) {
 
 // Which settings file install/uninstall may touch. AGENT_HUD_SETTINGS_PATH wins; without it only the
 // packaged app targets ~/.claude/settings.json, and a dev build is blocked (path null).
+// Dev-only isolation (R3), so a dev HUD can run beside the installed one: AGENT_HUD_USER_DATA names its
+// userData dir (config, single-instance lock, Chromium data), AGENT_HUD_PORT the port it listens on
+// instead of the config's (never saved). A packaged build ignores both. Malformed or empty: null.
+export function devOverrides({ isPackaged, env = {} }) {
+  if (isPackaged) return { userData: null, port: null };
+  const dir = typeof env.AGENT_HUD_USER_DATA === 'string' ? env.AGENT_HUD_USER_DATA.trim() : '';
+  const raw = typeof env.AGENT_HUD_PORT === 'string' ? env.AGENT_HUD_PORT.trim() : '';
+  const n = /^[0-9]+$/.test(raw) ? Number(raw) : NaN;
+  return { userData: dir ? path.resolve(dir) : null, port: n >= 1 && n <= 65535 ? n : null };
+}
+
 export function settingsTarget({ isPackaged, envPath, home }) {
   if (envPath) return { path: envPath, blocked: false };
   if (!isPackaged) return { path: null, blocked: true };

@@ -19,7 +19,7 @@ import { readSessionFiles, listSessions } from './sessions.js';
 import { createCodexSessions, readRolloutMeta } from './codex-sessions.js';
 import { createStore } from './store.js';
 import { openCommandFor, resolveCodeCmd, canOpen, CODEX_ACTIVATE, chatLinkFor, createChatOpener, VSCODE_TITLES_PS } from './focus.js';
-import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, panelShows, createThrottle, createInteractiveCheck, loadConfig, saveConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies } from './wiring.js';
+import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, panelShows, createThrottle, createInteractiveCheck, loadConfig, saveConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, devOverrides } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
@@ -56,6 +56,25 @@ const DEBUG = process.env.AGENT_HUD_DEBUG === '1';
 
 const log = (...a) => console.error('[agent-hud]', ...a);
 const debug = (...a) => { if (DEBUG) console.log('[agent-hud]', ...a); };
+
+// Dev-only isolation (R3): AGENT_HUD_USER_DATA gives a dev HUD its own userData (config, and the
+// single-instance lock, which Electron keys on it), set here, before the lock and the config load;
+// AGENT_HUD_PORT replaces the config's port without saving it. A packaged build ignores both.
+const DEV = devOverrides({ isPackaged: app.isPackaged, env: process.env });
+let devFailed = false;
+if (DEV.userData) {
+  try {
+    fs.mkdirSync(DEV.userData, { recursive: true });
+    app.setPath('userData', DEV.userData);
+    log('dev: userData', DEV.userData);
+  } catch (err) {
+    // Never fall back to the real userData: that is the installed HUD's config and lock.
+    log('dev: cannot use AGENT_HUD_USER_DATA', DEV.userData, err?.message ?? err);
+    devFailed = true;
+  }
+}
+if (DEV.port) log('dev: port', DEV.port);
+const hookPort = () => DEV.port ?? cfg.port;
 
 // I4: an error that escapes must never reach Electron's default error box, which blocks the main
 // process and with it every hooked session waiting on its hooks. Log it and carry on.
@@ -675,7 +694,7 @@ async function confirmCodexInstall({ firstRun }) {
 
 function doInstall() {
   if (TARGET.blocked) return;
-  const r = installHooks(SETTINGS_PATH, { port: cfg.port, secret: cfg.secret });
+  const r = installHooks(SETTINGS_PATH, { port: hookPort(), secret: cfg.secret });
   if (!r.ok) notify('Could not install the hooks', `${SETTINGS_PATH}: ${r.error}`, true);
   else if (!r.changed) notify('Agent HUD hooks already installed', `${SETTINGS_PATH} was left as it is.`);
   else notify('Agent HUD hooks installed', `Added to ${SETTINGS_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}\nChats you already have open start reporting after a restart.`);
@@ -823,7 +842,7 @@ function createTray() {
 
 async function startServer() {
   const srv = createHookServer({
-    port: cfg.port, secret: cfg.secret, queue, isInteractive, shouldHold: canHold,
+    port: hookPort(), secret: cfg.secret, queue, isInteractive, shouldHold: canHold,
     replyOptIn: (id) => store.wantsReply(id),
     onEvent: (ev) => {
       // A Codex chat exists only through its events: track it and list it before the store sees the event.
@@ -836,10 +855,10 @@ async function startServer() {
   try {
     await srv.listen();
     server = srv;
-    debug('listening on 127.0.0.1:' + cfg.port);
+    debug('listening on 127.0.0.1:' + hookPort());
   } catch (err) {
     server = null;
-    notify('Agent HUD is not listening', `127.0.0.1:${cfg.port}: ${err.code || err.message}. Hooks pass straight through until the HUD is restarted.`, true);
+    notify('Agent HUD is not listening', `127.0.0.1:${hookPort()}: ${err.code || err.message}. Hooks pass straight through until the HUD is restarted.`, true);
   }
 }
 
@@ -919,7 +938,9 @@ async function start() {
 // `--remove-hooks` (run by the uninstaller, build/installer.nsh) takes the hooks out of the settings
 // file and exits 0: no window, no server, no single-instance handshake.
 const WANT_QUIT = process.argv.includes('--quit');
-if (process.argv.includes('--remove-hooks')) {
+if (devFailed) {
+  app.exit(1); // no lock taken, no window: the dev userData could not be set
+} else if (process.argv.includes('--remove-hooks')) {
   const removed = removeHooksCli({
     target: TARGET, uninstall: uninstallHooks,
     codex: { target: CODEX, uninstall: (f) => removeCodexHooksFile(f, CODEX_COMMAND) },
@@ -927,6 +948,7 @@ if (process.argv.includes('--remove-hooks')) {
   for (const m of removed.messages) log('--remove-hooks:', m);
   app.exit(0);
 } else if (!app.requestSingleInstanceLock({ quit: WANT_QUIT })) {
+  log('another Agent HUD holds the single-instance lock: handing over to it');
   app.quit();
 } else if (WANT_QUIT) {
   app.quit(); // nothing running to quit; don't start one
