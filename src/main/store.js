@@ -11,7 +11,6 @@ const isSynthetic = (ev) => String((ev.raw || {}).prompt || '').trim().startsWit
 
 export { activityLine } from './steps.js';
 
-const ASKS = { permission: 'asks permission', choice: 'asks a question', reply: 'wants a reply' };
 
 export function createStore({ engine, queue, now = Date.now, holdMs = 60000, replyMs = 540000, stepLog, onError = (e) => console.error(e), canOpen = () => true }) {
   // Whether "open window" can focus this session (main knows where code.cmd is); unknown session → false.

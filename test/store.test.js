@@ -582,3 +582,42 @@ test('recap holds the recapOf text at stage turn and is null otherwise, in snaps
   assert.equal(store.detail('s1').recap, 'Done in 8s · 1 command');
 });
 
+test('Task 7: snapshot publishes every held card in queue order, with lines and expiry', () => {
+  const { queue, store } = setup(1000);
+  store.setSessions([S('s1'), S('s2'), S('s3')]);
+  queue.add({ id: 'p', sessionId: 's1', kind: 'permission', payload: { tool_name: 'Bash', tool_input: { command: 'ls' } } });
+  queue.add({ id: 'r', sessionId: 's2', kind: 'reply', payload: { last_assistant_message: 'Done' } });
+  queue.add({ id: 'c', sessionId: 's3', kind: 'choice', payload: { tool_input: { questions: [{ header: 'DB', question: 'q', options: [1, 2, 3] }] } } });
+  const snap = store.snapshot();
+  assert.deepEqual(snap.cards.map((c) => c.id), ['p', 'c', 'r']);
+  assert.deepEqual(snap.cards.map((c) => c.kind), ['permission', 'choice', 'reply']);
+  assert.deepEqual(snap.cards.map((c) => c.line), ['Bash: ls', 'DB · 3 options', 'Done']);
+  assert.deepEqual(Object.keys(snap.cards[0]).sort(), ['canOpen', 'cls', 'display', 'expiresAt', 'id', 'kind', 'line', 'sessionId', 'source']);
+  assert.equal(snap.cards[0].expiresAt, 61000);
+  assert.equal(snap.cards[2].expiresAt, 541000);
+  assert.equal(snap.card, undefined); assert.equal(snap.next, undefined);
+  const full = store.cardById('c');
+  assert.equal(full.payload.tool_input.questions[0].header, 'DB');
+  assert.equal(full.kind, 'choice'); assert.equal(full.canOpen, true); assert.ok(Number.isFinite(full.expiresAt));
+  assert.equal(store.cardById('nope'), null);
+  assert.equal('planModes' in store.cardById('p'), false);
+  const d = store.detail('s1');
+  assert.equal(d.card, undefined); assert.equal(d.hasCard, true);
+});
+
+test('Task 7: plan card carries planModes', async () => {
+  const { PLAN_MODES } = await import('../src/main/answers.js');
+  const { queue, store } = setup();
+  store.setSessions([S('s1')]);
+  queue.add({ id: 'pl', sessionId: 's1', kind: 'plan', payload: { tool_name: 'ExitPlanMode', tool_input: { plan: 'a' + String.fromCharCode(10) + 'b' } } });
+  assert.equal(store.cardById('pl').planModes, PLAN_MODES);
+  assert.equal(store.snapshot().cards[0].line, 'Plan ready · 2 lines');
+});
+
+test('Task 7: a card whose session is not in the session list still appears in cards', () => {
+  const { queue, store } = setup();
+  store.setSessions([S('s1')]);
+  queue.add({ id: 'z', sessionId: 'zz', kind: 'permission', payload: { tool_name: 'Bash' } });
+  const c = store.snapshot().cards;
+  assert.equal(c.length, 1); assert.equal(c[0].id, 'z'); assert.equal(c[0].display, 'unknown');
+});

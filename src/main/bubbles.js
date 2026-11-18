@@ -40,7 +40,7 @@ function choiceLine(p) {
 
 function planLine(p) {
   const i = p.tool_input && typeof p.tool_input === 'object' ? p.tool_input : {};
-  const n = String(i.plan ?? p.plan ?? '').split(/\r?\n/).filter((l) => l.trim()).length;
+  const n = String(String(i.plan ?? '').trim() ? i.plan : (p.plan ?? '')).split(/\r?\n/).filter((l) => l.trim()).length;
   return `Plan ready · ${n} line${n === 1 ? '' : 's'}`;
 }
 
