@@ -203,10 +203,10 @@ export function stackVisible(state, cards) {
 
 // What the panel shows: the bubble stack, and the details of one agent (detailId). A collapsed HUD
 // shows details only for the agent that owns the expanded card (panelTarget's hasCard).
-// `cards` rides in the options object (a fourth argument also works).
-export function panelShows(state, snapshot, { collapsed, visible, tuckOpen, cards: optCards } = {}, argCards = []) {
+// The cards come from the snapshot (`snapshot.cards`, the store's CardSummary[]).
+export function panelShows(state, snapshot, { collapsed, visible, tuckOpen } = {}) {
   if (!visible) return { stack: false, detailId: null };
-  const cards = Array.isArray(optCards) ? optCards : argCards;
+  const cards = Array.isArray(snapshot?.cards) ? snapshot.cards : [];
   const sel = state.selected;
   const owner = state.expandedId == null ? null : (Array.isArray(cards) ? cards : []).find((c) => String(c.id) === String(state.expandedId))?.sessionId;
   const hasCard = !!(sel && owner != null && String(owner) === String(sel.id));

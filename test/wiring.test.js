@@ -123,11 +123,29 @@ const C = (id, sessionId) => ({ id, sessionId, kind: 'permission', display: sess
 const SNAP = { agents: [{ id: 's1' }, { id: 's2' }, { id: 's9' }] };
 const HUD = { collapsed: false, visible: true, tuckOpen: false };
 
-test('stack: STACK_INIT is empty; stackUpdate never mutates its input', () => {
+test('stack: STACK_INIT is empty', () => {
   assert.deepEqual(STACK_INIT, { selected: null, auto: false, before: null, expandedId: null, hidden: false, seen: [] });
-  const s = Object.freeze({ ...STACK_INIT, seen: Object.freeze([]) });
-  assert.doesNotThrow(() => stackUpdate(s, [C('a', 's1')]));
-  assert.notEqual(stackUpdate(s, []), s);
+});
+
+const deepFreeze = (o) => { if (o && typeof o === 'object' && !Object.isFrozen(o)) { Object.freeze(o); Object.values(o).forEach(deepFreeze); } return o; };
+
+test('stack functions never mutate their input state (deep-frozen hidden and expanded-auto states)', () => {
+  const cards = [C('a', 's1'), C('b', 's2')];
+  const hidden = deepFreeze({ ...STACK_INIT, selected: { id: 's9', rowY: 1 }, hidden: true, seen: ['a'] });
+  const expanded = deepFreeze({ selected: { id: 's1', rowY: null }, auto: true, before: { id: 's9', rowY: 1 }, expandedId: 'a', hidden: false, seen: [] });
+  const keep = JSON.stringify([hidden, expanded]);
+  assert.equal(stackUpdate(hidden, cards).hidden, false, 'unseen card b unhides');
+  assert.equal(stackUpdate(hidden, [C('a', 's1')]).hidden, true);
+  assert.deepEqual(stackUpdate(expanded, [C('b', 's2')]).selected, { id: 's9', rowY: 1 }, 'vanished expanded card restores before');
+  assert.equal(stackUpdate(expanded, [C('b', 's2')]).expandedId, null);
+  assert.equal(stackExpand(expanded, 'b', cards).expandedId, 'b');
+  assert.equal(stackExpand(expanded, 'a', cards).expandedId, null);
+  assert.equal(stackExpand(hidden, 'a', cards).auto, true);
+  assert.equal(stackHide(expanded, cards).hidden, true);
+  assert.equal(stackShow(hidden).hidden, false);
+  assert.equal(userSelect(expanded, { id: 's2', rowY: 0 }, cards).expandedId, null);
+  assert.equal(userSelect(hidden, { id: 's1', rowY: 0 }, cards).hidden, false);
+  assert.equal(JSON.stringify([hidden, expanded]), keep);
 });
 
 test('(a) two cards arrive: stack visible, nothing selected, anchor is the first card session', () => {
@@ -203,7 +221,7 @@ test('(e) hidden + userSelect: waiting row shows the stack; non-waiting row stay
   assert.deepEqual(w.seen, []);
   const n = userSelect(h, { id: 's9', rowY: 5 }, ab);
   assert.equal(n.hidden, true);
-  assert.deepEqual(panelShows(n, SNAP, { ...HUD, cards: ab }), { stack: false, detailId: 's9' });
+  assert.deepEqual(panelShows(n, { ...SNAP, cards: ab }, { ...HUD }), { stack: false, detailId: 's9' });
 });
 
 test('userSelect: replaces auto/before; collapses a card of another session, keeps one of the same', () => {
@@ -222,12 +240,18 @@ test("(f) collapsed HUD: detailId only for the expanded card's agent; hidden HUD
   const cards = [C('a', 's1'), C('b', 's2')];
   const col = { ...HUD, collapsed: true };
   const e = stackExpand(STACK_INIT, 'a', cards);
-  assert.deepEqual(panelShows(e, SNAP, { ...col, cards }), { stack: true, detailId: 's1' });
+  assert.deepEqual(panelShows(e, { ...SNAP, cards }, { ...col }), { stack: true, detailId: 's1' });
   const other = userSelect(STACK_INIT, { id: 's2', rowY: 1 }, cards);
-  assert.deepEqual(panelShows(other, SNAP, { ...col, cards }), { stack: true, detailId: null });
-  assert.deepEqual(panelShows(other, SNAP, { ...HUD, visible: false, cards }), { stack: false, detailId: null });
-  assert.deepEqual(panelShows(other, SNAP, { ...HUD, cards }), { stack: true, detailId: 's2' });
-  assert.deepEqual(panelShows(STACK_INIT, SNAP, { ...HUD, cards }), { stack: true, detailId: null });
+  assert.deepEqual(panelShows(other, { ...SNAP, cards }, { ...col }), { stack: true, detailId: null });
+  assert.deepEqual(panelShows(other, { ...SNAP, cards }, { ...HUD, visible: false }), { stack: false, detailId: null });
+  assert.deepEqual(panelShows(other, { ...SNAP, cards }, { ...HUD }), { stack: true, detailId: 's2' });
+  assert.deepEqual(panelShows(STACK_INIT, { ...SNAP, cards }, { ...HUD }), { stack: true, detailId: null });
+});
+
+test('panelShows reads cards from the snapshot: the brief signature shows the stack', () => {
+  const cards = [C('a', 's1')];
+  assert.equal(panelShows(STACK_INIT, { ...SNAP, cards }, { collapsed: false, visible: true, tuckOpen: false }).stack, true);
+  assert.equal(panelShows(STACK_INIT, SNAP, { collapsed: false, visible: true, tuckOpen: false }).stack, false, 'no cards, no stack');
 });
 
 test('Green Goblin: every state with cards that is not hidden shows the stack while visible', () => {
@@ -238,10 +262,9 @@ test('Green Goblin: every state with cards that is not hidden shows the stack wh
     userSelect(hid, { id: 's1', rowY: 1 }, cards), stackShow(hid), stackUpdate(hid, [...cards, C('c', 's3')])];
   for (const s of states) for (const collapsed of [false, true]) for (const tuckOpen of [false, true]) {
     assert.equal(s.hidden, false);
-    assert.equal(panelShows(s, SNAP, { collapsed, visible: true, tuckOpen, cards }).stack, true);
+    assert.equal(panelShows(s, { ...SNAP, cards }, { collapsed, visible: true, tuckOpen }).stack, true);
   }
 });
-
 
 function fakeClock() {
   let t = 0; const timers = [];
