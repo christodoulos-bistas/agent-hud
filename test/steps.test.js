@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createStepLog, stepLabel, activityLine, patchPaths } from '../src/main/steps.js';
+import { createStepLog, stepLabel, activityLine, patchPaths, recapOf } from '../src/main/steps.js';
 
 const ev = (event, at, { tool, input, raw } = {}) => ({
   sessionId: 's1', event, toolName: tool, toolInput: input, cwd: 'C:\\p', at, raw: { ...(raw || {}) },
@@ -135,7 +135,7 @@ test('cap: 25 closed steps gives 20, newest first', () => {
 
 test('view of an unknown session is empty; forget clears', () => {
   const l = createStepLog();
-  assert.deepEqual(l.view('nope'), { task: null, taskAt: null, stepCount: 0, current: null, steps: [], open: [], helpers: [], lastEventAt: null, lastMessage: null });
+  assert.deepEqual(l.view('nope'), { task: null, taskAt: null, stepCount: 0, current: null, steps: [], open: [], helpers: [], lastEventAt: null, lastMessage: null, recap: { files: 0, commands: 0, failed: 0, helpers: 0, endedAt: null } });
   l.push(ev('UserPromptSubmit', 1, { raw: { prompt: 'hi' } }));
   l.forget('s1');
   assert.equal(l.view('s1').task, null);
@@ -293,4 +293,45 @@ test('Codex Bash (command string) labels like Claude Bash', () => {
   const input = { command: 'npm   test' };
   assert.equal(stepLabel('Bash', input), 'npm test');
   assert.equal(activityLine({ event: 'PreToolUse', toolName: 'Bash', toolInput: input }), 'running npm   test');
+});
+
+test('recap counts edited files once, commands, failed commands and helpers, helpers included', () => {
+  const log = createStepLog({});
+  const e = (event, x = {}) => log.push({ sessionId: 's', event, at: x.at ?? 1000, toolName: x.tool, toolInput: x.input, raw: { tool_name: x.tool, tool_input: x.input, ...x.raw } });
+  e('UserPromptSubmit', { raw: { prompt: 'do it' }, at: 0 });
+  e('PreToolUse', { tool: 'Edit', input: { file_path: 'C:/a/x.ts' } });
+  e('PreToolUse', { tool: 'Write', input: { file_path: 'C:/a/x.ts' } });
+  e('PreToolUse', { tool: 'apply_patch', input: { command: '*** Update File: y.ts\n*** Add File: z.ts' } });
+  e('PreToolUse', { tool: 'Bash', input: { command: 'npm test' } });
+  e('PostToolUseFailure', { tool: 'Bash', input: { command: 'npm test' } });
+  e('PostToolUseFailure', { tool: 'Read', input: { file_path: 'q' } });
+  e('SubagentStart', { raw: { agent_id: 'h1', agent_type: 'Explore' } });
+  e('PreToolUse', { tool: 'PowerShell', input: { command: 'ls' }, raw: { agent_id: 'h1' } });
+  e('PreToolUse', { tool: 'Edit', input: { file_path: 'C:/a/w.ts' }, raw: { agent_id: 'h1' } });
+  e('Stop', { at: 252000, raw: { last_assistant_message: 'done' } });
+  assert.deepEqual(log.view('s').recap, { files: 4, commands: 2, failed: 1, helpers: 1, endedAt: 252000 });
+});
+
+test('recap resets on a real prompt, not on <task-notification>, and survives the 20-step cap', () => {
+  const log = createStepLog({});
+  const e = (event, at, x = {}) => log.push({ sessionId: 's', event, at, toolName: x.tool, toolInput: x.input, raw: { tool_name: x.tool, tool_input: x.input, ...x.raw } });
+  e('UserPromptSubmit', 0, { raw: { prompt: 'go' } });
+  for (let i = 0; i < 25; i++) {
+    e('PreToolUse', 1000 + i * 10, { tool: 'Bash', input: { command: `c${i}` }, raw: { tool_use_id: `t${i}` } });
+    e('PostToolUse', 1005 + i * 10, { tool: 'Bash', raw: { tool_use_id: `t${i}` } });
+  }
+  assert.equal(log.view('s').recap.commands, 25);
+  e('UserPromptSubmit', 5000, { raw: { prompt: '<task-notification>bg done</task-notification>' } });
+  assert.equal(log.view('s').recap.commands, 25);
+  e('UserPromptSubmit', 6000, { raw: { prompt: 'next' } });
+  assert.deepEqual(log.view('s').recap, { files: 0, commands: 0, failed: 0, helpers: 0, endedAt: null });
+});
+
+test('recapOf formats parts, omits zeros, and marks tasks from before the HUD', () => {
+  assert.equal(recapOf({ files: 6, commands: 12, failed: 1, helpers: 2, endedAt: 252000 }, 0), 'Done in 4m 12s · 6 files edited · 12 commands (1 failed) · 2 helpers');
+  assert.equal(recapOf({ files: 1, commands: 0, failed: 0, helpers: 0, endedAt: 8000 }, 0), 'Done in 8s · 1 file edited');
+  assert.equal(recapOf({ files: 0, commands: 0, failed: 0, helpers: 0, endedAt: 8000 }, 0), 'Done in 8s · no tool steps');
+  assert.equal(recapOf({ files: 0, commands: 3, failed: 0, helpers: 0, endedAt: 8000 }, null), 'Since the HUD started: 3 commands');
+  assert.equal(recapOf({ files: 0, commands: 0, failed: 0, helpers: 0, endedAt: 3_900_000 }, 0), 'Done in 1h 5m · no tool steps');
+  assert.equal(recapOf(null, 0), null);
 });

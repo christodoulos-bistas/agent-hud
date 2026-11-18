@@ -70,13 +70,35 @@ function errorText(raw) {
   return null;
 }
 
+const newCounts = () => ({ files: new Set(), commands: 0, failed: 0, helpers: 0, endedAt: null });
+
+function duration(ms) {
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+  return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`;
+}
+
+// One line for the "turn" stage: how long the task took and what it did. null without counters.
+export function recapOf(recap, taskAt) {
+  if (!recap) return null;
+  const parts = [];
+  if (recap.files) parts.push(`${recap.files} ${recap.files === 1 ? 'file' : 'files'} edited`);
+  if (recap.commands) parts.push(`${recap.commands} ${recap.commands === 1 ? 'command' : 'commands'}${recap.failed > 0 ? ` (${recap.failed} failed)` : ''}`);
+  if (recap.helpers) parts.push(`${recap.helpers} ${recap.helpers === 1 ? 'helper' : 'helpers'}`);
+  const body = parts.length ? parts.join(' · ') : 'no tool steps';
+  if (taskAt == null) return `Since the HUD started: ${body}`;
+  if (recap.endedAt == null) return body;
+  return `Done in ${duration(recap.endedAt - taskAt)} · ${body}`;
+}
+
 const DELEGATES = new Set(['Agent', 'Task']);
 
 export function createStepLog({ cap = 20, supersedeMs = 10000 } = {}) {
   const sessions = new Map();
   const get = (id) => {
     let s = sessions.get(id);
-    if (!s) { s = { task: null, taskAt: null, stepCount: 0, open: [], closed: [], helpers: new Map(), lastEventAt: null, lastMessage: null }; sessions.set(id, s); }
+    if (!s) { s = { task: null, taskAt: null, stepCount: 0, open: [], closed: [], helpers: new Map(), lastEventAt: null, lastMessage: null, counts: newCounts() }; sessions.set(id, s); }
     return s;
   };
 
@@ -112,6 +134,20 @@ export function createStepLog({ cap = 20, supersedeMs = 10000 } = {}) {
     const agentId = raw.agent_id ?? null;
     s.lastEventAt = ev.at;
 
+    // Recap counters: counted for helpers too, before their early return.
+    const cTool = ev.toolName ?? raw.tool_name ?? null;
+    const cIn = ev.toolInput || raw.tool_input || {};
+    if (e === 'PreToolUse') {
+      if (cTool === 'Edit' || cTool === 'Write' || cTool === 'NotebookEdit') {
+        const f = cIn.file_path || cIn.notebook_path;
+        if (f) s.counts.files.add(f);
+      } else if (cTool === 'apply_patch') {
+        for (const f of patchPaths(cIn[APPLY_PATCH_FIELD])) s.counts.files.add(f);
+      } else if (cTool === 'Bash' || cTool === 'PowerShell') s.counts.commands += 1;
+    } else if (e === 'PostToolUseFailure' && (cTool === 'Bash' || cTool === 'PowerShell')) s.counts.failed += 1;
+    else if (e === 'SubagentStart') s.counts.helpers += 1;
+    else if (e === 'Stop' && agentId === null) s.counts.endedAt = ev.at;
+
     if (e === 'SubagentStart') {
       if (agentId !== null) s.helpers.set(agentId, { agentId, agentType: raw.agent_type ?? null, doing: null });
       return;
@@ -136,6 +172,7 @@ export function createStepLog({ cap = 20, supersedeMs = 10000 } = {}) {
       s.taskAt = ev.at;
       s.stepCount = 0;
       s.lastMessage = null;
+      s.counts = newCounts();
       closeInterrupted(s, ev.at);
     } else if (e === 'Stop' || e === 'SessionEnd') {
       if (e === 'Stop' && typeof raw.last_assistant_message === 'string') s.lastMessage = collapse(raw.last_assistant_message).slice(0, 600) || null;
@@ -180,7 +217,7 @@ export function createStepLog({ cap = 20, supersedeMs = 10000 } = {}) {
 
   function view(id) {
     const s = sessions.get(id);
-    if (!s) return { task: null, taskAt: null, stepCount: 0, current: null, steps: [], open: [], helpers: [], lastEventAt: null, lastMessage: null };
+    if (!s) return { task: null, taskAt: null, stepCount: 0, current: null, steps: [], open: [], helpers: [], lastEventAt: null, lastMessage: null, recap: { files: 0, commands: 0, failed: 0, helpers: 0, endedAt: null } };
     const open = s.open.slice();
     return {
       task: s.task, taskAt: s.taskAt, stepCount: s.stepCount,
@@ -189,6 +226,7 @@ export function createStepLog({ cap = 20, supersedeMs = 10000 } = {}) {
       open,
       helpers: [...s.helpers.values()].map((h) => ({ ...h })),
       lastEventAt: s.lastEventAt, lastMessage: s.lastMessage,
+      recap: { ...s.counts, files: s.counts.files.size },
     };
   }
 

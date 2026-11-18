@@ -589,3 +589,17 @@ test('I1 control: two real polls missing a session forget it', () => {
   store.setSessions([S('a')]);
   assert.equal(store.wantsReply('a'), false);
 });
+
+test('recap holds the recapOf text at stage turn and is null otherwise, in snapshot and detail', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1', { status: 'busy' })]);
+  store.onEvent(ev('s1', 'UserPromptSubmit', 1000, { raw: { prompt: 'x' } }));
+  store.onEvent(ev('s1', 'PreToolUse', 1500, { toolName: 'Bash', toolInput: { command: 'ls' } }));
+  assert.equal(store.snapshot().agents[0].recap, null); assert.equal(store.detail('s1').recap, null);
+  set(9000);
+  store.onEvent(ev('s1', 'Stop', 9000, { raw: { last_assistant_message: 'ok' } }));
+  const a = store.snapshot().agents[0];
+  assert.equal(a.stage, 'turn');
+  assert.equal(a.recap, 'Done in 8s · 1 command');
+  assert.equal(store.detail('s1').recap, 'Done in 8s · 1 command');
+});

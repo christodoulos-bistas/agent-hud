@@ -1,6 +1,6 @@
 import { moodOf } from './classes.js';
 import { displayName, baseOf, knownTime } from './sessions.js';
-import { activityLine, createStepLog } from './steps.js';
+import { activityLine, createStepLog, recapOf } from './steps.js';
 import { stageOf, stuckOf, currentOf } from './stages.js';
 import { quietSince, tuckOf } from './tuck.js';
 
@@ -148,6 +148,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
         stage, stuck, stageSince: rec.since,
         currentStepStartedAt: currentOf(view, sess.status)?.startedAt ?? null,
         lastActivityAt: s.lastActivityAt,
+        recap: stage === 'turn' ? recapOf(view.recap, view.taskAt) : null,
         tuck,
       };
     });
@@ -198,6 +199,7 @@ export function createStore({ engine, queue, now = Date.now, holdMs = 60000, rep
       // Where a "needs you" is waiting, for the panel's line (M3): a card in the panel, or its own window.
       handedBack: a.handedBack, hasCard: queue.list().some((it) => it.sessionId === id), canOpen: a.canOpen,
       lastMessage: a.stage === 'turn' ? (view.lastMessage ?? null) : null,
+      recap: a.stage === 'turn' ? recapOf(view.recap, view.taskAt) : null,
       card: card && card.sessionId === id ? card : null,
     };
   }
