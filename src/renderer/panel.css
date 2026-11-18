@@ -79,10 +79,10 @@ body[data-arrow="left"]::after { left: 0; border-right-color: rgba(224, 180, 92,
 @media (prefers-reduced-motion: reduce) { .ring { transition: none; } }
 
 /* The plan card */
-.plan { max-height: 260px; overflow: auto; white-space: pre-wrap; font-size: .78rem; line-height: 1.35; padding: 6px 8px; margin: 0 0 8px; background: rgba(0, 0, 0, .2); border-radius: 7px; user-select: text; }
-.plan b { color: var(--gold-l); }
-.plan-more { margin: 0 0 8px; font-size: .72rem; color: var(--sage); }
-.plan-mode { margin: 4px 0 8px; font-size: .72rem; color: var(--sage); }
+.plan-t { margin: 0 0 4px; font-family: 'IM Fell English', Georgia, serif; font-size: .95rem; line-height: 1.2; color: var(--gold-l); user-select: text; }
+.plan-o { margin: 0 0 6px; padding: 0 0 0 18px; max-height: 150px; overflow: auto; font-size: .76rem; line-height: 1.35; color: var(--parch); }
+.plan-o li { padding: 1px 0; overflow-wrap: anywhere; }
+.plan-n { margin: 0 0 8px; font-size: .72rem; color: var(--sage); }
 
 /* The stack above the details: a header (count, hide) and the bubbles */
 .stack { margin: 0 0 9px; }

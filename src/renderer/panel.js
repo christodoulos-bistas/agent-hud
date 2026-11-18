@@ -229,6 +229,7 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
       answer: (id, response) => call('answer', id, response),
       release: (id) => call('release', id),
       openWindow: (sessionId) => call('openWindow', sessionId),
+      openPlan: (id) => call('openPlan', id), // a plan notice's "Read plan": main opens Claude's plan file
     },
   });
 
@@ -265,7 +266,7 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
     for (const el of root.querySelectorAll('[data-ring]')) {
       const hold = Number(el.dataset.hold);
       const exp = Number(el.dataset.expires);
-      if (!(hold > 0) || !Number.isFinite(exp)) continue;
+      if (!(hold > 0) || !Number.isFinite(exp)) continue; // a ring without a hold (none is drawn for a plan notice) is skipped
       el.style.setProperty('--p', String(Math.max(0, Math.min(100, Math.round(((exp - now) / hold) * 100)))));
     }
     if (detail) {

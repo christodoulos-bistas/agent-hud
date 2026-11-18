@@ -1,15 +1,17 @@
 // The panel's bubble stack: renderBubble (one compact bubble per held question) and the answer cards
-// (permission / multiple choice / reply / plan) shown in full under the expanded bubble: the pure
+// (permission / multiple choice / reply) and the read-only plan notice card, shown in full under the
+// expanded bubble: the pure
 // renderCard (card in, HTML string out) and mountCards, which wires a rendered card to the panel's api.
 // Nothing here touches the DOM at import, so it loads in Node for the tests.
 import { CLASSES, spriteSvg } from './sprites.js';
 
 // The hold comes with each card from main (holdMs, stamped by the queue: R1). The fallback is only for a
-// card without one; main's HOLD_MS / REPLY_MS / PLAN_MS stay the one place a hold is set.
+// card without one; main's HOLD_MS / REPLY_MS stay the one place a hold is set. A plan notice has no hold
+// (holdMs null): it draws no ring and no countdown, and is read, never answered.
 export const FALLBACK_HOLD_MS = 60000;
 const holdOf = (card) => (Number.isFinite(card?.holdMs) && card.holdMs > 0 ? card.holdMs : FALLBACK_HOLD_MS);
 export const ARM_MS = 500; // a new card's answer buttons stay inert this long (I7)
-const ARMED_ACTS = new Set(['answer', 'allow', 'deny', 'send', 'noreply', 'approve-auto', 'approve-ask', 'approve', 'keep']);
+const ARMED_ACTS = new Set(['answer', 'allow', 'deny', 'send', 'noreply']);
 const NAMES = new Map(CLASSES.map((c) => [c.id, c.name]));
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -32,8 +34,8 @@ function clock(ms) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-// The countdown to the end of the card's own hold (holdMs from main: a question's, a reply's or a
-// plan's): a clock and a bar, which mountCards' tick rewrites in place every second.
+// The countdown to the end of the card's own hold (holdMs from main: a question's or a
+// reply's): a clock and a bar, which mountCards' tick rewrites in place every second.
 function timer(card, leftMs, label, extra = '') {
   const hold = holdOf(card);
   const left = Math.max(0, Math.min(hold, int(leftMs, hold)));
@@ -126,33 +128,37 @@ function replyCard(card, leftMs, arming) {
 export const PLAN_MAX = 20000;
 const KIND_ICON = { permission: '!', choice: '?', plan: '▤', reply: '↩' };
 
+// The plan notice: read-only. The title (first heading, else "Plan"), the step headings (# to ###) after
+// it as a list (else the first few lines), a line count, and two buttons: Read plan opens Claude's plan
+// file (main: panel:openPlan), Open chat hands the notice back and opens the window. Nothing answers.
 function planCard(card, leftMs, arming) {
   const raw = String(card.payload?.tool_input?.plan ?? card.payload?.plan ?? '');
   const chars = Array.from(raw);
-  const cut = chars.length > PLAN_MAX;
-  const text = cut ? chars.slice(0, PLAN_MAX).join('') : raw;
-  // escape first, then bold: the escape can't be bypassed by the markup added after it
-  const body = text.split('\n').map((l) => (l.startsWith('#') ? `<b>${esc(l)}</b>` : esc(l))).join('\n');
-  const approve = card.planModes
-    ? '<button type="button" class="btn gold" data-act="approve-auto">Approve · auto-accept edits</button>' +
-      '<button type="button" class="btn gold" data-act="approve-ask">Approve · ask before edits</button>'
-    : '<button type="button" class="btn gold" data-act="approve">Approve</button>';
-  // Without mode switching (PLAN_MODES false) the one Approve leaves the chat's own edit mode (spec, M3).
-  const modeNote = card.planModes ? '' : '<p class="plan-mode">Edit mode stays as set in the chat.</p>';
+  const text = chars.length > PLAN_MAX ? chars.slice(0, PLAN_MAX).join('') : raw;
+  const lines = text.split(/\r?\n/);
+  const total = text.trim() ? text.replace(/(\r?\n)+$/, '').split(/\r?\n/).length : 0;
+  const clip = (t) => { const c = Array.from(t); return c.length > 120 ? `${c.slice(0, 120).join('').trimEnd()}…` : t; };
+  const at = lines.findIndex((l) => /^#{1,6}\s+\S/.test(l));
+  const title = at >= 0 ? lines[at].replace(/^#{1,6}\s+/, '').trim() : 'Plan';
+  const rest = at >= 0 ? lines.slice(at + 1) : lines;
+  let items = rest.filter((l) => /^#{1,3}\s+\S/.test(l)).map((l) => l.replace(/^#{1,3}\s+/, '').trim());
+  if (!items.length) items = rest.map((l) => l.trim()).filter(Boolean).slice(0, 4);
+  const list = items.length ? `<ol class="plan-o">${items.map((t) => `<li>${esc(clip(t))}</li>`).join('')}</ol>` : '';
+  const hasHold = card.holdMs != null;
   return cardOpen(card, 'plan', { arming }) +
-    cardTop(card, '<span class="ans-seal" aria-hidden="true">▤</span>') +
-    `<div class="plan">${body}</div>` +
-    (cut ? '<p class="plan-more">Open the window to read the rest.</p>' : '') +
-    `<div class="btns">${approve}</div>${modeNote}` +
-    '<div class="reply"><input data-feedback placeholder="What should change?" aria-label="What should change?">' +
-    '<button type="button" class="btn ghost" data-act="keep">Keep planning</button></div>' +
-    timer(card, leftMs, 'Back to its window in') +
+    '<div class="ans-top"><span class="ans-seal" aria-hidden="true">▤</span>' + `<span class="who-n">${esc(card.display)}</span></div>` +
+    `<p class="plan-t">${esc(clip(title))}</p>` + list +
+    `<p class="plan-n">${total} ${total === 1 ? 'line' : 'lines'}</p>` +
+    '<div class="btns"><button type="button" class="btn gold" data-act="read-plan">Read plan ↗</button>' +
+    (card.canOpen === false ? '' : '<button type="button" class="btn ghost" data-act="open-card">Open chat ↗</button>') + '</div>' +
+    (hasHold ? timer(card, leftMs, 'Back to its window in') : '') +
   '</div>';
 }
 
 // A compact bubble for one waiting question; pure (the caller decides `expanded`).
 export function renderBubble(summary, { nowMs, expanded = false } = {}) {
   const c = summary || {};
+  const hasHold = c.holdMs != null;
   const hold = holdOf(c);
   const p = Number.isFinite(c.expiresAt) && Number.isFinite(nowMs)
     ? Math.max(0, Math.min(100, Math.round(((c.expiresAt - nowMs) / hold) * 100))) : 100;
@@ -162,7 +168,7 @@ export function renderBubble(summary, { nowMs, expanded = false } = {}) {
     `<span class="bub-n">${esc(c.display)}</span>` +
     `<span class="bub-k" aria-hidden="true">${KIND_ICON[c.kind] ?? ''}</span>` +
     `<span class="bub-l">${esc(c.line)}</span>` +
-    `<i class="ring" data-ring data-expires="${esc(c.expiresAt)}" data-hold="${hold}" style="--p:${p}"></i>` +
+    (hasHold ? `<i class="ring" data-ring data-expires="${esc(c.expiresAt)}" data-hold="${hold}" style="--p:${p}"></i>` : '') +
   '</button>';
 }
 
@@ -180,6 +186,7 @@ export function renderCard(card, { leftMs, arming = false } = {}) {
 // the card's hold (holdMs) down from when the card appeared here. Undefined for no card or an unknown kind.
 export function cardLeftMs(card, nowMs, sinceMs) {
   if (!['permission', 'choice', 'reply', 'plan'].includes(card?.kind)) return undefined;
+  if (card.kind === 'plan' && card.holdMs == null) return undefined; // a notice has no hold
   return Number.isFinite(card.expiresAt) ? card.expiresAt - nowMs : holdOf(card) - (nowMs - sinceMs);
 }
 // The same for a reply card only (v1's name, kept for its callers).
@@ -288,8 +295,6 @@ export function mountCards(host, { api, doc, onInteractive, adopt = false, draft
       if (v) { o.value = v; any = true; }
     }
     if (any) syncAnswer(cardEl);
-    const fb = cardEl.querySelector('[data-feedback]');
-    if (fb && text) fb.value = text;
   }
 
   function settle(cardEl, send) {
@@ -345,15 +350,8 @@ export function mountCards(host, { api, doc, onInteractive, adopt = false, draft
         if (text) answer(cardEl, { kind: 'reply', text });
         break;
       }
-      case 'approve-auto':
-        answer(cardEl, { kind: 'plan', approve: 'acceptEdits' }); break;
-      case 'approve-ask':
-      case 'approve':
-        answer(cardEl, { kind: 'plan', approve: 'default' }); break;
-      case 'keep': {
-        const feedback = (cardEl.querySelector('[data-feedback]')?.value ?? '').trim();
-        answer(cardEl, { kind: 'plan', keep: true, feedback }); break;
-      }
+      case 'read-plan':
+        call('openPlan', cardEl.dataset.card); break; // the card stays; a plan is never answered
       case 'noreply':
         release(cardEl, false); break;
       case 'open-card':
@@ -371,8 +369,6 @@ export function mountCards(host, { api, doc, onInteractive, adopt = false, draft
       }
       drafts.set(`${cardEl.dataset.card}#${e.target.dataset.q}`, e.target.value);
       syncAnswer(cardEl);
-    } else if (e.target.matches('[data-feedback]')) {
-      drafts.set(cardEl.dataset.card, e.target.value);
     } else if (e.target.matches('[data-reply]')) {
       drafts.set(cardEl.dataset.card, e.target.value);
       const send = cardEl.querySelector('[data-act="send"]');
@@ -384,9 +380,7 @@ export function mountCards(host, { api, doc, onInteractive, adopt = false, draft
     if (e.key !== 'Enter' || e.isComposing) return;
     const cardEl = cardOf(e.target);
     if (!cardEl) return;
-    const act = e.target.matches('[data-reply]') ? 'send' : e.target.matches('[data-feedback]') ? 'keep' : e.target.matches('.other') ? 'answer' : null;
-    // Enter in an empty feedback box is not "Keep planning" (M5); the button still sends it empty.
-    if (act === 'keep' && !String(e.target.value ?? '').trim()) return;
+    const act = e.target.matches('[data-reply]') ? 'send' : e.target.matches('.other') ? 'answer' : null;
     const btn = act && cardEl.querySelector(`[data-act="${act}"]`);
     if (btn && !btn.disabled && clickAllowed(act, st.cardSince, Date.now())) { e.preventDefault(); btn.click(); }
   });

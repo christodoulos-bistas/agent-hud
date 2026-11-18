@@ -98,7 +98,7 @@ test('v1.2 M6: a mounted permission card ticks its countdown like the reply card
 });
 
 // ---- Task 10: bubbles and the plan card ----
-const BUB = { id: 'b1', kind: 'permission', sessionId: 's1', display: '<img src=x onerror=alert(1)>', cls: 'pathfinder', source: 'claude', line: '<img onerror=x> runs "a"', expiresAt: 1_000_000 + 30000, canOpen: true };
+const BUB = { id: 'b1', kind: 'permission', sessionId: 's1', display: '<img src=x onerror=alert(1)>', cls: 'pathfinder', source: 'claude', line: '<img onerror=x> runs "a"', expiresAt: 1_000_000 + 30000, holdMs: 60000, canOpen: true };
 const PLAN = (text, extra = {}) => ({ id: 'pl1', kind: 'plan', sessionId: 's1', display: 'Ann', cls: 'pathfinder', source: 'claude', payload: { tool_input: { plan: text } }, ...extra });
 
 test('renderBubble escapes display and line and carries the data attributes', () => {
@@ -111,95 +111,81 @@ test('renderBubble escapes display and line and carries the data attributes', ()
   assert.match(cards.renderBubble({ ...BUB, kind: 'reply', holdMs: 540000 }, { nowMs: 1_000_000 }), /data-hold="540000"/);
 });
 
-test('plan card escapes, bolds headings, cuts at 20000 with the hint, and varies its approve buttons', () => {
-  const h = cards.renderCard(PLAN('# Heading\n<script>alert(1)</script>\nbody'), {});
-  assert.ok(!h.includes('<script>'));
-  assert.match(h, /<b>#? ?Heading<\/b>|<b># Heading<\/b>/);
-  assert.ok(!h.includes('plan-more'));
-  assert.ok(h.includes('data-act="approve">Approve</button></div><p class="plan-mode">Edit mode stays as set in the chat.</p>'), 'M3: one Approve says the mode stays as set');
-  assert.ok(!h.includes('approve-auto'));
-  assert.match(h, /<input data-feedback placeholder="What should change\?"/);
-  assert.match(h, /data-act="keep"[^>]*>Keep planning</);
-  assert.match(h, /Back to its window in/);
-  const two = cards.renderCard(PLAN('x', { planModes: ['acceptEdits', 'default'] }), {});
-  assert.match(two, /data-act="approve-auto"[^>]*>Approve · auto-accept edits</);
-  assert.match(two, /data-act="approve-ask"[^>]*>Approve · ask before edits</);
-  assert.ok(!two.includes('plan-mode'), 'the two approves set the mode themselves');
-  const long = cards.renderCard(PLAN('a'.repeat(20001)), {});
-  assert.ok(long.includes('<p class="plan-more">Open the window to read the rest.</p>'));
-  assert.ok(!long.includes('a'.repeat(20001)) && long.includes('a'.repeat(20000)));
-  assert.ok(!cards.renderCard(PLAN('a'.repeat(20000)), {}).includes('plan-more'));
+const PLAN_MD = '# Ship the thing\n\nIntro text\n## Step one\nbody\n### Step two\n#### too deep\n## Step three\n';
+
+test('plan card: title, step headings as a list, line count, Read plan and Open chat', () => {
+  const h = cards.renderCard(PLAN(PLAN_MD, { holdMs: null, expiresAt: null, canOpen: true }), {});
+  assert.match(h, /data-kind="plan"/);
+  assert.match(h, /<p class="plan-t">Ship the thing<\/p>/);
+  assert.match(h, /<ol class="plan-o"><li>Step one<\/li><li>Step two<\/li><li>Step three<\/li><\/ol>/, '#-### after the title; not ####');
+  assert.match(h, /<p class="plan-n">8 lines<\/p>/);
+  assert.ok(h.includes('<button type="button" class="btn gold" data-act="read-plan">Read plan ↗</button>'));
+  assert.match(h, /data-act="open-card"[^>]*>Open chat ↗</);
+  assert.ok(!cards.renderCard(PLAN(PLAN_MD, { canOpen: false }), {}).includes('open-card'), 'no Open chat without a window');
+  assert.ok(cards.renderCard(PLAN(PLAN_MD, { canOpen: false }), {}).includes('read-plan'));
 });
 
-test('plan: arming, hold and cardLeftMs', () => {
-  assert.equal(cards.clickAllowed('keep', 1000, 1100), false);
-  assert.equal(cards.clickAllowed('keep', 1000, 1500), true);
-  for (const a of ['approve', 'approve-auto', 'approve-ask']) assert.equal(cards.clickAllowed(a, 1000, 1100), false);
-  assert.equal(cards.cardLeftMs({ kind: 'plan', holdMs: 540000 }, 5000, 2000), 540000 - 3000);
+test('plan card: no headings falls back to "Plan" and the first lines', () => {
+  const h = cards.renderCard(PLAN('\nfirst\n\nsecond\nthird\nfourth\nfifth\nsixth'), {});
+  assert.match(h, /<p class="plan-t">Plan<\/p>/);
+  assert.match(h, /<ol class="plan-o"><li>first<\/li><li>second<\/li><li>third<\/li><li>fourth<\/li><\/ol>/);
 });
 
-test('mounted plan card answers approve / keep and drives onInteractive from the feedback box', () => {
+test('plan card escapes a hostile plan, caps the input at 20000, and has no answer controls', () => {
+  const h = cards.renderCard(PLAN('# <script>alert(1)</script>\n## <img src=x onerror=alert(1)>\n"q" & \'s\''), {});
+  assert.ok(!h.includes('<script>') && !h.includes('<img'));
+  assert.ok(h.includes('&lt;script&gt;alert(1)&lt;/script&gt;') && h.includes('&lt;img src=x'));
+  assert.doesNotMatch(h, /data-act="(answer|approve|approve-auto|approve-ask|keep|allow|deny|send)"/);
+  assert.doesNotMatch(h, /<input|data-feedback|Keep planning|Edit mode stays/);
+  const long = cards.renderCard(PLAN(`# T\n## ${'a'.repeat(30000)}`), {});
+  assert.ok(!long.includes('a'.repeat(20001)));
+});
+
+test('plan card: no timer or countdown without a hold; a hold still draws one', () => {
+  const none = cards.renderCard(PLAN('# T', { holdMs: null }), {});
+  assert.doesNotMatch(none, /class="timer"|data-left|data-bar|Back to its window/);
+  assert.doesNotMatch(cards.renderCard(PLAN('# T'), {}), /data-left/, 'holdMs undefined is not a hold either');
+  assert.match(cards.renderCard(PLAN('# T', { holdMs: 120000 }), { leftMs: 60000 }), /<i data-bar style="width:50\.0%">/);
+});
+
+test('a bubble has no ring without a hold', () => {
+  const b = cards.renderBubble({ ...BUB, kind: 'plan', holdMs: null, expiresAt: null }, { nowMs: 1_000_000 });
+  assert.doesNotMatch(b, /class="ring"|data-ring|data-hold/);
+  assert.match(b, /class="bub"/);
+});
+
+test('mounted plan card: read-plan calls openPlan with its own id and never answers; Open chat releases then opens', () => {
   const L = {};
-  const input = { value: '', dataset: {}, matches: (s) => s === '[data-feedback]' };
-  const cardEl = { dataset: { card: 'pl1', session: 's1' }, querySelector: (s) => (s === '[data-feedback]' ? input : null), querySelectorAll: () => [], classList: { remove() {} } };
-  const mk = (act) => ({ dataset: { act }, disabled: false, closest: (s) => (s === '[data-act]' ? mk.self : cardEl), });
-  const host = { addEventListener: (t, f) => { L[t] = f; }, contains: () => true, querySelector: () => null, querySelectorAll: () => [], };
-  input.closest = (s) => (s === '.ans' ? cardEl : s.includes('input') ? input : null);
-  const got = []; const inter = [];
-  const m = cards.mountCards(host, { api: { answer: (id, r) => got.push([id, r]) }, adopt: true, onInteractive: (v) => inter.push(v) });
-  const T = Date.now() - 10_000;
-  const clickOn = (act) => { const el = { dataset: { act }, disabled: false, closest: (s) => (s === '[data-act]' ? el : cardEl) }; cardEl.dataset.done = ''; delete cardEl.dataset.done; L.click({ target: el }); };
-  for (const [act, want] of [['approve-auto', { kind: 'plan', approve: 'acceptEdits' }], ['approve-ask', { kind: 'plan', approve: 'default' }], ['approve', { kind: 'plan', approve: 'default' }]]) {
-    m.show({ id: 'pl1', kind: 'plan', sessionId: 's1' }, T); got.length = 0;
-    clickOn(act); assert.deepEqual(got[0], ['pl1', want]);
-    m.clear();
-  }
-  m.show({ id: 'pl1', kind: 'plan', sessionId: 's1' }, T); got.length = 0; inter.length = 0;
-  L.pointerdown({ target: input });
-  assert.deepEqual(inter, [true]);
-  input.value = '  tighten it  ';
-  L.input({ target: input });
-  assert.equal(m.drafts.get('pl1'), '  tighten it  ');
-  clickOn('keep');
-  assert.deepEqual(got[0], ['pl1', { kind: 'plan', keep: true, feedback: 'tighten it' }]);
-  assert.equal(inter.at(-1), false);
+  const cardEl = { dataset: { card: 'plan:s1:1', session: 's1' }, querySelector: () => null, querySelectorAll: () => [], classList: { remove() {} } };
+  const host = { addEventListener: (t, f) => { L[t] = f; }, contains: () => true, querySelector: () => null, querySelectorAll: () => [] };
+  const calls = [];
+  const api = { answer: (...a) => calls.push(['answer', ...a]), openPlan: (id) => calls.push(['openPlan', id]), release: (id) => calls.push(['release', id]), openWindow: (s) => calls.push(['openWindow', s]) };
+  const m = cards.mountCards(host, { api, adopt: true });
+  m.show({ id: 'plan:s1:1', kind: 'plan', sessionId: 's1', holdMs: null, expiresAt: null }, Date.now() - 10_000);
+  const clickOn = (act) => { const el = { dataset: { act }, disabled: false, closest: (s) => (s === '[data-act]' ? el : cardEl) }; L.click({ target: el }); };
+  clickOn('read-plan');
+  clickOn('read-plan');
+  assert.deepEqual(calls, [['openPlan', 'plan:s1:1'], ['openPlan', 'plan:s1:1']], 'read-plan leaves the card in place and never answers');
+  assert.ok(!cardEl.dataset.done);
+  calls.length = 0;
+  clickOn('open-card');
+  assert.deepEqual(calls, [['release', 'plan:s1:1'], ['openWindow', 's1']]);
+  m.clear();
 });
 
 test('R1: the hold travels with the card (holdMs): the ring, the countdown bar and cardLeftMs read it', () => {
   const T = 1_000_000;
-  const b = cards.renderBubble({ ...BUB, kind: 'plan', holdMs: 120000, expiresAt: T + 60000 }, { nowMs: T });
+  const b = cards.renderBubble({ ...BUB, kind: 'permission', holdMs: 120000, expiresAt: T + 60000 }, { nowMs: T });
   assert.match(b, /data-hold="120000" style="--p:50"/, "half of the card's own hold, not of a renderer constant");
-  assert.match(cards.renderCard(PLAN('x', { holdMs: 120000 }), { leftMs: 60000 }), /<i data-bar style="width:50\.0%">/);
   assert.equal(cards.cardLeftMs({ kind: 'reply', holdMs: 120000 }, 5000, 2000), 117000, "no deadline: count down the card's hold");
-  assert.equal(cards.cardLeftMs({ kind: 'plan' }, 5000, 2000), cards.FALLBACK_HOLD_MS - 3000, 'a card without holdMs falls back');
+  assert.equal(cards.cardLeftMs({ kind: 'reply' }, 5000, 2000), cards.FALLBACK_HOLD_MS - 3000, 'a card without holdMs falls back');
   for (const k of ['HOLD_MS', 'REPLY_MS', 'PLAN_MS']) assert.equal(k in cards, false, `no renderer copy of main's ${k}`);
   const bar = { style: { width: '' } };
   const left = { textContent: '' };
   const host = { addEventListener() {}, querySelector: (sel) => (sel === '[data-left]' ? left : sel === '[data-bar]' ? bar : null), querySelectorAll: () => [] };
   const m = cards.mountCards(host, { api: {}, adopt: true });
-  m.show({ id: 'pl9', kind: 'plan', sessionId: 's1', holdMs: 120000, expiresAt: T + 30000, payload: {} }, T);
+  m.show({ id: 'r9', kind: 'reply', sessionId: 's1', holdMs: 120000, expiresAt: T + 30000, payload: {} }, T);
   assert.equal(left.textContent, '0:30');
   assert.equal(bar.style.width, '25.0%');
-  m.clear();
-});
-
-test('M5: Enter in an empty feedback box does not send "Keep planning"; with text it does; the button still sends empty', () => {
-  const L = {};
-  const input = { value: '', dataset: {}, matches: (sel) => sel === '[data-feedback]' };
-  let clicks = 0;
-  const keep = { dataset: { act: 'keep' }, disabled: false, click: () => { clicks++; } };
-  const cardEl = { dataset: { card: 'pl1', session: 's1' }, querySelector: (sel) => (sel === '[data-feedback]' ? input : sel === '[data-act="keep"]' ? keep : null), querySelectorAll: () => [] };
-  input.closest = (sel) => (sel === '.ans' ? cardEl : null);
-  const host = { addEventListener: (t, f) => { L[t] = f; }, contains: () => true, querySelector: () => null, querySelectorAll: () => [] };
-  const m = cards.mountCards(host, { api: {}, adopt: true });
-  m.show({ id: 'pl1', kind: 'plan', sessionId: 's1', holdMs: 540000 }, Date.now() - 10_000);
-  let prevented = 0;
-  const enter = () => L.keydown({ key: 'Enter', isComposing: false, target: input, preventDefault: () => { prevented++; } });
-  for (const v of ['', '   ']) { input.value = v; enter(); }
-  assert.equal(clicks, 0, 'an empty box: Enter does nothing');
-  assert.equal(prevented, 0);
-  input.value = 'add a rollback step';
-  enter();
-  assert.equal(clicks, 1, 'with text, Enter sends Keep planning');
   m.clear();
 });

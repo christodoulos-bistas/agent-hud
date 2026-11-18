@@ -627,7 +627,8 @@ fromPanel('panel:openPlan', (cardId) => {
   if (!card) return;
   const file = card.payload?.tool_input?.planFilePath;
   if (card.kind === 'plan' && planFileOk(file, os.homedir())) {
-    shell.openPath(file).then((err) => { if (err) log('open plan', err); }, (err) => log('open plan', err));
+    // A missing or unopenable file: the chat is still somewhere useful to land.
+    shell.openPath(file).then((err) => { if (err) { log('open plan', err); openWindow(card.sessionId); } }, (err) => { log('open plan', err); openWindow(card.sessionId); });
     return;
   }
   openWindow(card.sessionId);

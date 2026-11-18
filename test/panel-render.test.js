@@ -310,3 +310,17 @@ test('I4: a bubble takes no "expand" for ARM_MS after it first renders; the stac
   // Other panel actions are never held back.
   for (const act of ['close', 'open']) assert.equal(arm.allowed(act, {}, T + 5101), true, act);
 });
+
+test('a plan notice in the stack: read-only card, no ring, no countdown, no answer buttons', () => {
+  const plan = {
+    id: 'plan:s1:1', kind: 'plan', sessionId: 's1', display: 'arsenal · e0', cls: 'runesmith', source: 'claude', line: 'Plan ready · 2 steps',
+    expiresAt: null, holdMs: null, canOpen: true, payload: { tool_input: { plan: '# Plan <b>\n## One\n## Two', planFilePath: 'x' } },
+  };
+  const h = renderStack({ visible: true, cards: [{ ...summ(plan), line: plan.line }], expanded: plan }, NOW);
+  assert.match(h, /Plan ready · 2 steps/);
+  assert.doesNotMatch(h, /data-ring|class="ring"|data-left|data-bar/);
+  assert.match(h, /data-act="read-plan"/);
+  assert.match(h, /data-act="open-card"/);
+  assert.doesNotMatch(h, /data-act="(answer|approve|keep)"|<input/);
+  assert.ok(h.includes('Plan &lt;b&gt;') && !h.includes('Plan <b>'), 'escaped');
+});
