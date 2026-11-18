@@ -24,12 +24,13 @@ const NOTE_S = 0.12;
 
 export function createPlayer({ makeContext, makeAudio, makeUrl, revokeUrl }) {
   let ctx = null;
-  const custom = new Map(); // cue -> { url, mime }
+  const custom = new Map(); // cue -> { url }
 
   function synth(cue) {
     const spec = NOTES[cue];
     if (!spec) return;
     ctx ??= makeContext();
+    if (ctx.state === 'suspended') ctx.resume?.();
     const t0 = ctx.currentTime;
     spec.freqs.forEach((hz, i) => {
       const osc = ctx.createOscillator();
@@ -53,9 +54,11 @@ export function createPlayer({ makeContext, makeAudio, makeUrl, revokeUrl }) {
       if (!c) { synth(cue); return; }
       let fell = false;
       const fallback = () => { if (fell) return; fell = true; try { synth(cue); } catch { /* silent */ } };
-      const audio = makeAudio(c.url);
-      audio.addEventListener('error', fallback);
-      Promise.resolve(audio.play()).catch(fallback);
+      try {
+        const audio = makeAudio(c.url);
+        audio.addEventListener('error', fallback);
+        Promise.resolve(audio.play()).catch(fallback);
+      } catch { fallback(); }
     } catch { /* a sound failure never breaks the HUD */ }
   }
 

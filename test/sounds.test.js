@@ -114,3 +114,37 @@ test('setCustom(cue, null) reverts to the synth and revokes the old URL', () => 
   p.play('needs');
   assert.equal(osc.length, 2);
 });
+
+test('a suspended context is resumed and the notes are still scheduled', () => {
+  const { ctx, osc } = fakeCtx();
+  let resumed = 0;
+  ctx.state = 'suspended';
+  ctx.resume = () => { resumed++; return Promise.resolve(); };
+  createPlayer({ makeContext: () => ctx }).play('needs');
+  assert.equal(resumed, 1);
+  assert.equal(osc.length, 2);
+});
+
+test('a synchronous throw from makeAudio falls back to the synth', () => {
+  const { ctx, osc } = fakeCtx();
+  const p = createPlayer({ makeContext: () => ctx, makeAudio: () => { throw new Error('boom'); }, makeUrl: () => 'blob:x', revokeUrl() {} });
+  p.setCustom('needs', file);
+  p.play('needs');
+  assert.equal(osc.length, 2);
+});
+
+test('a synchronous throw from audio.play() falls back to the synth', () => {
+  const { ctx, osc } = fakeCtx();
+  const p = createPlayer({ makeContext: () => ctx, makeAudio: () => ({ play() { throw new Error('boom'); }, addEventListener() {} }), makeUrl: () => 'blob:x', revokeUrl() {} });
+  p.setCustom('needs', file);
+  p.play('needs');
+  assert.equal(osc.length, 2);
+});
+
+test('setCustom with a new file revokes the old URL', () => {
+  const revoked = []; let n = 0;
+  const p = createPlayer({ makeContext: () => fakeCtx().ctx, makeAudio: () => ({ play: () => Promise.resolve(), addEventListener() {} }), makeUrl: () => 'blob:' + (++n), revokeUrl: (u) => revoked.push(u) });
+  p.setCustom('needs', file);
+  p.setCustom('needs', file);
+  assert.deepEqual(revoked, ['blob:1']);
+});
