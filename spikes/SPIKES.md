@@ -280,7 +280,7 @@ page + scripts + CSS written to os.tmpdir()). Headless-style evidence: nobody li
 ```
 
 - AUDIO_OK = yes (by API evidence): the context starts `running` with no gesture in a window that never had focus
-  (`isFocused()` false for both windows throughout), the oscillator chime schedules without error, and the Blob WAV plays to its
+  (`isFocused()` false for both windows at show and at the end, 8 s; sampled only twice), the oscillator chime schedules without error, and the Blob WAV plays to its
   `ended` event under that CSP. Audibility is on Spider-Man's live checklist.
 - Gotcha: the CSP `default-src 'self'` also blocks inline `<script>` and inline `style=` attributes, so the HUD's own pages must
   keep scripts and styles in files (the probe loads `a.js`, `b.js`, `s.css` from the page's folder).
@@ -299,9 +299,10 @@ main: focusable A=true B=false; focused A=false B=false
 ```
 
 (The run also logged three further enter/mouseenter/leave cycles later, with no input sent from the script at those times;
-possible stray real-pointer or compositor-generated moves, not investigated.)
+possible stray real-pointer or compositor-generated moves, not investigated. So the logged hover events cannot be tied
+to the synthetic moves alone.)
 
-- HOVER_OK = yes for the renderer side: a non-focusable window delivers pointer events to the page, and the box saw enter and
-  leave; neither window ever became focused (`isFocused()` false after the run), so the editor would keep focus.
+- HOVER_OK = unconfirmed (renderer receives pointer events; real-mouse OS routing untested - Spider-Man's live check). The box saw
+  enter and leave; the spike's windows never took Electron focus (isFocused false); the OS foreground window was not checked.
   Not proven: that a real mouse over a `focusable: false` window on Windows is routed to it (synthetic events bypass the OS
   hit-test). A real-mouse hover check is on Spider-Man's live checklist; until it passes, treat the highlight as likely-but-unconfirmed.
