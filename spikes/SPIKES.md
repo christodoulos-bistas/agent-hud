@@ -306,3 +306,50 @@ to the synthetic moves alone.)
   enter and leave; the spike's windows never took Electron focus (isFocused false); the OS foreground window was not checked.
   Not proven: that a real mouse over a `focusable: false` window on Windows is routed to it (synthetic events bypass the OS
   hit-test). A real-mouse hover check is on Spider-Man's live checklist; until it passes, treat the highlight as likely-but-unconfirmed.
+
+## Spike 12 - ExitPlanMode (hands-on, NOT YET RUN)
+
+Probe modes (`node spikes/hook-probe.mjs --mode <m>`; the scratch folder's hooks must include PreToolUse and PermissionRequest):
+`plan-allow-auto` (allow + `setMode acceptEdits`, session), `plan-keep` (deny with "Keep planning: add a rollback step"),
+`plan-hold --holdMs 60000` (hold ExitPlanMode unanswered). Each also logs every payload to `spikes/logs/hooks.jsonl`.
+Run per host: VS Code panel, Claude desktop app, CLI. Folder: `C:\Consortis_projects\agent-hud-spike`. In each, enter plan mode and ask for a two-step plan.
+
+For each host record:
+1. Which event carries ExitPlanMode (PermissionRequest, PreToolUse or both) and its `tool_input` keys (from hooks.jsonl).
+2. `plan-allow-auto`: does Claude leave plan mode? Is the new mode accept-edits? Does the "Agent HUD · Plan approved" record show?
+3. `plan-keep`: does Claude stay in plan mode and revise using the message (a rollback step)?
+4. `plan-hold`: while the hook is held, does the chat show its own approval dialog? Does answering there end the held request?
+   **If the chat shows nothing to click during the hold: STOP and report before Task 6** (the 9-minute hold would leave the chat blank).
+
+| Host | Event(s) | tool_input keys | allow-auto: left plan / acceptEdits / record | keep: stays + revises | hold: native dialog / ends hold |
+| --- | --- | --- | --- | --- | --- |
+| VS Code panel | | | | | |
+| Claude desktop | | | | | |
+| CLI | | | | | |
+
+## Spike 13 - systemMessage per host (hands-on, NOT YET RUN)
+
+Probe `--mode record` answers every PermissionRequest with allow + `"systemMessage":"Agent HUD · Allowed: <tool>"`.
+1. Claude hosts (VS Code, desktop, CLI): ask "Run `echo hi > x.txt` with Bash". Record: does the record show in the chat, and did the command run?
+2. Codex Desktop and Codex TUI: start the Codex receiver as `RECORD=1 node spikes/codex/receiver.mjs` (same body behind the Codex bridge,
+   `spikes/codex/bridge.cjs`), run a shell command needing approval. Record: did the command run, does the record show, any "hook failed" text.
+
+| Host | Record shows | Command ran | Notes |
+| --- | --- | --- | --- |
+| claude-vscode | | | |
+| claude-desktop | | | |
+| cli | | | |
+| codex desktop | | | |
+| codex tui | | | |
+
+## Spike 14 - messaging socket (hands-on, NOT YET RUN)
+
+Use ONLY a throwaway session started in `C:\Consortis_projects\agent-hud-spike`; never any other session. Read its `messagingSocketPath`
+from `~/.claude/sessions/<pid>.json`, connect, and send one newline-terminated JSON line: `{"type":"user_message","text":"Say PINEAPPLE"}`.
+Record the exact response (bytes returned, or none) and whether the chat reacts (shows the message / Claude answers PINEAPPLE). Task 3 builds the script; this section is only the procedure.
+
+## Decisions (provisional - the build uses these until the checklists above are run)
+
+- `PLAN_EVENT = 'PermissionRequest'` - provisional - flip after the checklist. Flips to `'PreToolUse'` if only PreToolUse carries ExitPlanMode or only it accepts the answer.
+- `PLAN_MODES = false` - provisional - flip after the checklist. Flips to `true` if `plan-allow-auto` left plan mode and the mode became accept-edits.
+- `RECORD_HOSTS = new Set()` (no records) - provisional - flip after the checklist. Add each of `claude-vscode`, `claude-desktop`, `cli`, `codex` where Spike 13 showed the record AND the allow still took effect.
