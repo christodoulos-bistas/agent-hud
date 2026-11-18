@@ -16,7 +16,7 @@ const addRulesOf = (suggestions) => (Array.isArray(suggestions) ? suggestions.fi
 // With `record`, a valid answer also carries a one-line chat record (systemMessage).
 export function encodeAnswer(item, response, { record = false } = {}) {
   const encoded = encodeDecision(item, response);
-  return record && encoded ? withRecord(encoded, recordText(item, response)) : encoded;
+  return record && encoded ? withRecord(encoded, recordText(item, response, { modes: PLAN_MODES })) : encoded;
 }
 
 function encodeDecision(item, response) {

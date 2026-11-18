@@ -529,8 +529,8 @@ test('recordText per kind', () => {
   const ch = { kind: 'choice', payload: { tool_input: { questions: [{ question: 'Which DB?' }, { question: 'Port?' }] } } };
   assert.equal(recordText(ch, { kind: 'choice', picks: { 'Which DB?': 'Postgres', 'Port?': ['5432', '5433'] } }), 'Agent HUD · Answered: Which DB? → Postgres; Port? → 5432, 5433');
   const plan = { kind: 'plan', payload: {} };
-  assert.equal(recordText(plan, { kind: 'plan', approve: 'acceptEdits' }), 'Agent HUD · Plan approved (auto-accept edits)');
-  assert.equal(recordText(plan, { kind: 'plan', approve: 'default' }), 'Agent HUD · Plan approved (ask before edits)');
+  assert.equal(recordText(plan, { kind: 'plan', approve: 'acceptEdits' }, { modes: true }), 'Agent HUD · Plan approved (auto-accept edits)');
+  assert.equal(recordText(plan, { kind: 'plan', approve: 'default' }, { modes: true }), 'Agent HUD · Plan approved (ask before edits)');
   assert.equal(recordText(plan, { kind: 'plan', keep: true, feedback: 'add\nrollback' }), 'Agent HUD · Keep planning: add rollback');
   assert.equal(recordText({ kind: 'reply', payload: {} }, { kind: 'reply', text: 'x'.repeat(200) }), `Agent HUD · You replied: ${'x'.repeat(80)}…`);
   assert.ok(recordText(bash, { kind: 'allow', always: true }).length <= 160);
@@ -559,7 +559,7 @@ test('encodeAnswer: plan case', () => {
   assert.equal(encodeAnswer(plan, { kind: 'plan' }), null);
   assert.equal(encodeAnswer(plan, { kind: 'plan', keep: true, feedback: 5 }), null);
   assert.equal(encodeAnswer(plan, { kind: 'allow' }), null);
-  assert.equal(encodeAnswer(plan, { kind: 'plan', approve: 'default' }, { record: true }).systemMessage, 'Agent HUD · Plan approved (ask before edits)');
+  assert.equal(encodeAnswer(plan, { kind: 'plan', approve: 'default' }, { record: true }).systemMessage, PLAN_MODES ? 'Agent HUD · Plan approved (ask before edits)' : 'Agent HUD · Plan approved');
   if (!PLAN_MODES) assert.deepEqual(encodeAnswer(plan, { kind: 'plan', approve: 'acceptEdits' }), encodeAnswer(plan, { kind: 'plan', approve: 'default' }));
 });
 
@@ -574,4 +574,28 @@ test('recordAllowed follows RECORD_HOSTS by entrypoint, Codex by source', () => 
   assert.equal(recordAllowed(null, hosts), false);
   assert.equal(recordAllowed({ entrypoint: 'claude-vscode' }, new Set()), false);
   assert.equal(recordAllowed({ entrypoint: 'x' }), false); // default RECORD_HOSTS
+});
+
+test('recordText: Windows paths shorten to the basename', () => {
+  const edit = { kind: 'permission', payload: { tool_name: 'Edit', tool_input: { file_path: 'C:\\p\\src\\a.ts' } } };
+  assert.equal(recordText(edit, { kind: 'allow' }), 'Agent HUD · Allowed: Edit a.ts');
+});
+test('recordText: plan approve names a mode only when modes is on', () => {
+  const plan = { kind: 'plan', payload: {} };
+  for (const approve of ['acceptEdits', 'default']) assert.equal(recordText(plan, { kind: 'plan', approve }, { modes: false }), 'Agent HUD · Plan approved');
+  assert.equal(recordText(plan, { kind: 'plan', approve: 'acceptEdits' }, { modes: true }), 'Agent HUD · Plan approved (auto-accept edits)');
+  assert.equal(recordText(plan, { kind: 'plan', approve: 'default' }, { modes: true }), 'Agent HUD · Plan approved (ask before edits)');
+});
+test('recordText: malformed choice questions never throw', () => {
+  for (const questions of ['x', null, [null, 5, { question: 'Q?' }]]) {
+    const item = { kind: 'choice', payload: { tool_input: { questions } } };
+    assert.doesNotThrow(() => recordText(item, { kind: 'choice', picks: { 'Q?': 'a' } }));
+  }
+  assert.equal(recordText({ kind: 'choice', payload: { tool_input: { questions: 'x' } } }, { kind: 'choice', picks: { a: 'b' } }), null);
+});
+test('recordText: an over-long record is exactly 160 characters ending in an ellipsis', () => {
+  const long = { kind: 'permission', payload: { tool_name: 'Bash', tool_input: { command: 'y'.repeat(400) } } };
+  const t = recordText(long, { kind: 'allow' });
+  assert.equal(t.length, 160);
+  assert.ok(t.endsWith('…'));
 });

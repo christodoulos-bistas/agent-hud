@@ -1,11 +1,11 @@
 // The one-line chat records Agent HUD adds to a hook answer (systemMessage), and which sessions show them.
-import { RECORD_HOSTS } from './answers.js';
+import { RECORD_HOSTS, PLAN_MODES } from './answers.js';
 
 const MAX_RECORD = 160;
 const squash = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
 const cap = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s);
 const capAll = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s); // total length stays <= n
-const base = (p) => String(p ?? '').split(/[\/]/).filter(Boolean).pop() ?? '';
+const base = (p) => String(p ?? '').split(/[\\/]/).filter(Boolean).pop() ?? '';
 
 function permissionWhat(payload) {
   const tool = squash(payload?.tool_name);
@@ -20,7 +20,8 @@ function permissionWhat(payload) {
 
 const pickText = (v) => (Array.isArray(v) ? v.join(', ') : String(v));
 
-export function recordText(item, response) {
+// `modes`: whether a plan approve really sets the permission mode; without it the record names no mode.
+export function recordText(item, response, { modes = PLAN_MODES } = {}) {
   const p = item?.payload || {};
   let body = null;
   switch (item?.kind) {
@@ -31,13 +32,15 @@ export function recordText(item, response) {
     case 'choice': {
       const picks = response?.picks;
       if (!picks || typeof picks !== 'object') break;
-      const parts = (p.tool_input?.questions ?? []).filter((q) => q.question in picks).map((q) => `${squash(q.question)} → ${squash(pickText(picks[q.question]))}`);
+      const parts = (Array.isArray(p.tool_input?.questions) ? p.tool_input.questions : []).filter((q) => q?.question != null && q.question in picks).map((q) => `${squash(q.question)} → ${squash(pickText(picks[q.question]))}`);
       if (parts.length) body = `Answered: ${parts.join('; ')}`;
       break;
     }
     case 'plan':
-      if (response?.approve === 'acceptEdits') body = 'Plan approved (auto-accept edits)';
-      else if (response?.approve === 'default') body = 'Plan approved (ask before edits)';
+      if (response?.approve === 'acceptEdits' || response?.approve === 'default') {
+        if (!modes) body = 'Plan approved';
+        else body = response.approve === 'acceptEdits' ? 'Plan approved (auto-accept edits)' : 'Plan approved (ask before edits)';
+      }
       else if (response?.keep) {
         const f = cap(squash(response.feedback), 120);
         body = f ? `Keep planning: ${f}` : 'Keep planning';
