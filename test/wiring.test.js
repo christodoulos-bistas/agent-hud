@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, stackVisible, panelShows, anchorOf, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { installCodexHooksFile, removeCodexHooksFile, codexHookCommand } from '../src/main/codex-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply, planApprove, planKeepPlanning, PLAN_MODES } from '../src/main/answers.js';
@@ -119,70 +119,129 @@ test('panelBounds: a selection without a known row (rowY null) sits level with t
   assert.equal(panelBounds(hud, wa, { height: 300, rowY: null }).y, 600);
 });
 
-const NONE = { selected: null, auto: false, before: null, cardId: null };
-const qcard = (id, sessionId) => ({ id, sessionId, kind: 'permission' });
+const C = (id, sessionId) => ({ id, sessionId, kind: 'permission', display: sessionId, cls: 'x', source: 'claude', line: '', expiresAt: 1, canOpen: true });
+const SNAP = { agents: [{ id: 's1' }, { id: 's2' }, { id: 's9' }] };
+const HUD = { collapsed: false, visible: true, tuckOpen: false };
 
-test('autoSelect: new card opens its agent (auto), remembers the previous manual selection, restores it when the card goes; restores null when nothing was open', () => {
-  const manual = { id: 's2', rowY: 120 };
-  let s = autoSelect({ ...NONE, selected: manual }, qcard('c1', 's1'));
-  assert.deepEqual(s, { selected: { id: 's1', rowY: null }, auto: true, before: manual, cardId: 'c1' });
-  assert.deepEqual(autoSelect(s, qcard('c1', 's1')), s, 'the same card id changes nothing');
-  s = autoSelect(s, null);
-  assert.deepEqual(s, { selected: manual, auto: false, before: null, cardId: null }, 'back to what was open');
-
-  let t = autoSelect(NONE, qcard('c1', 's1'));
-  assert.deepEqual(t, { selected: { id: 's1', rowY: null }, auto: true, before: null, cardId: 'c1' });
-  t = autoSelect(t, null);
-  assert.deepEqual(t, NONE, 'opened by itself: closes again');
-
-  // The asking agent was already the one open: it stays, row position kept, and stays open afterwards.
-  const same = { id: 's1', rowY: 88 };
-  let u = autoSelect({ ...NONE, selected: same }, qcard('c1', 's1'));
-  assert.deepEqual(u, { selected: { id: 's1', rowY: 88 }, auto: true, before: same, cardId: 'c1' });
-  u = autoSelect(u, null);
-  assert.deepEqual(u.selected, same);
-  assert.equal(u.auto, false);
-
-  assert.deepEqual(autoSelect(NONE, null), NONE, 'no card, nothing open: nothing changes');
+test('stack: STACK_INIT is empty; stackUpdate never mutates its input', () => {
+  assert.deepEqual(STACK_INIT, { selected: null, auto: false, before: null, expandedId: null, hidden: false, seen: [] });
+  const s = Object.freeze({ ...STACK_INIT, seen: Object.freeze([]) });
+  assert.doesNotThrow(() => stackUpdate(s, [C('a', 's1')]));
+  assert.notEqual(stackUpdate(s, []), s);
 });
 
-test('autoSelect: a second card while auto keeps the original before', () => {
-  const manual = { id: 's2', rowY: 120 };
-  let s = autoSelect({ ...NONE, selected: manual }, qcard('c1', 's1'));
-  s = autoSelect(s, qcard('c2', 's3'));
-  assert.deepEqual(s, { selected: { id: 's3', rowY: null }, auto: true, before: manual, cardId: 'c2' });
-  s = autoSelect(s, qcard('c1', 's1')); // c1 comes back after c2 pre-empted it
-  assert.deepEqual(s, { selected: { id: 's1', rowY: null }, auto: true, before: manual, cardId: 'c1' });
-  s = autoSelect(s, null);
-  assert.deepEqual(s.selected, manual);
+test('(a) two cards arrive: stack visible, nothing selected, anchor is the first card session', () => {
+  const cards = [C('a', 's1'), C('b', 's2')];
+  const s = stackUpdate(STACK_INIT, cards);
+  assert.equal(stackVisible(s, cards), true);
+  assert.equal(s.selected, null);
+  assert.equal(anchorOf(s, cards), 's1');
+  assert.equal(anchorOf(STACK_INIT, []), null);
+  assert.equal(anchorOf({ ...STACK_INIT, selected: { id: 's9', rowY: 1 } }, cards), 's9');
+});
+
+test('stackExpand: unknown id changes nothing; same id collapses', () => {
+  const cards = [C('a', 's1')];
+  assert.deepEqual(stackExpand(STACK_INIT, 'zz', cards), STACK_INIT);
+  const e = stackExpand(STACK_INIT, 'a', cards);
+  assert.deepEqual(e, { ...STACK_INIT, selected: { id: 's1', rowY: null }, auto: true, expandedId: 'a' });
+  assert.deepEqual(stackExpand(e, 'a', cards), STACK_INIT, 'collapsing restores before (null)');
+  const keep = stackExpand({ ...STACK_INIT, selected: { id: 's1', rowY: 50 } }, 'a', cards);
+  assert.deepEqual(keep.selected, { id: 's1', rowY: 50 }, 'same agent keeps rowY');
+});
+
+test("(b) expand over the user's s9 details; answering the card restores s9", () => {
+  const s9 = { id: 's9', rowY: 70 };
+  const cards = [C('a', 's1')];
+  let s = stackExpand({ ...STACK_INIT, selected: s9 }, 'a', cards);
+  assert.deepEqual(s.selected, { id: 's1', rowY: null });
+  assert.deepEqual(s.before, s9);
+  s = stackUpdate(s, []);
+  assert.deepEqual(s.selected, s9);
+  assert.equal(s.expandedId, null);
   assert.equal(s.auto, false);
 });
 
-test('userSelect during a question: the manual choice stands until a different card id arrives (Review Focus 2)', () => {
-  let s = autoSelect(NONE, qcard('c1', 's1'));
-  s = userSelect(s, { id: 's2', rowY: 80 });
-  assert.deepEqual(s, { selected: { id: 's2', rowY: 80 }, auto: false, before: null, cardId: 'c1' });
-  assert.deepEqual(autoSelect(s, qcard('c1', 's1')), s, 'the current question does not re-open');
-  assert.deepEqual(autoSelect(s, null).selected, { id: 's2', rowY: 80 }, 'the question goes: the manual choice stays');
-  const closed = userSelect(s, null);
-  assert.deepEqual(closed, { selected: null, auto: false, before: null, cardId: 'c1' }, '✕ during a question');
-  assert.deepEqual(autoSelect(closed, qcard('c1', 's1')), closed, 'closing keeps it closed for this question');
-  const next = autoSelect(s, qcard('c2', 's3'));
-  assert.deepEqual(next, { selected: { id: 's3', rowY: null }, auto: true, before: { id: 's2', rowY: 80 }, cardId: 'c2' }, 'a different card id opens again');
+test('(c) expand A then B: expandedId is B, before is still the original selection', () => {
+  const s9 = { id: 's9', rowY: 70 };
+  const cards = [C('a', 's1'), C('b', 's2')];
+  let s = stackExpand({ ...STACK_INIT, selected: s9 }, 'a', cards);
+  s = stackExpand(s, 'b', cards);
+  assert.equal(s.expandedId, 'b');
+  assert.deepEqual(s.before, s9);
+  assert.deepEqual(s.selected, { id: 's2', rowY: null });
 });
 
-test('card answered natively (card null) → back to before (Review Focus 3)', () => {
-  const manual = { id: 's2', rowY: 64 };
-  let s = autoSelect({ ...NONE, selected: manual }, qcard('c1', 's1'));
-  // answered in the agent's own window: the hook request ends, the queue drops c1, and the next snapshot has no card
-  s = autoSelect(s, null);
-  assert.deepEqual(s, { selected: manual, auto: false, before: null, cardId: null });
-  // a queued question behind it becomes the active card instead: it opens, still returning to the manual choice
-  let q = autoSelect({ ...NONE, selected: manual }, qcard('c1', 's1'));
-  q = autoSelect(q, qcard('c2', 's1'));
-  assert.deepEqual(q, { selected: { id: 's1', rowY: null }, auto: true, before: manual, cardId: 'c2' });
-  assert.deepEqual(autoSelect(q, null).selected, manual);
+test('stackUpdate: a vanished expanded card clears it; a non-auto selection is kept', () => {
+  const sel = { id: 's2', rowY: 3 };
+  const s = stackUpdate({ ...STACK_INIT, selected: sel, expandedId: 'gone' }, [C('a', 's1')]);
+  assert.equal(s.expandedId, null);
+  assert.deepEqual(s.selected, sel);
 });
+
+test('(d) stackHide hides; same cards stay hidden; a new card shows the stack again', () => {
+  const ab = [C('a', 's1'), C('b', 's2')];
+  const h = stackHide(stackExpand(STACK_INIT, 'a', ab), ab);
+  assert.deepEqual(h, { ...STACK_INIT, hidden: true, seen: ['a', 'b'] });
+  assert.equal(stackVisible(h, ab), false);
+  assert.equal(stackUpdate(h, ab).hidden, true);
+  const abc = [...ab, C('c', 's3')];
+  const more = stackUpdate(h, abc);
+  assert.equal(more.hidden, false);
+  assert.deepEqual(more.seen, []);
+  assert.equal(stackVisible(more, abc), true);
+  assert.deepEqual(stackHide(STACK_INIT, []), STACK_INIT, 'no cards: nothing to hide');
+  assert.equal(stackUpdate(h, []).hidden, false, 'no cards at all clears hidden');
+  assert.deepEqual(stackShow(h), { ...h, hidden: false, seen: [] });
+});
+
+test('(e) hidden + userSelect: waiting row shows the stack; non-waiting row stays hidden with details', () => {
+  const ab = [C('a', 's1')];
+  const h = stackHide(STACK_INIT, ab);
+  const w = userSelect(h, { id: 's1', rowY: 5 }, ab);
+  assert.equal(w.hidden, false);
+  assert.deepEqual(w.seen, []);
+  const n = userSelect(h, { id: 's9', rowY: 5 }, ab);
+  assert.equal(n.hidden, true);
+  assert.deepEqual(panelShows(n, SNAP, { ...HUD, cards: ab }), { stack: false, detailId: 's9' });
+});
+
+test('userSelect: replaces auto/before; collapses a card of another session, keeps one of the same', () => {
+  const cards = [C('a', 's1')];
+  const e = stackExpand({ ...STACK_INIT, selected: { id: 's9', rowY: 1 } }, 'a', cards);
+  assert.deepEqual(userSelect(e, { id: 's2', rowY: 9 }, cards), { ...STACK_INIT, selected: { id: 's2', rowY: 9 } });
+  const same = userSelect(e, { id: 's1', rowY: 9 }, cards);
+  assert.equal(same.expandedId, 'a');
+  assert.equal(same.auto, false);
+  assert.equal(same.before, null);
+  assert.equal(userSelect(e, null, cards).expandedId, null);
+  assert.equal(userSelect(STACK_INIT, { id: 's1', rowY: 0 }).selected.id, 's1', 'cards defaults to []');
+});
+
+test("(f) collapsed HUD: detailId only for the expanded card's agent; hidden HUD shows nothing", () => {
+  const cards = [C('a', 's1'), C('b', 's2')];
+  const col = { ...HUD, collapsed: true };
+  const e = stackExpand(STACK_INIT, 'a', cards);
+  assert.deepEqual(panelShows(e, SNAP, { ...col, cards }), { stack: true, detailId: 's1' });
+  const other = userSelect(STACK_INIT, { id: 's2', rowY: 1 }, cards);
+  assert.deepEqual(panelShows(other, SNAP, { ...col, cards }), { stack: true, detailId: null });
+  assert.deepEqual(panelShows(other, SNAP, { ...HUD, visible: false, cards }), { stack: false, detailId: null });
+  assert.deepEqual(panelShows(other, SNAP, { ...HUD, cards }), { stack: true, detailId: 's2' });
+  assert.deepEqual(panelShows(STACK_INIT, SNAP, { ...HUD, cards }), { stack: true, detailId: null });
+});
+
+test('Green Goblin: every state with cards that is not hidden shows the stack while visible', () => {
+  const cards = [C('a', 's1'), C('b', 's2')];
+  const hid = stackHide(STACK_INIT, cards);
+  const states = [stackUpdate(STACK_INIT, cards), stackExpand(STACK_INIT, 'a', cards),
+    stackExpand(stackExpand(STACK_INIT, 'a', cards), 'b', cards), userSelect(STACK_INIT, { id: 's9', rowY: 1 }, cards),
+    userSelect(hid, { id: 's1', rowY: 1 }, cards), stackShow(hid), stackUpdate(hid, [...cards, C('c', 's3')])];
+  for (const s of states) for (const collapsed of [false, true]) for (const tuckOpen of [false, true]) {
+    assert.equal(s.hidden, false);
+    assert.equal(panelShows(s, SNAP, { collapsed, visible: true, tuckOpen, cards }).stack, true);
+  }
+});
+
 
 function fakeClock() {
   let t = 0; const timers = [];
@@ -425,14 +484,6 @@ test('v1.2 M2: a ✕ closes the panel only when it names the agent still selecte
   assert.equal(closeApplies(undefined, 's2'), false);
   assert.equal(closeApplies('s1', null), false, 'nothing selected: nothing to close');
   assert.equal(closeApplies(7, '7'), true);
-});
-
-test('v1.2 M7: the HUD gets only the id, kind and session of the active card (the panel gets the rest)', () => {
-  const card = { id: 'c1', kind: 'permission', sessionId: 's1', display: 'arsenal', cls: 'runesmith', canOpen: true, expiresAt: 5,
-    payload: { tool_name: 'Bash', tool_input: { command: 'npm test' } } };
-  assert.deepEqual(hudCard(card), { id: 'c1', kind: 'permission', sessionId: 's1' });
-  assert.equal(hudCard(null), null);
-  assert.equal(hudCard(undefined), null);
 });
 
 test('v1.3: a tucked chat is a panel target only while the tucked list is open', () => {

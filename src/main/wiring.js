@@ -139,37 +139,84 @@ export function panelTarget(selectedId, snapshot, { collapsed, visible, hasCard,
   return [...agents, ...tucked].some((a) => a && String(a.id) === String(selectedId)) ? selectedId : null;
 }
 
-// The panel's selection as a question comes and goes. state = { selected: {id,rowY}|null, auto, before,
-// cardId }; `card` is the snapshot's active card or null.
-// - A new card id opens the panel on its agent (auto). The selection to come back to (`before`) is the
-//   one the user had; a card replacing an auto-opened one keeps that original `before`.
-// - The card going away (answered here or in its own window, released, timed out) while the
-//   selection is still auto puts `before` back (null: the panel closes).
-// - The same card id changes nothing, so a choice the user made during the question (userSelect) stands.
-// rowY is unknown for a newly opened agent (null) until the HUD reports where its row is.
-export function autoSelect(state, card) {
-  const s = { selected: state?.selected ?? null, auto: !!state?.auto, before: state?.before ?? null, cardId: state?.cardId ?? null };
-  if (card && card.id != null) {
-    const cardId = String(card.id);
-    if (cardId === s.cardId) return s;
-    const id = String(card.sessionId);
-    const rowY = s.selected && String(s.selected.id) === id ? s.selected.rowY ?? null : null;
-    return { selected: { id, rowY }, auto: true, before: s.auto ? s.before : s.selected, cardId };
-  }
-  if (s.auto) return { selected: s.before, auto: false, before: null, cardId: null };
-  return { ...s, cardId: null };
+// The side panel's selection, as a pure state machine over the store's CardSummary[].
+// state = { selected: {id,rowY}|null, auto, before, expandedId, hidden, seen }
+// - `selected` is the agent whose details the panel shows. Expanding a card selects its agent by itself
+//   (auto) and remembers what the user had (`before`); the card going away puts `before` back.
+// - `expandedId` is the card shown in full; the rest of the cards stay compact bubbles in the stack.
+// - `hidden` is the user's "hide the stack": it ends when a card the user has not seen arrives (`seen`
+//   holds the ids that were waiting when they hid it), when no card is left, or when they pick a waiting agent.
+// rowY is unknown (null) for a newly opened agent until the HUD reports where its row is.
+export const STACK_INIT = Object.freeze({ selected: null, auto: false, before: null, expandedId: null, hidden: false, seen: Object.freeze([]) });
+
+const ids = (cards) => (Array.isArray(cards) ? cards : []).map((c) => String(c.id));
+
+// Close the expanded card: an auto selection goes back to what the user had.
+function collapse(state) {
+  if (state.auto) return { ...state, expandedId: null, selected: state.before, auto: false, before: null };
+  return { ...state, expandedId: null };
+}
+
+// Run on every push of the cards.
+export function stackUpdate(state, cards) {
+  let s = { ...STACK_INIT, ...state, seen: [...(state?.seen ?? [])] };
+  const have = ids(cards);
+  if (s.expandedId != null && !have.includes(String(s.expandedId))) s = collapse(s);
+  if (s.hidden && (have.length === 0 || have.some((id) => !s.seen.includes(id)))) s = { ...s, hidden: false, seen: [] };
+  return s;
+}
+
+export function stackExpand(state, cardId, cards) {
+  const card = (Array.isArray(cards) ? cards : []).find((c) => String(c.id) === String(cardId));
+  if (!card) return state;
+  if (state.expandedId != null && String(state.expandedId) === String(card.id)) return collapse(state);
+  const id = String(card.sessionId);
+  const rowY = state.selected && String(state.selected.id) === id ? state.selected.rowY ?? null : null;
+  return { ...state, expandedId: String(card.id), selected: { id, rowY }, auto: true, before: state.auto ? state.before : state.selected };
+}
+
+export function stackHide(state, cards) {
+  const have = ids(cards);
+  return { ...STACK_INIT, seen: have, hidden: have.length > 0 };
+}
+
+export function stackShow(state) {
+  return { ...state, hidden: false, seen: [] };
 }
 
 // The user picked an agent (or closed the panel: sel null). Their choice stands: not auto, nothing to
-// go back to, and the current card id is kept so this question doesn't re-open the panel.
-export function userSelect(state, sel) {
-  return { selected: sel ?? null, auto: false, before: null, cardId: state?.cardId ?? null };
+// go back to. A card of another agent can't stay expanded beside it.
+export function userSelect(state, sel, cards = []) {
+  const list = Array.isArray(cards) ? cards : [];
+  let s = { ...state, selected: sel ?? null, auto: false, before: null };
+  if (s.expandedId != null) {
+    const card = list.find((c) => String(c.id) === String(s.expandedId));
+    if (!card || sel == null || String(card.sessionId) !== String(sel.id)) s = { ...s, expandedId: null };
+  }
+  if (s.hidden && sel && list.some((c) => String(c.sessionId) === String(sel.id))) s = { ...s, hidden: false, seen: [] };
+  return s;
 }
 
-// The HUD's view of the active card: only what the asking row ("asks a question") and the "Next:" line
-// need. The whole card (payload, command, options) goes to the panel with the detail (M7).
-export function hudCard(card) {
-  return card ? { id: card.id, kind: card.kind, sessionId: card.sessionId } : null;
+export function stackVisible(state, cards) {
+  return Array.isArray(cards) && cards.length > 0 && !state.hidden;
+}
+
+// What the panel shows: the bubble stack, and the details of one agent (detailId). A collapsed HUD
+// shows details only for the agent that owns the expanded card (panelTarget's hasCard).
+// `cards` rides in the options object (a fourth argument also works).
+export function panelShows(state, snapshot, { collapsed, visible, tuckOpen, cards: optCards } = {}, argCards = []) {
+  if (!visible) return { stack: false, detailId: null };
+  const cards = Array.isArray(optCards) ? optCards : argCards;
+  const sel = state.selected;
+  const owner = state.expandedId == null ? null : (Array.isArray(cards) ? cards : []).find((c) => String(c.id) === String(state.expandedId))?.sessionId;
+  const hasCard = !!(sel && owner != null && String(owner) === String(sel.id));
+  const detailId = sel ? panelTarget(sel.id, snapshot, { collapsed, visible, hasCard, tuckOpen }) : null;
+  return { stack: stackVisible(state, cards), detailId };
+}
+
+// The row the panel's arrow points at.
+export function anchorOf(state, cards) {
+  return state.selected?.id ?? cards?.[0]?.sessionId ?? null;
 }
 
 // The panel's ✕ names the agent it was showing; it closes the panel only if that agent is still the
