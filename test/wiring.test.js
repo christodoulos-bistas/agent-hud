@@ -3,7 +3,8 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, autoSelect, userSelect, createThrottle, createInteractiveCheck, loadConfig, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, hudCard } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { installCodexHooksFile, removeCodexHooksFile, codexHookCommand } from '../src/main/codex-hooks.js';
-import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
+import { permissionAllow, permissionDeny, choiceAnswer, stopReply, planApprove, planKeepPlanning, PLAN_MODES } from '../src/main/answers.js';
+import { recordText, recordAllowed } from '../src/main/records.js';
 
 const SUGG = [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test' }], behavior: 'allow', destination: 'localSettings' }];
 const perm = { id: 'p', sessionId: 's1', kind: 'permission', payload: { tool_name: 'Bash', permission_suggestions: SUGG } };
@@ -516,4 +517,61 @@ test('codexTrustDue is true only with consent, a usable target and unapproved ho
   assert.equal(codexTrustDue({ cfg: { codexAutoTrust: true }, target: ok, missing: [] }), false);
   assert.equal(codexTrustDue({ cfg: { codexAutoTrust: true }, target: ok, missing: ['Stop'] }), true);
   assert.equal(codexTrustDue({ cfg: null, target: ok, missing: ['Stop'] }), false);
+});
+
+test('recordText per kind', () => {
+  const bash = { kind: 'permission', payload: { tool_name: 'Bash', tool_input: { command: 'npm test' } } };
+  assert.equal(recordText(bash, { kind: 'allow' }), 'Agent HUD · Allowed: npm test');
+  assert.equal(recordText(bash, { kind: 'allow', always: true }), 'Agent HUD · Always allowed here: npm test');
+  assert.equal(recordText(bash, { kind: 'deny' }), 'Agent HUD · Denied: npm test');
+  const edit = { kind: 'permission', payload: { tool_name: 'Edit', tool_input: { file_path: 'C:/p/src/a.ts' } } };
+  assert.equal(recordText(edit, { kind: 'allow' }), 'Agent HUD · Allowed: Edit a.ts');
+  const ch = { kind: 'choice', payload: { tool_input: { questions: [{ question: 'Which DB?' }, { question: 'Port?' }] } } };
+  assert.equal(recordText(ch, { kind: 'choice', picks: { 'Which DB?': 'Postgres', 'Port?': ['5432', '5433'] } }), 'Agent HUD · Answered: Which DB? → Postgres; Port? → 5432, 5433');
+  const plan = { kind: 'plan', payload: {} };
+  assert.equal(recordText(plan, { kind: 'plan', approve: 'acceptEdits' }), 'Agent HUD · Plan approved (auto-accept edits)');
+  assert.equal(recordText(plan, { kind: 'plan', approve: 'default' }), 'Agent HUD · Plan approved (ask before edits)');
+  assert.equal(recordText(plan, { kind: 'plan', keep: true, feedback: 'add\nrollback' }), 'Agent HUD · Keep planning: add rollback');
+  assert.equal(recordText({ kind: 'reply', payload: {} }, { kind: 'reply', text: 'x'.repeat(200) }), `Agent HUD · You replied: ${'x'.repeat(80)}…`);
+  assert.ok(recordText(bash, { kind: 'allow', always: true }).length <= 160);
+  const long = { kind: 'permission', payload: { tool_name: 'Bash', tool_input: { command: 'y'.repeat(400) } } };
+  assert.ok(recordText(long, { kind: 'allow' }).length <= 160);
+  assert.equal(recordText({ kind: 'permission', payload: { tool_name: 'WebFetch', tool_input: {} } }, { kind: 'allow' }), 'Agent HUD · Allowed: WebFetch');
+});
+
+test('encodeAnswer: record flag adds systemMessage, never changes the decision', () => {
+  assert.deepEqual(encodeAnswer(perm, { kind: 'deny' }), permissionDeny());
+  assert.deepEqual(encodeAnswer(perm, { kind: 'deny' }, { record: false }), permissionDeny());
+  const rec = encodeAnswer(perm, { kind: 'deny' }, { record: true });
+  assert.equal(rec.systemMessage, 'Agent HUD · Denied: Bash');
+  assert.deepEqual(rec.hookSpecificOutput, permissionDeny().hookSpecificOutput);
+  assert.equal(encodeAnswer(perm, { kind: 'bogus' }, { record: true }), null);
+  assert.equal(encodeAnswer(reply, { kind: 'reply', text: ' ' }, { record: true }), null);
+});
+
+test('encodeAnswer: plan case', () => {
+  const plan = { id: 'pl', sessionId: 's1', kind: 'plan', payload: {} };
+  assert.deepEqual(encodeAnswer(plan, { kind: 'plan', approve: 'acceptEdits' }), planApprove('acceptEdits', { modes: PLAN_MODES }));
+  assert.deepEqual(encodeAnswer(plan, { kind: 'plan', approve: 'default' }), planApprove('default', { modes: PLAN_MODES }));
+  assert.deepEqual(encodeAnswer(plan, { kind: 'plan', keep: true, feedback: 'more' }), planKeepPlanning('more'));
+  assert.deepEqual(encodeAnswer(plan, { kind: 'plan', keep: true }), planKeepPlanning(''));
+  assert.equal(encodeAnswer(plan, { kind: 'plan', approve: 'bypass' }), null);
+  assert.equal(encodeAnswer(plan, { kind: 'plan' }), null);
+  assert.equal(encodeAnswer(plan, { kind: 'plan', keep: true, feedback: 5 }), null);
+  assert.equal(encodeAnswer(plan, { kind: 'allow' }), null);
+  assert.equal(encodeAnswer(plan, { kind: 'plan', approve: 'default' }, { record: true }).systemMessage, 'Agent HUD · Plan approved (ask before edits)');
+  if (!PLAN_MODES) assert.deepEqual(encodeAnswer(plan, { kind: 'plan', approve: 'acceptEdits' }), encodeAnswer(plan, { kind: 'plan', approve: 'default' }));
+});
+
+test('recordAllowed follows RECORD_HOSTS by entrypoint, Codex by source', () => {
+  const hosts = new Set(['claude-vscode', 'codex']);
+  assert.equal(recordAllowed({ entrypoint: 'claude-vscode' }, hosts), true);
+  assert.equal(recordAllowed({ entrypoint: 'claude-desktop' }, hosts), false);
+  assert.equal(recordAllowed({ source: 'codex', entrypoint: 'codex' }, hosts), true);
+  assert.equal(recordAllowed({ source: 'codex' }, new Set(['claude-vscode'])), false);
+  assert.equal(recordAllowed({}, hosts), false);
+  assert.equal(recordAllowed(undefined, hosts), false);
+  assert.equal(recordAllowed(null, hosts), false);
+  assert.equal(recordAllowed({ entrypoint: 'claude-vscode' }, new Set()), false);
+  assert.equal(recordAllowed({ entrypoint: 'x' }), false); // default RECORD_HOSTS
 });

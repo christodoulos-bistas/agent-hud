@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { approvalState } from './codex-hooks.js';
-import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from './answers.js';
+import { permissionAllow, permissionDeny, choiceAnswer, stopReply, planApprove, planKeepPlanning, withRecord, PLAN_MODES } from './answers.js';
+import { recordText } from './records.js';
 
 export const DEFAULT_PORT = 47821;
 
@@ -12,7 +13,13 @@ export const DEFAULT_PORT = 47821;
 const addRulesOf = (suggestions) => (Array.isArray(suggestions) ? suggestions.filter((s) => s?.type === 'addRules') : []);
 
 // Renderer answer object -> hook response for that queue item, or null when it doesn't fit.
-export function encodeAnswer(item, response) {
+// With `record`, a valid answer also carries a one-line chat record (systemMessage).
+export function encodeAnswer(item, response, { record = false } = {}) {
+  const encoded = encodeDecision(item, response);
+  return record && encoded ? withRecord(encoded, recordText(item, response)) : encoded;
+}
+
+function encodeDecision(item, response) {
   if (!item || !response || typeof response !== 'object') return null;
   const p = item.payload || {};
   switch (item.kind) {
@@ -31,6 +38,12 @@ export function encodeAnswer(item, response) {
     case 'reply': {
       const text = typeof response.text === 'string' ? response.text.trim() : '';
       return response.kind === 'reply' && text ? stopReply(text) : null;
+    }
+    case 'plan': {
+      if (response.kind !== 'plan') return null;
+      if (response.approve === 'acceptEdits' || response.approve === 'default') return planApprove(response.approve, { modes: PLAN_MODES });
+      if (response.keep === true && (response.feedback === undefined || typeof response.feedback === 'string')) return planKeepPlanning(response.feedback);
+      return null;
     }
     default: return null;
   }

@@ -7,6 +7,7 @@ import os from 'node:os';
 import { spawn, execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { RELEASE } from './answers.js';
+import { recordAllowed } from './records.js';
 import { createClassEngine } from './classes.js';
 import { createQueue } from './queue.js';
 import { isDeepStrictEqual } from 'node:util';
@@ -415,7 +416,7 @@ function answerCard(id, response) {
   const item = queue.list().find((i) => i.id === id);
   if (!item) return;
   // An answer that doesn't fit its card is handed back to the session's own window.
-  const encoded = encodeAnswer(item, response);
+  const encoded = encodeAnswer(item, response, { record: recordAllowed(sessionById(item.sessionId) ?? { source: item.source }) });
   if (encoded && item.kind === 'reply') store.replySent(item.sessionId); // Claude carries on: not "finished"
   if (encoded && item.kind === 'permission' && response.kind === 'deny') store.permissionDenied(item); // R8a
   queue.answer(id, encoded ?? RELEASE);
