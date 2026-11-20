@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { readSessionFiles, listSessions, displayName } from '../src/main/sessions.js';
+import { readSessionFiles, listSessions, displayName, SIDE_ENTRYPOINT } from '../src/main/sessions.js';
 
 const mk = () => fs.mkdtempSync(path.join(os.tmpdir(), 'hud-sess-'));
 const file = (pid, o = {}) => JSON.stringify({ pid, sessionId: `sid-${pid}`, cwd: 'c:\\Consortis_projects\\arsenal', startedAt: 5, kind: 'interactive', entrypoint: 'claude-vscode', name: 'arsenal-e0', nameSource: 'derived', status: 'busy', ...o });
@@ -81,4 +81,14 @@ test('listSessions dedupe: equal start times fall back to procStart; missing tim
   fs.writeFileSync(path.join(dir, '4.json'), file(4, { sessionId: 'y', startedAt: 9 }));
   const l = await listSessions({ dir, isAlive: () => true });
   assert.deepEqual(l.map((s) => [s.sessionId, s.pid]).sort(), [['x', 2], ['y', 4]]);
+});
+
+test('readSessionFiles drops the HUD\'s own side-question process (entrypoint agent-hud-side)', () => {
+  const dir = mk();
+  const base = { sessionId: 'abc', cwd: 'c:\p', kind: 'interactive', status: 'idle', startedAt: 5 };
+  fs.writeFileSync(path.join(dir, '100.json'), JSON.stringify({ ...base, pid: 100, entrypoint: 'claude-vscode' }));
+  fs.writeFileSync(path.join(dir, '200.json'), JSON.stringify({ ...base, pid: 200, entrypoint: SIDE_ENTRYPOINT, startedAt: 9 }));
+  const got = readSessionFiles(dir);
+  assert.deepEqual(got.map((s) => s.pid), [100]);
+  assert.equal(SIDE_ENTRYPOINT, 'agent-hud-side');
 });

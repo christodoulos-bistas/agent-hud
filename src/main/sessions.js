@@ -6,6 +6,10 @@ export function baseOf(p) {
   return path.win32.basename(s);
 }
 
+// The entrypoint of the claude.exe the HUD spawns to ask side questions. It is the HUD's own process,
+// so no session reader may list it.
+export const SIDE_ENTRYPOINT = 'agent-hud-side';
+
 // A start time that is missing, zero, negative or not a number is unknown (null), never "56 years ago".
 export const knownTime = (t) => (typeof t === 'number' && Number.isFinite(t) && t > 0 ? t : null);
 
@@ -27,7 +31,7 @@ export function readSessionFiles(dir) {
     if (!n.endsWith('.json')) continue;
     try {
       const s = toSession(JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')));
-      if (s) out.push(s);
+      if (s && s.entrypoint !== SIDE_ENTRYPOINT) out.push(s);
     } catch { /* half-written or unreadable: skip */ }
   }
   return out;
