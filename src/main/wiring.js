@@ -313,6 +313,25 @@ export function codexTrustDue({ cfg, target, missing }) {
   return cfg?.codexAutoTrust === true && !target?.blocked && missing?.length > 0;
 }
 
+// The Claude hooks follow the HUD: present while it runs, out while it is closed, unless the user removed
+// them on purpose. `claudeHooksWanted` remembers that choice; a config from before this flag existed takes
+// it from what is installed now (`migrate`: the caller saves it).
+export function hooksWanted(cfg, installedNow) {
+  const v = cfg?.claudeHooksWanted;
+  return typeof v === 'boolean' ? { wanted: v, migrate: false } : { wanted: !!installedNow, migrate: true };
+}
+
+// What the HUD does to its Claude hooks on start ('install') and on quit or Windows logoff ('remove').
+export function hookSync({ phase, wanted, blocked }) {
+  if (blocked || !wanted) return null;
+  if (phase === 'start') return 'install';
+  if (phase === 'quit') return 'remove';
+  return null;
+}
+
+// `--remove-hooks` (a real uninstall): not wanted, and a later reinstall asks again instead of starting disconnected.
+export const forgetHooks = (cfg) => ({ ...cfg, claudeHooksWanted: false, offeredHooks: false });
+
 // One target of `--remove-hooks`. Never throws; a blocked target touches nothing.
 function removeOne({ target, uninstall, label, blockedMessage }) {
   if (!target || target.blocked || !target.path) return { ok: false, message: blockedMessage };

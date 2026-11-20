@@ -1,6 +1,6 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, stackVisible, panelShows, createThrottle, createInteractiveCheck, loadConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, devOverrides, planFileOk } from '../src/main/wiring.js';
+import { encodeAnswer, dockBounds, placeBounds, anchorFrom, anchorPoint, snapBounds, panelBounds, panelTarget, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, stackVisible, panelShows, createThrottle, createInteractiveCheck, loadConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, devOverrides, planFileOk, hooksWanted, hookSync, forgetHooks } from '../src/main/wiring.js';
 import { installHooks, uninstallHooks } from '../src/main/settings-hooks.js';
 import { installCodexHooksFile, removeCodexHooksFile, codexHookCommand } from '../src/main/codex-hooks.js';
 import { permissionAllow, permissionDeny, choiceAnswer, stopReply } from '../src/main/answers.js';
@@ -758,4 +758,26 @@ test('planFileOk: POSIX paths (case-sensitive)', () => {
   assert.equal(planFileOk('/home/u/.claude/plans', home), false);
   assert.equal(planFileOk('home/u/.claude/plans/p.md', home), false);
   assert.equal(planFileOk('C:\\Users\\u\\.claude\\plans\\p.md', home), false, 'a Windows path is not under a POSIX home');
+});
+
+test('hooksWanted: a saved boolean wins; missing migrates from what is installed now', () => {
+  assert.deepEqual(hooksWanted({ claudeHooksWanted: false }, true), { wanted: false, migrate: false });
+  assert.deepEqual(hooksWanted({ claudeHooksWanted: true }, false), { wanted: true, migrate: false });
+  assert.deepEqual(hooksWanted({}, true), { wanted: true, migrate: true });
+  assert.deepEqual(hooksWanted({ claudeHooksWanted: 'yes' }, false), { wanted: false, migrate: true });
+});
+
+test('hookSync: install on start and remove on quit only when wanted and not blocked', () => {
+  assert.equal(hookSync({ phase: 'start', wanted: true, blocked: false }), 'install');
+  assert.equal(hookSync({ phase: 'quit', wanted: true, blocked: false }), 'remove');
+  assert.equal(hookSync({ phase: 'start', wanted: false, blocked: false }), null);
+  assert.equal(hookSync({ phase: 'quit', wanted: false, blocked: false }), null);
+  assert.equal(hookSync({ phase: 'start', wanted: true, blocked: true }), null);
+  assert.equal(hookSync({ phase: 'other', wanted: true, blocked: false }), null);
+});
+
+test('forgetHooks: not wanted and offer again, input untouched', () => {
+  const c = { port: 1, offeredHooks: true, claudeHooksWanted: true };
+  assert.deepEqual(forgetHooks(c), { port: 1, offeredHooks: false, claudeHooksWanted: false });
+  assert.equal(c.claudeHooksWanted, true);
 });
