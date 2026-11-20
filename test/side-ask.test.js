@@ -45,7 +45,14 @@ test('withBusyNote: the exact note while working, the plain question otherwise',
   const now = 100_000;
   assert.equal(withBusyNote('why?', { doing: 'running sleep 25', startedAt: now - 9000 }, now),
     'why?\n\n(Agent HUD note: this chat is still working right now. Current step: running sleep 25, for 9s. Anything unfinished in the conversation is still running, not interrupted.)');
+  assert.equal(withBusyNote('why?', { doing: 'running sleep 25', startedAt: now - 9000 }, now, { working: true }),
+    'why?\n\n(Agent HUD note: this chat is still working right now. Current step: running sleep 25, for 9s. Anything unfinished in the conversation is still running, not interrupted.)');
   assert.equal(withBusyNote('why?', null, now), 'why?');
+  assert.equal(withBusyNote('why?', null, now, { working: false }), 'why?');
+});
+test('withBusyNote: working between steps (no open step) gets the note without the step clause', () => {
+  assert.equal(withBusyNote('why?', null, 5, { working: true }),
+    'why?\n\n(Agent HUD note: this chat is still working right now. Anything unfinished in the conversation is still running, not interrupted.)');
 });
 
 test('transcriptPathFor replaces every non-alphanumeric character of the cwd', () => {

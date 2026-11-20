@@ -41,7 +41,7 @@ export function createSideQuestions({ log, ask, now = Date.now, onChange = () =>
     try {
       p = Promise.resolve(ask({
         sessionId, cwd: ctx.cwd, model: ctx.model,
-        question: withBusyNote(trimmed, ctx.current, at),
+        question: withBusyNote(trimmed, ctx.current, at, { working: !!ctx.working }),
         history: log.history(sessionId),
         signal: controller.signal,
       }));

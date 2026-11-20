@@ -58,9 +58,12 @@ export function parseReply(line) {
   return { error: SIDE_ERRORS.refused, detail: String(r.error ?? r.subtype ?? 'error') };
 }
 
-export function withBusyNote(question, current, now) {
-  if (!current) return question;
-  return `${question}\n\n(Agent HUD note: this chat is still working right now. Current step: ${current.doing}, for ${fmtDuration(now - current.startedAt)}. Anything unfinished in the conversation is still running, not interrupted.)`;
+// The busy note: the chat is thinking or working. With an open step it names the step; between
+// steps (working, no step open) it says only that the chat is busy. Otherwise the plain question.
+export function withBusyNote(question, current, now, { working = false } = {}) {
+  if (current) return `${question}\n\n(Agent HUD note: this chat is still working right now. Current step: ${current.doing}, for ${fmtDuration(now - current.startedAt)}. Anything unfinished in the conversation is still running, not interrupted.)`;
+  if (working) return `${question}\n\n(Agent HUD note: this chat is still working right now. Anything unfinished in the conversation is still running, not interrupted.)`;
+  return question;
 }
 
 export function transcriptPathFor(home, cwd, sessionId) {

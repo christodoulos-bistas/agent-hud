@@ -28,6 +28,15 @@ test('one ask per chat; blank and invalid ignored; the answer is logged with the
   assert.deepEqual(log.list(ID).map((e) => [e.source, e.question, e.response]), [['hud', 'why?', 'because']]);
 });
 
+test('busy note between steps: ctx.working without a step adds the short note; nothing when not working', () => {
+  const asks = [];
+  const sq = createSideQuestions({ log: mkLog(), ask: (o) => { asks.push(o); return new Promise(() => {}); }, now: () => 1000 });
+  sq.start(ID, 'q1', { working: true, current: null });
+  sq.start(ID2, 'q2', { working: false, current: null });
+  assert.equal(asks[0].question, 'q1\n\n(Agent HUD note: this chat is still working right now. Anything unfinished in the conversation is still running, not interrupted.)');
+  assert.equal(asks[1].question, 'q2');
+});
+
 test('dot: set when not viewing, not when viewing; viewing clears it; VS Code imports never set it', async () => {
   const log = mkLog();
   const ds = [deferred(), deferred()]; let i = 0;

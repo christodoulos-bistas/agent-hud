@@ -263,15 +263,17 @@ function readTail(file, bytes) {
 }
 
 // What a side question needs to know about its chat: where it runs, the model it last used, and the
-// step it is on while it is busy (the busy note).
+// step it is on while it is busy (the busy note: thinking or working, with or without an open step;
+// never in any other stage, needs included).
 function ctxFor(id) {
   const cwd = sessionById(id)?.cwd;
   const file = store.transcriptOf(id) ?? (cwd ? transcriptPathFor(os.homedir(), cwd, id) : null);
   const tail = file ? readTail(file, TRANSCRIPT_TAIL) : null;
   const model = tail ? modelFromTranscriptTail(tail) : null;
   const d = store.detail(id);
-  const current = d && (d.stage === 'thinking' || d.stage === 'working') ? (d.current ?? null) : null;
-  return { cwd, model, current };
+  const working = !!d && (d.stage === 'thinking' || d.stage === 'working');
+  const current = working ? (d.current ?? null) : null;
+  return { cwd, model, current, working };
 }
 
 // VS Code's /btw threads into the logs. Never overlapping; pass() never rejects, the rest is caught.
