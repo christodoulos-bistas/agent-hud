@@ -351,6 +351,12 @@ test('Side tab: thread, tags, markdown, error with retry, escaped question, ask 
   assert.match(h, /placeholder="Ask a follow-up…"/);
   assert.match(h, /data-act="open"/); // footer stays
 });
+test('Side tab: no "open window" on an error entry (nor the footer) when the window cannot be focused', () => {
+  const h = renderPanel(detail({ canOpen: false, side: side() }), NOW);
+  assert.match(h, /data-act="side-retry" data-entry="h1"/);
+  assert.doesNotMatch(h, /data-act="open"/);
+  assert.doesNotMatch(h, /open window/);
+});
 test('asking: thinking row, disabled box', () => {
   const h = renderPanel(detail({ side: side({ asking: { question: 'is it safe?', at: NOW } }) }), NOW);
   assert.match(h, /is it safe\?[^]*class="qa-a wait">thinking/);

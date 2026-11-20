@@ -144,7 +144,7 @@ export function renderPanel(detail, nowMs = Date.now()) {
       '<button type="button" class="x" data-act="close" aria-label="Close">✕</button>' +
     '</div>' +
     tabs +
-    (sideOn ? renderSideTab(sd, d.display, nowMs, footHtml.replace('<div class="foot">', '<div class="foot" data-key="foot">'))
+    (sideOn ? renderSideTab(sd, d.display, nowMs, footHtml.replace('<div class="foot">', '<div class="foot" data-key="foot">'), { canOpen: d.canOpen !== false })
       : '<div class="det" data-key="det">' +
         stuckLine(d, nowMs) +
         finishedBlock(d) +

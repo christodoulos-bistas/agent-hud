@@ -29,7 +29,7 @@ function qaHead(question, source, when) {
   return `<div class="qa-q"><span class="q">“${esc(question)}”</span><span class="meta">${tag(source)} ${esc(when)}</span></div>`;
 }
 
-function entryHtml(e, nowMs) {
+function entryHtml(e, nowMs, canOpen) {
   const id = esc(e.id);
   const head = qaHead(e.question, e.source, sideWhen(e.at, nowMs));
   let body;
@@ -40,16 +40,17 @@ function entryHtml(e, nowMs) {
     body = `<div class="qa-a err">${esc(e.error || 'Claude gave no answer')}</div>` +
       '<div class="qa-acts">' +
         `<button type="button" data-act="side-retry" data-entry="${id}">try again</button>` +
-        '<button type="button" data-act="open">open window ↗</button>' +
+        (canOpen ? '<button type="button" data-act="open">open window ↗</button>' : '') +
       '</div>';
   }
   return `<div class="qa" data-key="qa:${id}">${head}${body}</div>`;
 }
 
-export function renderSideTab(side, display, nowMs, foot = '') {
+// canOpen false (the chat's window can't be focused): no "open window" on an error entry either.
+export function renderSideTab(side, display, nowMs, foot = '', { canOpen = true } = {}) {
   const entries = Array.isArray(side?.entries) ? side.entries : [];
   const asking = side?.asking || null;
-  const rows = entries.map((e) => entryHtml(e, nowMs));
+  const rows = entries.map((e) => entryHtml(e, nowMs, canOpen));
   if (asking) {
     rows.push(`<div class="qa" data-key="qa:pending">${qaHead(asking.question, 'hud', sideWhen(asking.at, nowMs))}` +
       '<div class="qa-a wait">thinking<span class="dots"></span></div></div>');
