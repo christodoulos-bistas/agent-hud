@@ -48,8 +48,9 @@ export function createSideQuestions({ log, ask, now = Date.now, onChange = () =>
     } catch (err) {
       p = Promise.reject(err);
     }
-    p.then((r) => r, () => ({ error: SIDE_ERRORS.refused }))
-      .then((r) => settle(sessionId, rec, at, trimmed, r));
+    rec.done = p.then((r) => r, () => ({ error: SIDE_ERRORS.refused }))
+      .then((r) => settle(sessionId, rec, at, trimmed, r))
+      .catch((err) => report(`side question ${sessionId}: ${err?.message ?? err}`));
     changed();
     return true;
   }
@@ -103,9 +104,17 @@ export function createSideQuestions({ log, ask, now = Date.now, onChange = () =>
     changed();
   }
 
-  function stopAll() {
-    for (const rec of inflight.values()) rec.controller.abort();
+  // The HUD is quitting: every running ask is aborted (its child gets stdin EOF, then a tree kill).
+  // Resolves once all of them settled (their children gone), or after maxMs at the latest.
+  function stopAll(maxMs = 2500) {
+    const recs = [...inflight.values()];
+    for (const rec of recs) rec.controller.abort();
     inflight.clear();
+    if (!recs.length) return Promise.resolve();
+    return new Promise((resolve) => {
+      const t = setTimeout(resolve, maxMs);
+      Promise.all(recs.map((r) => r.done)).then(() => { clearTimeout(t); resolve(); });
+    });
   }
 
   function view(sessionId) {

@@ -13,10 +13,13 @@ if (env.FAKE_CLAUDE_OUT) {
   }) + '\n');
 }
 const mode = env.FAKE_CLAUDE_MODE || 'answer';
+const note = (o) => { if (env.FAKE_CLAUDE_OUT) fs.appendFileSync(env.FAKE_CLAUDE_OUT, JSON.stringify(o) + '\n'); };
 const send = (o) => process.stdout.write(JSON.stringify(o) + '\n');
 const reply = (id, response, extra = {}) => send({ type: 'control_response', response: { subtype: 'success', request_id: id, response, ...extra } });
 
-if (mode === 'hang') {
+if (mode === 'hang' || mode === 'hang-eof') {
+  // hang: ignores EOF (only a kill ends it); hang-eof: exits on EOF like the real CLI.
+  process.stdin.on('end', () => { note({ event: 'stdin-end' }); if (mode === 'hang-eof') process.exit(0); });
   process.stdin.resume();
   setInterval(() => {}, 1000);
 } else {
@@ -29,6 +32,11 @@ if (mode === 'hang') {
       if (mode !== 'noinit') reply('init', {});
     } else if (sub === 'side_question') {
       if (mode === 'exit') process.exit(3);
+      if (mode === 'exit-noisy') {
+        process.stdout.write('Error: No conversation found with session ID: s1\n', () =>
+          process.stderr.write('warn: something\nfatal: cannot resume\n', () => process.exit(1)));
+        return;
+      }
       if (mode === 'null') return reply('sq', null);
       if (mode === 'error') return send({ type: 'control_response', response: { subtype: 'error', request_id: 'sq', error: 'Unknown subtype' } });
       if (mode === 'split-utf8') {

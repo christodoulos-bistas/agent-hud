@@ -148,6 +148,28 @@ test('stopAll aborts in-flight asks (signal aborted), and a late settle adds not
   assert.equal(sq.dot(ID), false);
 });
 
+test('stopAll resolves once every aborted ask settled (its child gone), and no later', async () => {
+  const d = deferred();
+  const sq = createSideQuestions({ log: mkLog(), ask: () => d.promise });
+  sq.start(ID, 'q', {});
+  let stopped = false;
+  const p = sq.stopAll(5000).then(() => { stopped = true; });
+  await tick(); await tick();
+  assert.equal(stopped, false, 'waits for the ask to settle');
+  d.resolve({ error: 'cancelled' });
+  await p;
+  assert.equal(stopped, true);
+  await sq.stopAll(); // nothing in flight: resolves at once
+});
+
+test('stopAll is bounded: an ask that never settles does not hold it past maxMs', async () => {
+  const sq = createSideQuestions({ log: mkLog(), ask: () => new Promise(() => {}) });
+  sq.start(ID, 'q', {});
+  const t0 = Date.now();
+  await sq.stopAll(50);
+  assert.ok(Date.now() - t0 < 1000);
+});
+
 test('a rejected or throwing ask is a refused entry; disk errors never throw out', async () => {
   const log = mkLog();
   const sq = createSideQuestions({ log, ask: () => Promise.reject(new Error('x')) });

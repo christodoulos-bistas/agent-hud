@@ -39,6 +39,10 @@ const PUSH_MS = 100;
 const WIDTH = 272;
 const COLLAPSED_WIDTH = 72;
 const QUIT_GRACE_MS = 3000;
+// Quitting mid-ask: the asking claude.exe gets stdin EOF and this long to leave on its own before its
+// process tree is killed; inside QUIT_GRACE_MS so the kill happens before the HUD exits.
+const SIDE_ABORT_GRACE_MS = 1500;
+const SIDE_STOP_MS = 2500; // the longest quit waits for the asks to end (taskkill included)
 const RELOAD_MS = 1000;
 const VSCODE_MS = 30000; // VS Code's /btw threads: read every 30 s (mtime-gated, read-only)
 const TRANSCRIPT_TAIL = 256 * 1024; // a side question's model comes from the transcript's last 256 KB
@@ -129,7 +133,7 @@ const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return f
 // The CLI is looked up per ask (cheap), so an install made after the HUD started is picked up.
 function ask(opts) {
   const claudeExe = findClaudeExe({ env: process.env, home: os.homedir(), exists: isFile });
-  return askSide({ ...opts, exe: claudeExe ? { file: claudeExe } : null, env: childEnv(process.env) });
+  return askSide({ ...opts, exe: claudeExe ? { file: claudeExe } : null, env: childEnv(process.env), abortGraceMs: SIDE_ABORT_GRACE_MS });
 }
 const side = createSideQuestions({ log: sideLog, ask, onChange: () => { push(); pushDetail(); }, onError: (e) => log('side', e) });
 const store = createStore({ engine, queue, onError: (err) => log('step log', err), canOpen: (s) => canOpen(s, OPEN_OPTS), side });
@@ -1031,14 +1035,16 @@ async function firstRun() {
 
 function quit() {
   if (!quitting) {
-    try { side.stopAll(); } catch (err) { log('side', err); } // running side questions end; nothing is logged
+    // Running side questions end (stdin EOF, then a tree kill); nothing is logged. Quit waits for them.
+    let stopping = Promise.resolve();
+    try { stopping = Promise.resolve(side.stopAll(SIDE_STOP_MS)).catch((err) => log('side', err)); } catch (err) { log('side', err); }
     pick = STACK_INIT; // nothing selected or expanded: the panel shows nothing while quitting
     try { if (panelWin && !panelWin.isDestroyed()) panelWin.destroy(); } catch (err) { log('panel', err); }
     panelWin = null;
     // close() releases every held question, so each waiting agent carries on in its own window.
     const closing = server ? server.close() : Promise.resolve();
     server = null;
-    quitting = Promise.race([closing, new Promise((r) => setTimeout(r, QUIT_GRACE_MS))])
+    quitting = Promise.race([Promise.all([closing, stopping]), new Promise((r) => setTimeout(r, QUIT_GRACE_MS))])
       .catch((err) => log('quit', err))
       .finally(() => {
         try { tray?.destroy(); } catch { /* exiting anyway */ }

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import nodeFs from 'node:fs';
 import path from 'node:path';
 import { SIDE_ENTRYPOINT } from './sessions.js';
 import { fmtDuration } from '../renderer/format.js';
@@ -83,31 +84,88 @@ export function modelFromTranscriptTail(text) {
   return null;
 }
 
+const TASKKILL = process.env.SystemRoot ? path.win32.join(process.env.SystemRoot, 'System32', 'taskkill.exe') : 'taskkill.exe';
+
+// Ends a child and everything it started. On Windows child.kill() is TerminateProcess: claude.exe gets
+// no chance to remove its ~/.claude/sessions files and its own children (MCP servers) are orphaned,
+// so the whole tree goes with taskkill /T /F (no shell). Resolves once taskkill is done (bounded).
+export function killTree(child, { platform = process.platform, spawnFn = spawn, waitMs = 3000 } = {}) {
+  if (!child) return Promise.resolve();
+  if (platform !== 'win32' || !child.pid) {
+    try { child.kill(); } catch { /* already gone */ }
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    let tk;
+    const t = setTimeout(done, waitMs);
+    function done() { clearTimeout(t); resolve(); }
+    try {
+      tk = spawnFn(TASKKILL, ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+    } catch {
+      try { child.kill(); } catch { /* already gone */ }
+      return done();
+    }
+    tk.once('error', () => { try { child.kill(); } catch { /* already gone */ } done(); });
+    tk.once('exit', done);
+  });
+}
+
+const STDERR_KEEP = 2048;
+const LINE_KEEP = 300;
+const isDir = (p) => { try { return nodeFs.statSync(p).isDirectory(); } catch { return false; } };
+
+// Ends a side question's child (after an answer, an abort, a timeout): stdin is closed first, and
+// `claude -p --input-format stream-json` exits on EOF and cleans up after itself. Only a child still
+// alive after the grace is killed, tree and all (killTree, injectable for the tests).
+// On abort (the HUD quitting) the result comes once the child is gone, so quit can wait for it;
+// every other result comes at once and the child is reaped in the background.
 export function askSide({ exe, sessionId, cwd, question, history = [], model = null, env, spawnFn = spawn,
-  timeoutMs = 300000, initFallbackMs = 2000, exitGraceMs = 5000, signal } = {}) {
+  timeoutMs = 300000, initFallbackMs = 2000, exitGraceMs = 5000, abortGraceMs = exitGraceMs, signal,
+  treeKill = killTree, dirExists = isDir } = {}) {
   if (!exe) return Promise.resolve({ error: SIDE_ERRORS.notFound });
+  if (!cwd || !dirExists(cwd)) return Promise.resolve({ error: SIDE_ERRORS.refused, detail: `cwd missing: ${cwd}` });
   return new Promise((resolve) => {
     let settled = false;
     let asked = false;
     let exited = false;
     let child = null;
     let buf = '';
+    let stderr = '';
+    let lastOut = '';
     const timers = [];
-    const kill = () => { try { if (child && !exited) child.kill(); } catch { /* already gone */ } };
-    const settle = (result) => {
+    let gone = null;
+    // Closes stdin, waits `graceMs` for the child to leave, then kills its tree. One reap per child.
+    const reap = (graceMs) => {
+      if (gone) return gone;
+      try { child && child.stdin && child.stdin.end(); } catch { /* closed */ }
+      if (!child || exited) return (gone = Promise.resolve());
+      gone = new Promise((done) => {
+        const t = setTimeout(() => {
+          if (exited) return done();
+          Promise.resolve().then(() => treeKill(child)).catch(() => {}).then(done, done);
+        }, graceMs);
+        if (t.unref) t.unref();
+        child.once('exit', () => { clearTimeout(t); done(); });
+      });
+      return gone;
+    };
+    // What the CLI said last: the stderr tail and the last stdout line that wasn't a control message.
+    const context = (detail) => {
+      const parts = [detail];
+      const err = stderr.trim();
+      if (err) parts.push(`stderr: ${err}`);
+      if (lastOut) parts.push(`stdout: ${lastOut}`);
+      return parts.join(' | ');
+    };
+    const settle = (result, { graceMs = exitGraceMs, waitGone = false } = {}) => {
       if (settled) return;
       settled = true;
       timers.forEach(clearTimeout);
       if (signal) signal.removeEventListener('abort', onAbort);
-      try { child && child.stdin.end(); } catch { /* closed */ }
-      if (!exited) {
-        const t = setTimeout(kill, exitGraceMs);
-        if (t.unref) t.unref();
-        if (child) child.once('exit', () => clearTimeout(t));
-      }
-      resolve(result);
+      const g = reap(graceMs);
+      if (waitGone) g.then(() => resolve(result)); else resolve(result);
     };
-    const onAbort = () => { kill(); settle({ error: 'cancelled' }); };
+    const onAbort = () => settle({ error: 'cancelled' }, { graceMs: abortGraceMs, waitGone: true });
 
     if (signal) {
       if (signal.aborted) return resolve({ error: 'cancelled' });
@@ -117,38 +175,58 @@ export function askSide({ exe, sessionId, cwd, question, history = [], model = n
     const lines = requestLines({ question, history });
     try {
       child = spawnFn(exe.file, [...(exe.args || []), ...sideArgs({ sessionId, model })],
-        { cwd, env, windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+        { cwd, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     } catch (err) {
       return settle({ error: SIDE_ERRORS.notFound, detail: err.message });
     }
     const write = (s) => { try { child.stdin.write(s); } catch { /* child gone */ } };
     const ask = () => { if (asked || settled) return; asked = true; write(lines.ask); };
 
+    const onLine = (raw) => {
+      const line = raw.trim();
+      if (!line) return;
+      const reply = parseReply(line);
+      if (reply) {
+        if (reply.error === SIDE_ERRORS.refused) reply.detail = context(reply.detail);
+        return settle(reply);
+      }
+      let o = null;
+      try { o = JSON.parse(line); } catch { /* noise */ }
+      if (o && o.type === 'control_response' && o.response && o.response.request_id === 'init') ask();
+      if (!o || typeof o.type !== 'string' || !o.type.startsWith('control_')) lastOut = line.slice(0, LINE_KEEP);
+    };
+
     child.on('error', (err) => { exited = true; settle({ error: SIDE_ERRORS.notFound, detail: err.message }); });
     if (child.stdin) child.stdin.on('error', () => {});
+    if (child.stderr) {
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk) => { stderr = (stderr + chunk).slice(-STDERR_KEEP); });
+    }
+    // The output may still be in flight at 'exit': wait for 'close' (all pipes drained), but never for
+    // long, since a grandchild holding a pipe open would keep 'close' away.
     child.on('exit', (code) => {
       exited = true;
-      settle({ error: SIDE_ERRORS.refused, detail: `exited ${code}` });
+      const done = () => {
+        clearTimeout(t);
+        if (buf.trim()) { const rest = buf; buf = ''; onLine(rest); }
+        settle({ error: SIDE_ERRORS.refused, detail: context(`exited ${code}`) });
+      };
+      const t = setTimeout(done, 200);
+      child.once('close', done);
     });
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
       buf += chunk;
       let nl;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl).trim();
+      while (!settled && (nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl);
         buf = buf.slice(nl + 1);
-        if (!line) continue;
-        const reply = parseReply(line);
-        if (reply) return settle(reply);
-        try {
-          const o = JSON.parse(line);
-          if (o && o.type === 'control_response' && o.response && o.response.request_id === 'init') ask();
-        } catch { /* noise */ }
+        onLine(line);
       }
     });
 
     timers.push(setTimeout(ask, initFallbackMs));
-    timers.push(setTimeout(() => { kill(); settle({ error: SIDE_ERRORS.timeout }); }, timeoutMs));
+    timers.push(setTimeout(() => settle({ error: SIDE_ERRORS.timeout }), timeoutMs));
     write(lines.init);
   });
 }
