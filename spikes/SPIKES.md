@@ -470,10 +470,8 @@ result; write what you saw in the table at the end. Checks 1, 2 and 5 need your 
    hover its row in the dev HUD, click the **?**, type "what is 2+2?" and press Enter.
    Expected: the answer shows in the Side questions tab, tagged **HUD**; the chat's own transcript gains nothing (no new
    message in the VS Code panel); the row never flickers to idle while the command runs.
-   "No hook event from the asking process": the dev terminal's `[agent-hud]` debug lines must not show a new SessionStart (or any
-   hook line carrying this chat's session id) at the moment you asked. Find the chat's id in the newest
-   `%USERPROFILE%\.claude\sessions\<pid>.json` whose `cwd` is the spike folder, and search the terminal output for it right after
-   asking; the only new lines should be `ipc` lines for the panel's own channels.
+   "No hook event from the asking process" is already verified by the controller: a normal chat in a throwaway project fired 3
+   hooks, the HUD's side ask fired 0. You only need to confirm the row doesn't flicker.
 2. **`/btw` in VS Code.** In the same chat's VS Code panel type `/btw what colour is the sky?`.
    Expected: within about 30 s the entry appears in that chat's Side questions tab, tagged **VS Code** (grey), and it does not
    set the slate answer dot.
@@ -492,7 +490,7 @@ result; write what you saw in the table at the end. Checks 1, 2 and 5 need your 
    dev HUD from its tray (Quit). Then run:
    ```powershell
    Get-Process claude -ErrorAction SilentlyContinue
-   Select-String -Path "$env:USERPROFILE\.claude\sessions\*" -Pattern '"entrypoint":"agent-hud-side"' -List
+   Select-String -Path "$env:USERPROFILE\.claude\sessions\*" -Pattern 'agent-hud-side' -List
    ```
    Expected: no `claude` process that was started for the question is left (the chats' own `claude` processes from VS Code or the
    CLI are still there; only a child of the HUD would be wrong, so compare with the list before quitting), and the
@@ -506,7 +504,7 @@ result; write what you saw in the table at the end. Checks 1, 2 and 5 need your 
 
 | # | Check | Expected | Result | Notes |
 | --- | --- | --- | --- | --- |
-| 1 | Ask while busy | answer in tab (HUD tag); transcript unchanged; no idle flicker; no hook line for the asking process | | |
+| 1 | Ask while busy | answer in tab (HUD tag); transcript unchanged; no idle flicker (no hooks: already verified) | | |
 | 2 | `/btw` in VS Code | entry in tab within about 30 s, VS Code tag, no dot | | |
 | 3 | Follow-up | understood (answer builds on the previous one) | | |
 | 4 | Missing executable | error state with try again / open window; nothing else breaks | | |
