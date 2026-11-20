@@ -106,6 +106,18 @@ test('requestFocus switches to the side tab and stamps focusAsk', () => {
   assert.equal(sq.tab(ID), 'side');
 });
 
+test('consumeFocus: a focus stamp is used once; the tab stays on Side questions', () => {
+  let changes = 0;
+  const sq = createSideQuestions({ log: mkLog(), ask: () => new Promise(() => {}), now: () => 10, onChange: () => { changes++; } });
+  sq.requestFocus(ID);
+  assert.equal(sq.view(ID).focusAsk, 10);
+  sq.consumeFocus(ID);
+  assert.equal(sq.view(ID).focusAsk, null);
+  assert.equal(sq.tab(ID), 'side');
+  assert.equal(changes, 0, 'no onChange');
+  sq.consumeFocus(ID2); // nothing to consume: harmless
+});
+
 test('view: newest 50, oldest first, with tab, count, dot, asking, healthy', () => {
   const log = mkLog();
   for (let n = 0; n < 55; n++) log.add(ID, { source: 'hud', question: `q${n}`, response: `r${n}` });

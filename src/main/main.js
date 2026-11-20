@@ -181,7 +181,9 @@ const pushDetailNow = guarded('detail', () => {
   const d = detailId ? store.detail(detailId) : null; // null empties the details (stack only, or hidden)
   const json = JSON.stringify(d);
   if (json === sentDetail) return;
-  try { panelWin.webContents.send('detail', d); sentDetail = json; } catch (err) { log('detail', err); }
+  try { panelWin.webContents.send('detail', d); sentDetail = json; } catch (err) { log('detail', err); return; }
+  // A ? focus request goes out once: a reloaded panel must not grab the keyboard again.
+  if (d?.side?.focusAsk != null) side.consumeFocus(detailId);
 }, log);
 const pushDetail = createThrottle(pushDetailNow, PUSH_MS);
 

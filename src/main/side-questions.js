@@ -84,6 +84,9 @@ export function createSideQuestions({ log, ask, now = Date.now, onChange = () =>
     tabs.set(sessionId, 'side');
     focus.set(sessionId, now());
   }
+  // Main sent a detail carrying the focus stamp: it is used up, so a renderer reload never takes the
+  // keyboard again. No onChange.
+  function consumeFocus(sessionId) { focus.delete(sessionId); }
 
   function importVscode(items) {
     let ids;
@@ -130,5 +133,5 @@ export function createSideQuestions({ log, ask, now = Date.now, onChange = () =>
     };
   }
 
-  return { start, retry, asking, dot: (id) => dots.has(id), setViewing, tab, setTab, requestFocus, importVscode, setHealthy, stopAll, view };
+  return { start, retry, asking, dot: (id) => dots.has(id), setViewing, tab, setTab, requestFocus, consumeFocus, importVscode, setHealthy, stopAll, view };
 }
