@@ -88,7 +88,8 @@ function keepOriginal(target) {
 }
 
 // Unchanged settings are neither backed up nor rewritten, so the .bak keeps the last real change.
-export function rewrite(file, transform) {
+// `backup: false` (the HUD's own start/quit edits) skips the .bak; the one-time .orig copy still happens.
+export function rewrite(file, transform, { backup: wantBackup = true } = {}) {
   try {
     const target = path.resolve(file);
     const { exists, settings, indent, eol, trailing } = readSettings(target);
@@ -98,8 +99,10 @@ export function rewrite(file, transform) {
     let backup = null;
     if (exists) {
       keepOriginal(target);
-      backup = target + '.agent-hud.bak';
-      fs.copyFileSync(target, backup);
+      if (wantBackup) {
+        backup = target + '.agent-hud.bak';
+        fs.copyFileSync(target, backup);
+      }
     }
     let text = JSON.stringify(next, null, transform.keepIndent ? indent : 2);
     if (eol === '\r\n') text = text.replace(/\n/g, '\r\n');
@@ -111,14 +114,14 @@ export function rewrite(file, transform) {
   }
 }
 
-export function installHooks(file, { port, secret }) {
+export function installHooks(file, { port, secret }, { backup = true } = {}) {
   const entries = buildHookEntries({ port, secret });
   const t = (s) => mergeHooks(s, entries);
-  return rewrite(file, t);
+  return rewrite(file, t, { backup });
 }
 
-export function uninstallHooks(file) {
+export function uninstallHooks(file, { backup = true } = {}) {
   const t = (s) => unmergeHooks(s);
   t.skipIfMissing = true;
-  return rewrite(file, t);
+  return rewrite(file, t, { backup });
 }

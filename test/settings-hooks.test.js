@@ -234,3 +234,18 @@ test('installHooks twice on a mixed group never loses the user hook', () => {
     assert.equal(g.length, 2);
   } finally { t.done(); }
 });
+
+test('install and uninstall with backup:false write no .bak but still keep the .orig once', () => {
+  const t = tmp();
+  try {
+    fs.writeFileSync(t.file, JSON.stringify({ model: 'x' }, null, 2) + '\n');
+    const a = installHooks(t.file, { port: 1, secret: 's' }, { backup: false });
+    assert.equal(a.ok, true); assert.equal(a.changed, true); assert.equal(a.backup, null);
+    assert.ok(!fs.existsSync(t.file + '.agent-hud.bak'));
+    assert.ok(fs.existsSync(t.file + '.agent-hud.orig'));
+    const b = uninstallHooks(t.file, { backup: false });
+    assert.equal(b.changed, true); assert.equal(b.backup, null);
+    assert.ok(!fs.existsSync(t.file + '.agent-hud.bak'));
+    assert.deepEqual(JSON.parse(fs.readFileSync(t.file, 'utf8')), { model: 'x' });
+  } finally { t.done(); }
+});
