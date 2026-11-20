@@ -73,7 +73,7 @@ export function modelFromTranscriptTail(text) {
     try { o = JSON.parse(lines[i]); } catch { continue; }
     if (o && o.type === 'assistant') {
       const m = o.message && o.message.model;
-      if (typeof m === 'string' && m) return m;
+      if (typeof m === 'string' && m && !m.startsWith('<')) return m;
     }
   }
   return null;

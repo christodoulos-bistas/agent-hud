@@ -61,3 +61,10 @@ test('modelFromTranscriptTail: the last assistant line\'s model; a cut first lin
   assert.equal(modelFromTranscriptTail(t), 'claude-opus-5-5');
   assert.equal(modelFromTranscriptTail('{"type":"user"}'), null);
 });
+
+test('modelFromTranscriptTail: skips <synthetic> assistant lines', () => {
+  const real = JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5-5' } });
+  const syn = JSON.stringify({ type: 'assistant', message: { model: '<synthetic>' } });
+  assert.equal(modelFromTranscriptTail([real, syn].join('\n')), 'claude-opus-5-5');
+  assert.equal(modelFromTranscriptTail(syn), null);
+});
