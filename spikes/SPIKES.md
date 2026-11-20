@@ -437,3 +437,81 @@ REPLY_ANYWHERE = no. The pipe is Claude Code's private session-to-session channe
 - Release 2 ("reply to any agent"): dropped (Spike 14).
 - New issue: with the HUD closed, its HTTP hooks show red "hook failed" lines in the CLI and a "hook gave no usable answer" notice in the desktop app. To fix separately.
 
+
+## Live check - v1.5 side questions
+
+Hands-on check of "ask on the side" (spec section 8) on the DEV HUD, branch `side-questions`. Nine checks, each with an expected
+result; write what you saw in the table at the end. Checks 1, 2 and 5 need your hands in VS Code and the Claude desktop app.
+
+**Use only throwaway chats opened in `C:\Consortis_projects\agent-hud-spike`. Never ask from a real project chat.**
+
+### Setup
+
+1. In PowerShell, from `C:\Consortis_projects\agent-hud`, start the dev HUD isolated beside the installed one (own data folder,
+   own port):
+   ```powershell
+   Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+   $env:AGENT_HUD_USER_DATA = "$env:TEMP\agent-hud-dev"
+   $env:AGENT_HUD_PORT = '47911'
+   $env:AGENT_HUD_DEBUG = '1'
+   npm run dev
+   ```
+   Keep this terminal open: with `AGENT_HUD_DEBUG=1` the dev HUD prints its debug log (lines starting `[agent-hud]`) there.
+2. `npm run dev` points the hooks at the spike folder's settings file
+   (`C:\Consortis_projects\agent-hud-spike\.claude\settings.local.json`), so chats opened in the spike folder report to the dev
+   HUD (port 47911), not to the installed one. That is why every check uses a throwaway chat in that folder.
+3. Open a **new chat** in `C:\Consortis_projects\agent-hud-spike` (VS Code panel unless a check says otherwise) and send "hi" so
+   it is live. Its row appears in the dev HUD. Start a new throwaway chat whenever a check says so.
+4. When done: quit the dev HUD from its tray icon (Quit), then close the throwaway chats.
+
+### Checks
+
+1. **Ask while the chat is busy.** In the throwaway chat ask: "Run `Start-Sleep 60` in PowerShell, then say done." While it runs,
+   hover its row in the dev HUD, click the **?**, type "what is 2+2?" and press Enter.
+   Expected: the answer shows in the Side questions tab, tagged **HUD**; the chat's own transcript gains nothing (no new
+   message in the VS Code panel); the row never flickers to idle while the command runs.
+   "No hook event from the asking process": the dev terminal's `[agent-hud]` debug lines must not show a new SessionStart (or any
+   hook line carrying this chat's session id) at the moment you asked. Find the chat's id in the newest
+   `%USERPROFILE%\.claude\sessions\<pid>.json` whose `cwd` is the spike folder, and search the terminal output for it right after
+   asking; the only new lines should be `ipc` lines for the panel's own channels.
+2. **`/btw` in VS Code.** In the same chat's VS Code panel type `/btw what colour is the sky?`.
+   Expected: within about 30 s the entry appears in that chat's Side questions tab, tagged **VS Code** (grey), and it does not
+   set the slate answer dot.
+3. **Follow-up that depends on the previous answer.** In the tab ask: "add 3 to that". Expected: the answer follows from the
+   previous one (2+2 = 4, so 7), i.e. the follow-up is understood.
+4. **Executable missing.** Quit the dev HUD, set a missing path, start it again from the same terminal
+   (`$env:AGENT_HUD_CLAUDE_EXE = 'C:\nope\claude.exe'; npm run dev`), open a throwaway chat, ask from the HUD.
+   Expected: the error state shows in the rust style with **try again** and **open window**; nothing else breaks (rows, bubbles,
+   panel). Afterwards quit, `Remove-Item Env:AGENT_HUD_CLAUDE_EXE`, and restart the dev HUD with the setup commands.
+5. **Desktop-app chat.** Open a new chat in the Claude desktop app in the spike folder, send "hi", then ask from its row's **?**.
+   Expected: either an answer or the "can't be resumed" error; record which. Either way the HUD shows a result and the desktop
+   chat is untouched.
+6. **Ask while a long command runs.** In a throwaway chat ask it to run `Start-Sleep 90`. While it runs ask from the HUD: "what
+   are you doing right now?". Expected: the answer says the command is still running; it is not interrupted.
+7. **Quit mid-ask.** Start a question from the HUD (e.g. while check 6's command runs), and while it shows "thinking…" quit the
+   dev HUD from its tray (Quit). Then run:
+   ```powershell
+   Get-Process claude -ErrorAction SilentlyContinue
+   Select-String -Path "$env:USERPROFILE\.claude\sessions\*" -Pattern '"entrypoint":"agent-hud-side"' -List
+   ```
+   Expected: no `claude` process that was started for the question is left (the chats' own `claude` processes from VS Code or the
+   CLI are still there; only a child of the HUD would be wrong, so compare with the list before quitting), and the
+   `Select-String` finds no file.
+8. **The ? never covers the chip.** Hover a Claude row. Expected: the **?** sits left of the ✕ and does not cover the status
+   chip or the answer dot.
+9. **Bulleted answer renders as a list.** Ask: "Give me three bullet points about cats." Expected: the Side questions tab shows a
+   real bulleted list (bullets, not raw `-` or `*` characters), inside the slate answer block.
+
+### Results
+
+| # | Check | Expected | Result | Notes |
+| --- | --- | --- | --- | --- |
+| 1 | Ask while busy | answer in tab (HUD tag); transcript unchanged; no idle flicker; no hook line for the asking process | | |
+| 2 | `/btw` in VS Code | entry in tab within about 30 s, VS Code tag, no dot | | |
+| 3 | Follow-up | understood (answer builds on the previous one) | | |
+| 4 | Missing executable | error state with try again / open window; nothing else breaks | | |
+| 5 | Desktop-app chat | answer or error (record which); chat untouched | | |
+| 6 | Long command running | answer says it is still running, not interrupted | | |
+| 7 | Quit mid-ask | no leftover HUD child `claude`; no session file with `agent-hud-side` | | |
+| 8 | ? vs chip | ? left of the ✕, chip not covered | | |
+| 9 | Bulleted answer | rendered as a list in the Side questions tab | | |
