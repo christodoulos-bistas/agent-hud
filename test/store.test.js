@@ -789,3 +789,47 @@ test('side: sideDot on Claude agents only; detail.side for Claude, null for Code
   assert.equal(bare.store.detail('s1').side, null);
   assert.equal(bare.store.snapshot().agents[0].sideDot, false);
 });
+
+test('v1.7: unseen is set when a chat moves into "Your turn", not when first seen already there', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1')]);
+  store.onEvent(ev('s1', 'PostToolUse', 1000));
+  set(1010); store.onEvent(ev('s1', 'Stop', 1010));
+  assert.equal(store.snapshot().agents[0].stage, 'turn');
+  assert.equal(store.snapshot().agents[0].unseen, false, 'first sighting already in turn: not lit (M8)');
+  set(1020); store.onEvent(ev('s1', 'UserPromptSubmit', 1020, { raw: { prompt: 'go' } }));
+  assert.equal(store.snapshot().agents[0].unseen, false);
+  set(1030); store.onEvent(ev('s1', 'Stop', 1030));
+  assert.equal(store.snapshot().agents[0].unseen, true);
+  assert.equal(store.snapshot().agents[0].unseen, true, 'stays across snapshots');
+  set(1040); store.onEvent(ev('s1', 'UserPromptSubmit', 1040, { raw: { prompt: 'again' } }));
+  assert.equal(store.snapshot().agents[0].unseen, false, 'a new turn clears it');
+});
+
+test('v1.7: markSeen clears once and reports it; unknown ids are false', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1')]);
+  store.onEvent(ev('s1', 'UserPromptSubmit', 1000, { raw: { prompt: 'go' } }));
+  store.snapshot();
+  set(1010); store.onEvent(ev('s1', 'Stop', 1010));
+  assert.equal(store.snapshot().agents[0].unseen, true);
+  assert.equal(store.markSeen('s1'), true);
+  assert.equal(store.snapshot().agents[0].unseen, false);
+  assert.equal(store.markSeen('s1'), false);
+  assert.equal(store.markSeen('nope'), false);
+});
+
+test('v1.7: ✕ clears unseen; the next finished turn lights it again', () => {
+  const { store, set } = setup(1000);
+  store.setSessions([S('s1')]);
+  store.onEvent(ev('s1', 'UserPromptSubmit', 1000, { raw: { prompt: 'go' } }));
+  store.snapshot();
+  set(1010); store.onEvent(ev('s1', 'Stop', 1010));
+  assert.equal(store.snapshot().agents[0].unseen, true);
+  store.hide('s1');
+  assert.equal(store.snapshot().tucked[0].unseen, false);
+  set(1020); store.onEvent(ev('s1', 'UserPromptSubmit', 1020, { raw: { prompt: 'more' } }));
+  assert.equal(store.snapshot().agents[0].unseen, false);
+  set(1030); store.onEvent(ev('s1', 'Stop', 1030));
+  assert.equal(store.snapshot().agents[0].unseen, true);
+});

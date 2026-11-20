@@ -21,6 +21,9 @@ export function createStore({ engine, queue, now = Date.now, stepLog, plans = cr
   const hidden = new Map(); // id -> when the user hid it with ✕ (v1.3; memory only)
   const steps = stepLog ?? createStepLog({});
   const stages = new Map(); // id -> { stage, since }
+  // v1.7: chats that moved into "Your turn" and haven't been seen since (main marks the open one seen).
+  // Only a change into turn counts: a chat already in turn when first seen stays unlit (M8).
+  const unseen = new Set();
   const st = (id) => {
     let s = state.get(id);
     if (!s) { s = { lastActivityAt: null, lastMainActivityAt: null, stoppedAt: null, notif: null, activity: '', cwd: null }; state.set(id, s); }
@@ -77,7 +80,7 @@ export function createStore({ engine, queue, now = Date.now, stepLog, plans = cr
       const n = (missed.get(old.sessionId) ?? 0) + 1;
       if (n < 2) { missed.set(old.sessionId, n); held.push(old); continue; }
       missed.delete(old.sessionId);
-      engine.forget(old.sessionId); steps.forget(old.sessionId); stages.delete(old.sessionId); state.delete(old.sessionId); optIn.delete(old.sessionId);
+      engine.forget(old.sessionId); steps.forget(old.sessionId); stages.delete(old.sessionId); unseen.delete(old.sessionId); state.delete(old.sessionId); optIn.delete(old.sessionId);
       hidden.delete(old.sessionId); plans.forget(old.sessionId);
     }
     if (poll) for (const id of keep) missed.delete(id);
@@ -137,7 +140,10 @@ export function createStore({ engine, queue, now = Date.now, stepLog, plans = cr
       const stage = stageOf({ mood: baseMood, view, status: sess.status, now: t });
       const stuck = stuckOf({ stage, view, status: sess.status, now: t });
       let rec = stages.get(id);
-      if (!rec || rec.stage !== stage) { rec = { stage, since: t }; stages.set(id, rec); }
+      if (!rec || rec.stage !== stage) {
+        if (stage !== 'turn') unseen.delete(id); else if (rec) unseen.add(id);
+        rec = { stage, since: t }; stages.set(id, rec);
+      }
       // A ✕ hide ends for good when the chat asks something or wakes after it (v1.3).
       if (hidden.has(id) && (stage === 'needs' || (s.wakeAt != null && s.wakeAt > hidden.get(id)))) hidden.delete(id);
       const tuck = tuckOf({
@@ -155,6 +161,7 @@ export function createStore({ engine, queue, now = Date.now, stepLog, plans = cr
         recap: stage === 'turn' ? recapOf(view.recap, view.taskAt) : null,
         tuck,
         sideDot: (sess.source ?? 'claude') === 'claude' && !!side?.dot(id),
+        unseen: unseen.has(id),
       };
     });
     return agents;
@@ -165,7 +172,11 @@ export function createStore({ engine, queue, now = Date.now, stepLog, plans = cr
     const a = computeAgents(now()).find((x) => x.id === id);
     if (!a || a.stage === 'needs') return;
     hidden.set(id, now());
+    unseen.delete(id);
   }
+
+  // v1.7: the user has seen this chat (its details are open). True when that cleared a "Your turn" glow.
+  const markSeen = (id) => unseen.delete(String(id));
 
   // The queue stamps every item's deadline and hold (R1); the renderers read both off the card.
   const finiteOr = (v) => (Number.isFinite(v) ? v : null);
@@ -237,5 +248,5 @@ export function createStore({ engine, queue, now = Date.now, stepLog, plans = cr
     return true;
   }
 
-  return { onEvent, setSessions, setReplyOptIn, wantsReply, replySent, permissionDenied, hide, snapshot, cardById, detail, stageKey, dismissNotice, transcriptOf };
+  return { onEvent, setSessions, setReplyOptIn, wantsReply, replySent, permissionDenied, hide, markSeen, snapshot, cardById, detail, stageKey, dismissNotice, transcriptOf };
 }
