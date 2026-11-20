@@ -58,7 +58,7 @@
 2. **✕ a lit row, then the chat starts and finishes a new turn:** it comes back and lights again. ✕ alone never leaves a stale `unseen` that shows after the chat un-tucks for some other reason (Task 1).
 3. **A row redrawn mid-flash** (a helper flips it to Working and back): no `glow-done` left stuck on a row after the flash, with or without reduced motion (Task 2).
 4. **Collapse or expand mid-flash:** no throw; the flash moves to whichever element now represents the chat (Task 2).
-5. **HUD start or renderer reload with chats in "Your turn":** nothing is lit and nothing flashes (Tasks 1 and 2).
+5. **HUD start with chats in "Your turn":** nothing is lit and nothing flashes; a renderer reload keeps what the store has lit (spec, "Claude's calls"), without flashing (Tasks 1 and 2).
 
 ---
 

@@ -580,3 +580,15 @@ test('v1.7 M4: the unseen glow never animates; collapsed faces get the finite fi
   }
   assert.match(css, /\.face\.glow-done\s*\{[^}]*animation:\s*done-pulse[^;}]*\b2\b/, 'faces flash twice, like rows');
 });
+
+test('v1.7: the finish flash pulses from and back to the row\'s own glow (no dip, no jump at the end)', async () => {
+  const fs = await import('node:fs');
+  const css = fs.readFileSync(new URL('../src/renderer/hud.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const pulse = /@keyframes done-pulse\s*\{([^]*?)\n\}/.exec(css)?.[1];
+  assert.ok(pulse, 'done-pulse keyframes exist');
+  assert.doesNotMatch(pulse, /\b(0%|100%|from|to)\b/, 'no start/end stops: the animation returns to the static style (unseen, selected or none)');
+  const reduce = /@media \(prefers-reduced-motion: reduce\)\s*\{([^]*?)\n\}/.exec(css)?.[1] ?? '';
+  assert.match(reduce, /\.row\.glow-done\s*\{[^}]*box-shadow/, 'with reduced motion the flash shows static');
+  const outside = css.replace(/@media \(prefers-reduced-motion: reduce\)\s*\{[^]*?\n\}/, '');
+  assert.doesNotMatch(outside, /\.(row|face)\.glow-done\s*\{[^}]*box-shadow/, 'with motion on, no static flash style sits under the animation');
+});
