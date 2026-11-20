@@ -127,8 +127,9 @@ export function askSide({ exe, sessionId, cwd, question, history = [], model = n
       exited = true;
       settle({ error: SIDE_ERRORS.refused, detail: `exited ${code}` });
     });
+    child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
-      buf += chunk.toString('utf8');
+      buf += chunk;
       let nl;
       while ((nl = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, nl).trim();

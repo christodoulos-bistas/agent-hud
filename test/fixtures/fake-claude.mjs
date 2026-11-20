@@ -8,7 +8,7 @@ if (!process.argv.includes('-p')) process.exit(0);
 const env = process.env;
 if (env.FAKE_CLAUDE_OUT) {
   fs.appendFileSync(env.FAKE_CLAUDE_OUT, JSON.stringify({
-    argv: process.argv.slice(2), cwd: process.cwd(),
+    pid: process.pid, argv: process.argv.slice(2), cwd: process.cwd(),
     entry: env.CLAUDE_CODE_ENTRYPOINT, runAsNode: env.ELECTRON_RUN_AS_NODE ?? null,
   }) + '\n');
 }
@@ -31,6 +31,12 @@ if (mode === 'hang') {
       if (mode === 'exit') process.exit(3);
       if (mode === 'null') return reply('sq', null);
       if (mode === 'error') return send({ type: 'control_response', response: { subtype: 'error', request_id: 'sq', error: 'Unknown subtype' } });
+      if (mode === 'split-utf8') {
+        const b = Buffer.from(JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: 'sq', response: { response: 'Ναι, ξεκίνα' } } }) + '\n');
+        const at = b.indexOf(Buffer.from('Ν')) + 1;
+        process.stdout.write(b.subarray(0, at));
+        return void setTimeout(() => process.stdout.write(b.subarray(at)), 20);
+      }
       const text = 'A:' + m.request.question + '|h' + (m.request.history?.length ?? 0);
       if (mode === 'split') {
         const s = JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: 'sq', response: { response: text } } }) + '\n';

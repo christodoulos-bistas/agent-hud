@@ -24,11 +24,25 @@ test('askSide: error subtype -> refused, detail kept', async () => assert.deepEq
 test('askSide: no init reply -> asks after the fallback', async () => assert.equal((await run('noinit')).r.answer, 'A:q?|h0'));
 test('askSide: reply split across chunks', async () => assert.equal((await run('split')).r.answer, 'A:q?|h0'));
 test('askSide: exits before replying -> refused', async () => assert.equal((await run('exit')).r.error, SIDE_ERRORS.refused));
-test('askSide: hang -> timeout, child killed', async () => assert.equal((await run('hang', { timeoutMs: 400 })).r.error, SIDE_ERRORS.timeout));
+const dead = async (pid) => {
+  for (let i = 0; i < 25; i++) {
+    try { process.kill(pid, 0); } catch { return true; }
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return false;
+};
+test('askSide: hang -> timeout, child killed', async () => {
+  const { r, calls } = await run('hang', { timeoutMs: 400 });
+  assert.equal(r.error, SIDE_ERRORS.timeout);
+  assert.ok(await dead(calls[0].pid), 'child process is gone');
+});
+test('askSide: UTF-8 character split across chunks survives', async () => assert.equal((await run('split-utf8')).r.answer, 'Ναι, ξεκίνα'));
 test('askSide: missing exe -> notFound', async () => assert.equal((await askSide({ exe: null, sessionId: 's', cwd: '.', question: 'q', env: {} })).error, SIDE_ERRORS.notFound));
 test('askSide: abort mid-ask kills the child (HUD quitting)', async () => {
   const ac = new AbortController();
   const p = run('hang', { signal: ac.signal });
   setTimeout(() => ac.abort(), 150);
-  assert.equal((await p).r.error, 'cancelled');
+  const { r, calls } = await p;
+  assert.equal(r.error, 'cancelled');
+  assert.ok(await dead(calls[0].pid), 'child process is gone');
 });
