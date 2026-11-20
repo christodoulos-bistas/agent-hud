@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { renderPanel, renderStack, timeText, arrowOf, panelAction, createStackArming } from '../src/renderer/panel.js';
+import { renderPanel, renderStack, timeText, arrowOf, panelAction, createStackArming, shouldRelease } from '../src/renderer/panel.js';
 import { ARM_MS } from '../src/renderer/cards.js';
 import { sideWhen } from '../src/renderer/side-tab.js';
 
@@ -379,4 +379,12 @@ test('panelAction: tab, copy and retry name the agent on show', () => {
   assert.deepEqual(panelAction('tab', d, { tab: 'side' }), { call: 'setTab', id: 's1', tab: 'side' });
   assert.deepEqual(panelAction('side-copy', d, { entry: 'h1' }), { call: 'copySide', id: 's1', entry: 'h1' });
   assert.deepEqual(panelAction('side-retry', d, { entry: 'h1' }), { call: 'retrySide', id: 's1', entry: 'h1' });
+});
+
+test('shouldRelease: gone, disabled or another agent gives the keyboard back', () => {
+  assert.equal(shouldRelease({ askFor: null, id: 's1', input: null }), false);
+  assert.equal(shouldRelease({ askFor: 's1', id: 's1', input: { disabled: false } }), false);
+  assert.equal(shouldRelease({ askFor: 's1', id: 's1', input: null }), true);
+  assert.equal(shouldRelease({ askFor: 's1', id: 's1', input: { disabled: true } }), true);
+  assert.equal(shouldRelease({ askFor: 's1', id: 's2', input: { disabled: false } }), true);
 });

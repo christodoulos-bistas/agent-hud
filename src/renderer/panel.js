@@ -209,6 +209,12 @@ export function createStackArming() {
   };
 }
 
+// Whether the ask box must give the keyboard back: it holds it for `askFor` but is gone, disabled
+// (a retry started an ask) or showing another agent.
+export function shouldRelease({ askFor, id, input } = {}) {
+  return !!askFor && (!input || !!input.disabled || askFor !== id);
+}
+
 export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   const root = doc.getElementById('panel-root');
   const call = (name, ...args) => (typeof api?.[name] === 'function' ? api[name](...args) : undefined);
@@ -222,6 +228,7 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   const sideDrafts = new Map(); // session id -> the side-question text typed and not yet asked
   const focusSeen = new Map(); // session id -> the last side.focusAsk handled
   let threadSig = null; // what the thread showed at the last render: chat, entry count, asking
+  let inputFor = null; // the session the ask input last showed (drafts must not cross agents)
   let askFor = null; // the session whose ask box holds the keyboard (null: not typing there)
   const arm = createStackArming(); // bubbles and the stack's ✕ arm like a card's buttons (I4)
 
@@ -283,8 +290,12 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
     const sd = detail?.side;
     const id = detail?.id != null ? String(detail.id) : null;
     const input = sd?.tab === 'side' && id ? askBox() : null;
-    if (askFor && (!input || askFor !== id)) typingDone();
-    if (input && !input.disabled && !input.value && sideDrafts.get(id)) input.value = sideDrafts.get(id);
+    if (shouldRelease({ askFor, id, input })) typingDone();
+    if (input && inputFor !== id) { // the keyed patch can hand one input element to the next agent: never carry text over
+      input.value = sideDrafts.get(id) ?? '';
+      if (inputFor !== null) input.blur?.();
+    } else if (input && !input.disabled && !input.value && sideDrafts.get(id)) input.value = sideDrafts.get(id);
+    inputFor = input ? id : null;
     if (input && Number(sd.focusAsk) > (focusSeen.get(id) ?? 0)) {
       focusSeen.set(id, Number(sd.focusAsk));
       if (!input.disabled) { input.focus?.(); askFor = id; setInteractive(true); }
@@ -307,8 +318,10 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
     typingDone();
   };
   root.addEventListener('pointerdown', (e) => {
-    if (e.target.closest?.('[data-side-ask]') && detail?.id != null) { askFor = String(detail.id); setInteractive(true); }
+    const box = e.target.closest?.('[data-side-ask]');
+    if (box && !box.disabled && detail?.id != null) { askFor = String(detail.id); setInteractive(true); }
   });
+  root.addEventListener('focusout', (e) => { if (e.target.matches?.('[data-side-ask]')) typingDone(); });
   root.addEventListener('input', (e) => {
     if (!e.target.matches?.('[data-side-ask]') || detail?.id == null) return;
     if (e.target.value) sideDrafts.set(String(detail.id), e.target.value); else sideDrafts.delete(String(detail.id));
