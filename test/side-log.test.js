@@ -130,3 +130,38 @@ test('successful remove updates the cache and leaves no .tmp file', () => {
   assert.deepEqual(log.list(SID).map((e) => e.question), ['b']);
   assert.deepEqual(fs.readdirSync(dir), [SID + '.jsonl']);
 });
+
+test('a log deleted on disk while running is gone from list, and an add after it does not resurrect old entries', () => {
+  const dir = tmp();
+  const log = createSideLog({ dir });
+  log.add(SID, { source: 'hud', question: 'old1', response: 'r' });
+  log.add(SID, { source: 'hud', question: 'old2', response: 'r' });
+  assert.equal(log.count(SID), 2);
+  fs.unlinkSync(path.join(dir, SID + '.jsonl'));
+  assert.deepEqual(log.list(SID), []);
+  log.add(SID, { source: 'hud', question: 'new', response: 'r' });
+  assert.deepEqual(log.list(SID).map((e) => e.question), ['new']);
+  const lines = fs.readFileSync(path.join(dir, SID + '.jsonl'), 'utf8').split('\n').filter(Boolean);
+  assert.deepEqual(lines.map((l) => JSON.parse(l).question), ['new']);
+});
+
+test('a delete straight before an add (no list in between) is honoured too', () => {
+  const dir = tmp();
+  const log = createSideLog({ dir });
+  log.add(SID, { source: 'hud', question: 'old', response: 'r' });
+  fs.unlinkSync(path.join(dir, SID + '.jsonl'));
+  log.add(SID, { source: 'hud', question: 'new', response: 'r' });
+  assert.deepEqual(log.list(SID).map((e) => e.question), ['new']);
+  assert.deepEqual(createSideLog({ dir }).list(SID).map((e) => e.question), ['new']);
+});
+
+test('a log changed on disk (edited by hand) is read again', () => {
+  const dir = tmp();
+  const log = createSideLog({ dir });
+  log.add(SID, { source: 'hud', question: 'a', response: 'r' });
+  const file = path.join(dir, SID + '.jsonl');
+  fs.writeFileSync(file, JSON.stringify({ id: 'hX', at: 1, source: 'hud', question: 'edited', response: 'r' }) + '\n');
+  assert.deepEqual(log.list(SID).map((e) => e.question), ['edited']);
+  assert.equal(log.count(SID), 1);
+  assert.deepEqual(log.history(SID), [{ question: 'edited', response: 'r' }]);
+});

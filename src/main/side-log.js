@@ -15,12 +15,20 @@ export function createSideLog({
   fs = nodeFs,
   newId = () => 'h' + randomUUID().slice(0, 12),
 }) {
+  // sessionId -> { entries, stamp }: the stamp is the file's mtime and size when the cache last saw it,
+  // so a log deleted or changed on disk while the HUD runs is read again (and never resurrected).
   const cache = new Map();
 
   const fileOf = (sessionId) => path.join(dir, sessionId + '.jsonl');
+  const stampOf = (sessionId) => {
+    try { const st = fs.statSync(fileOf(sessionId)); return st.mtimeMs + ':' + st.size; } catch { return 'none'; }
+  };
+  const restamp = (sessionId) => { const c = cache.get(sessionId); if (c) c.stamp = stampOf(sessionId); };
 
   function load(sessionId) {
-    if (cache.has(sessionId)) return cache.get(sessionId);
+    const stamp = stampOf(sessionId);
+    const c = cache.get(sessionId);
+    if (c && c.stamp === stamp) return c.entries;
     const entries = [];
     let text = '';
     try {
@@ -39,7 +47,7 @@ export function createSideLog({
         // corrupt line: skip
       }
     }
-    cache.set(sessionId, entries);
+    cache.set(sessionId, { entries, stamp });
     return entries;
   }
 
@@ -62,6 +70,7 @@ export function createSideLog({
     if (error !== undefined) entry.error = error;
     appendLines(sessionId, [entry]);
     entries.push(entry);
+    restamp(sessionId);
     return copy(entry);
   }
 
@@ -82,7 +91,7 @@ export function createSideLog({
       try { fs.unlinkSync(tmp); } catch { /* ignore */ }
       throw err;
     }
-    cache.set(sessionId, next);
+    cache.set(sessionId, { entries: next, stamp: stampOf(sessionId) });
     return true;
   }
 
@@ -117,6 +126,7 @@ export function createSideLog({
       if (!fresh.length) continue;
       appendLines(sessionId, fresh);
       entries.push(...fresh);
+      restamp(sessionId);
       changed.push(sessionId);
     }
     return changed;
