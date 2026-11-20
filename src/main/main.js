@@ -1106,8 +1106,10 @@ async function start() {
   setInterval(readVscode, VSCODE_MS);
   setInterval(refreshMenu, 30000); // hook status lines follow edits made outside the HUD (e.g. approval in Codex Settings → Hooks)
   await startServer();
+  // Before firstRun: an unanswered first-run dialog (the Codex offer) must not keep Claude chats unreported.
+  // A not-yet-offered machine has claudeHooksWanted false here, so nothing is installed before the user answers.
+  syncHooks('start');
   await firstRun();
-  syncHooks('start'); // after firstRun, so a first-run "No" is honoured
   if (!upgradeCodexHooks() && codexTrustDue({ cfg, target: CODEX, missing: codexState().missing })) trustCodex({ reason: 'startup' });
 }
 
