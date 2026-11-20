@@ -355,6 +355,8 @@ test('asking: thinking row, disabled box', () => {
   const h = renderPanel(detail({ side: side({ asking: { question: 'is it safe?', at: NOW } }) }), NOW);
   assert.match(h, /is it safe\?[^]*class="qa-a wait">thinking/);
   assert.match(h, /<input[^>]*data-side-ask[^>]*disabled[^>]*placeholder="Waiting for the answer…"/);
+  assert.match(h, /class="btn gold" data-act="side-ask" disabled>Ask/);
+  assert.doesNotMatch(renderPanel(detail({ side: side() }), NOW), /data-act="side-ask" disabled/);
 });
 test('empty and unhealthy lines', () => {
   const h = renderPanel(detail({ display: 'arsenal', side: side({ count: 0, entries: [], healthy: false }) }), NOW);

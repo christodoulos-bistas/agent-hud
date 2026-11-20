@@ -62,6 +62,6 @@ export function renderSideTab(side, display, nowMs, foot = '') {
   const ph = asking ? 'Waiting for the answer…' : entries.length ? 'Ask a follow-up…' : `Ask ${display ?? ''} on the side…`;
   const box = '<div class="ask" data-key="side-ask">' +
     `<input type="text" data-side-ask${asking ? ' disabled' : ''} placeholder="${esc(ph)}" autocomplete="off" spellcheck="false">` +
-    '<button type="button" class="btn gold" data-act="side-ask">Ask</button></div>';
+    `<button type="button" class="btn gold" data-act="side-ask"${asking ? ' disabled' : ''}>Ask</button></div>`;
   return `<div class="det" data-key="side" data-deep>${thread}${empty}${sick}${box}${foot}</div>`;
 }

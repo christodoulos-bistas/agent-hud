@@ -125,3 +125,9 @@ body[data-arrow="left"]::after { left: 0; border-right-color: rgba(224, 180, 92,
 .ask input:focus { outline: none; border-color: #a9bcd8; box-shadow: 0 0 0 2px rgba(79, 103, 135, .45); }
 .ask input:disabled { opacity: .7; }
 .ask .btn { padding: 4px 11px; }
+/* Answer content keeps its own list/code styles: the side body is a .det, whose Recent-steps rules must not reach it. */
+.qa-a ul, .qa-a ol { list-style: revert; margin: 2px 0 4px; padding: 0 0 0 18px; }
+.qa-a li { display: list-item; grid-template-columns: none; padding: 0; color: inherit; }
+.qa-a li > span:nth-child(2) { color: inherit; }
+.qa-a pre { margin: 0 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.qa-a pre code { padding: 0; background: none; }
