@@ -61,8 +61,10 @@ export function renderSideTab(side, display, nowMs, foot = '', { canOpen = true 
   const sick = side?.healthy === false
     ? '<p class="task none" data-key="side-sick">Can\'t read VS Code side questions right now.</p>' : '';
   const ph = asking ? 'Waiting for the answer…' : entries.length ? 'Ask a follow-up…' : `Ask ${display ?? ''} on the side…`;
-  const box = '<div class="ask" data-key="side-ask">' +
-    `<input type="text" data-side-ask${asking ? ' disabled' : ''} placeholder="${esc(ph)}" autocomplete="off" spellcheck="false">` +
-    `<button type="button" class="btn gold" data-act="side-ask"${asking ? ' disabled' : ''}>Ask</button></div>`;
+  // data-deep on the box and the input: the keyed patch keeps the input element and updates its
+  // attributes (placeholder, disabled) in place, so a re-render never takes the typing focus away.
+  const box = '<div class="ask" data-key="side-ask" data-deep>' +
+    `<input type="text" data-key="side-ask-input" data-deep data-side-ask${asking ? ' disabled' : ''} placeholder="${esc(ph)}" autocomplete="off" spellcheck="false">` +
+    `<button type="button" data-key="side-ask-btn" class="btn gold" data-act="side-ask"${asking ? ' disabled' : ''}>Ask</button></div>`;
   return `<div class="det" data-key="side" data-deep>${thread}${empty}${sick}${box}${foot}</div>`;
 }

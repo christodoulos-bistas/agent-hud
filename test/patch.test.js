@@ -42,3 +42,37 @@ test('patch with unique keys still reuses an unchanged child and replaces a chan
   assert.equal(parent.children[1].outerHTML, 'B2');
   assert.deepEqual(keys(parent), ['row:a', 'row:b']);
 });
+
+// An element with real attributes, for the data-deep attribute patching.
+class AEl extends El {
+  constructor(key, attrs = {}, deep = false) {
+    super(key);
+    if (deep) this.dataset.deep = '';
+    this.attributes = Object.entries(attrs).map(([name, value]) => ({ name, value }));
+  }
+  hasAttribute(n) { return this.attributes.some((a) => a.name === n); }
+  getAttribute(n) { return this.attributes.find((a) => a.name === n)?.value ?? null; }
+  setAttribute(n, v) { const a = this.attributes.find((x) => x.name === n); if (a) a.value = v; else this.attributes.push({ name: n, value: v }); }
+  removeAttribute(n) { this.attributes = this.attributes.filter((a) => a.name !== n); }
+}
+const askBox = (inputAttrs) => {
+  const box = new AEl('side-ask', { class: 'ask' }, true);
+  box.insertBefore(new AEl('side-ask-input', inputAttrs, true), null);
+  box.insertBefore(new El('side-ask-btn', `btn-${inputAttrs.disabled ?? ''}`), null);
+  return box;
+};
+
+test('patch: a data-deep input inside a data-deep box is kept, its attributes updated in place (M6)', () => {
+  const parent = tree();
+  const rendered = new WeakMap();
+  patch(parent, tree(askBox({ placeholder: 'Ask arsenal on the side…' })), rendered);
+  const input = parent.children[0].children[0];
+  patch(parent, tree(askBox({ placeholder: 'Ask a follow-up…' })), rendered);
+  assert.equal(parent.children[0].children[0], input, 'same input element (focus and typed text survive)');
+  assert.equal(input.getAttribute('placeholder'), 'Ask a follow-up…');
+  patch(parent, tree(askBox({ placeholder: 'Waiting for the answer…', disabled: '' })), rendered);
+  assert.equal(parent.children[0].children[0], input);
+  assert.equal(input.hasAttribute('disabled'), true);
+  patch(parent, tree(askBox({ placeholder: 'Ask a follow-up…' })), rendered);
+  assert.equal(input.hasAttribute('disabled'), false);
+});

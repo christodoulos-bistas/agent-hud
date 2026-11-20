@@ -394,3 +394,16 @@ test('shouldRelease: gone, disabled or another agent gives the keyboard back', (
   assert.equal(shouldRelease({ askFor: 's1', id: 's1', input: { disabled: true } }), true);
   assert.equal(shouldRelease({ askFor: 's1', id: 's2', input: { disabled: false } }), true);
 });
+test('shouldRelease: a replaced input without the focus gives the keyboard back; with it, keeps it', () => {
+  const input = { disabled: false };
+  assert.equal(shouldRelease({ askFor: 's1', id: 's1', input, replaced: true, active: null }), true);
+  assert.equal(shouldRelease({ askFor: 's1', id: 's1', input, replaced: true, active: input }), false);
+  assert.equal(shouldRelease({ askFor: 's1', id: 's1', input, replaced: false, active: null }), false, 'kept element: focus not judged');
+  assert.equal(shouldRelease({ askFor: null, id: 's1', input, replaced: true, active: null }), false);
+});
+test('ask box: the box and its input are data-deep and keyed, so the patch keeps the input in place', () => {
+  const h = renderPanel(detail({ side: side() }), NOW);
+  assert.match(h, /<div class="ask" data-key="side-ask" data-deep>/);
+  assert.match(h, /<input type="text" data-key="side-ask-input" data-deep data-side-ask /);
+  assert.match(h, /<button type="button" data-key="side-ask-btn" class="btn gold" data-act="side-ask">Ask/);
+});

@@ -210,9 +210,10 @@ export function createStackArming() {
 }
 
 // Whether the ask box must give the keyboard back: it holds it for `askFor` but is gone, disabled
-// (a retry started an ask) or showing another agent.
-export function shouldRelease({ askFor, id, input } = {}) {
-  return !!askFor && (!input || !!input.disabled || askFor !== id);
+// (a retry started an ask) or showing another agent, or a render replaced the input element and the
+// new one doesn't have the focus (Chromium fires no focusout on a removed element).
+export function shouldRelease({ askFor, id, input, replaced = false, active = null } = {}) {
+  return !!askFor && (!input || !!input.disabled || askFor !== id || (replaced && active !== input));
 }
 
 export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
@@ -230,6 +231,7 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   let threadSig = null; // what the thread showed at the last render: chat, entry count, asking
   let inputFor = null; // the session the ask input last showed (drafts must not cross agents)
   let askFor = null; // the session whose ask box holds the keyboard (null: not typing there)
+  let askEl = null; // the ask input element the last render showed (a new one means it was replaced)
   const arm = createStackArming(); // bubbles and the stack's ✕ arm like a card's buttons (I4)
 
   // The panel takes the keyboard focus only while the user types into a card's text box, and gives it
@@ -267,7 +269,7 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
     if (!stackOn()) setHover(null);
     const open = stackOn() ? stack.expanded ?? null : null;
     const { arming } = cards.show(open, now);
-    if (!stackOn() && !detail) { root.innerHTML = ''; lastExpanded = null; arm.seen(null, now); return; }
+    if (!stackOn() && !detail) { root.innerHTML = ''; lastExpanded = null; arm.seen(null, now); syncSide(); return; }
     const tpl = doc.createElement('template');
     tpl.innerHTML = renderStack(stackOn() ? stack : null, now, { leftMs: cards.leftMs(now), arming }) +
       (detail ? renderPanel(detail, now) : '');
@@ -290,7 +292,9 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
     const sd = detail?.side;
     const id = detail?.id != null ? String(detail.id) : null;
     const input = sd?.tab === 'side' && id ? askBox() : null;
-    if (shouldRelease({ askFor, id, input })) typingDone();
+    const replaced = !!input && input !== askEl;
+    askEl = input;
+    if (shouldRelease({ askFor, id, input, replaced, active: doc.activeElement })) typingDone();
     if (input && inputFor !== id) { // the keyed patch can hand one input element to the next agent: never carry text over
       input.value = sideDrafts.get(id) ?? '';
       if (inputFor !== null) input.blur?.();
