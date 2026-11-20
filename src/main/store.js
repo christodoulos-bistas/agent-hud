@@ -12,7 +12,7 @@ const isSynthetic = (ev) => String((ev.raw || {}).prompt || '').trim().startsWit
 export { activityLine } from './steps.js';
 
 
-export function createStore({ engine, queue, now = Date.now, stepLog, plans = createPlanNotices(), onError = (e) => console.error(e), canOpen = () => true }) {
+export function createStore({ engine, queue, now = Date.now, stepLog, plans = createPlanNotices(), onError = (e) => console.error(e), canOpen = () => true, side = null }) {
   // Whether "open window" can focus this session (main knows where code.cmd is); unknown session → false.
   const openable = (sess) => { try { return !!sess && !!canOpen(sess); } catch { return false; } };
   let sessions = [];
@@ -32,6 +32,7 @@ export function createStore({ engine, queue, now = Date.now, stepLog, plans = cr
     const s = st(ev.sessionId);
     s.connected = true; // its hooks reach the HUD (a session known only from its file never sets this)
     if (ev.cwd) s.cwd = ev.cwd;
+    if (typeof (ev.raw || {}).transcript_path === 'string') s.transcript = ev.raw.transcript_path;
     const e = ev.event;
     // Subagent events share the parent's session_id and carry agent_id (SPIKES.md).
     const agentId = (ev.raw || {}).agent_id ?? null;
@@ -153,6 +154,7 @@ export function createStore({ engine, queue, now = Date.now, stepLog, plans = cr
         lastActivityAt: s.lastActivityAt,
         recap: stage === 'turn' ? recapOf(view.recap, view.taskAt) : null,
         tuck,
+        sideDot: (sess.source ?? 'claude') === 'claude' && !!side?.dot(id),
       };
     });
     return agents;
@@ -216,8 +218,11 @@ export function createStore({ engine, queue, now = Date.now, stepLog, plans = cr
       handedBack: a.handedBack, hasCard: queue.list().some((it) => it.sessionId === id) || !!plans.get(id), canOpen: a.canOpen,
       lastMessage: a.stage === 'turn' ? (view.lastMessage ?? null) : null,
       recap: a.stage === 'turn' ? recapOf(view.recap, view.taskAt) : null,
+      side: (sess.source ?? 'claude') === 'claude' && side ? side.view(id) : null,
     };
   }
+
+  const transcriptOf = (id) => state.get(id)?.transcript ?? null;
 
   function stageKey() {
     return computeAgents(now()).map((a) => `${a.id}:${a.stage}:${a.stuck ? a.stuck.reason : ''}${a.tuck ? `:${a.tuck}` : ''}`).join('|');
@@ -232,5 +237,5 @@ export function createStore({ engine, queue, now = Date.now, stepLog, plans = cr
     return true;
   }
 
-  return { onEvent, setSessions, setReplyOptIn, wantsReply, replySent, permissionDenied, hide, snapshot, cardById, detail, stageKey, dismissNotice };
+  return { onEvent, setSessions, setReplyOptIn, wantsReply, replySent, permissionDenied, hide, snapshot, cardById, detail, stageKey, dismissNotice, transcriptOf };
 }

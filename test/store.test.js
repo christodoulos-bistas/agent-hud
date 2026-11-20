@@ -770,3 +770,22 @@ test('plan notice: stageKey changes when a plan shows (the push sees it)', () =>
   assert.notEqual(store.stageKey(), before);
   assert.match(store.stageKey(), /s1:needs/);
 });
+
+test('side: sideDot on Claude agents only; detail.side for Claude, null for Codex; transcriptOf from hooks', () => {
+  let t = 1000; const engine = createClassEngine(); const queue = createQueue({ now: () => t, setTimer: () => 0, clearTimer: () => {} });
+  const side = { dot: (id) => id === 's1' || id === 'c1', view: (id) => ({ tab: 'now', id }) };
+  const store = createStore({ engine, queue, now: () => t, side });
+  store.setSessions([S('s1'), S('c1', { source: 'codex' })]);
+  assert.equal(store.transcriptOf('s1'), null);
+  store.onEvent(ev('s1', 'UserPromptSubmit', 1, { raw: { transcript_path: 'C:\t\s1.jsonl' } }));
+  const agents = store.snapshot().agents;
+  assert.equal(agents.find((a) => a.id === 's1').sideDot, true);
+  assert.equal(agents.find((a) => a.id === 'c1').sideDot, false);
+  assert.equal(store.detail('s1').side.id, 's1');
+  assert.equal(store.detail('c1').side, null);
+  assert.equal(store.transcriptOf('s1'), 'C:\t\s1.jsonl');
+  assert.equal(store.transcriptOf('c1'), null);
+  const bare = setup(); bare.store.setSessions([S('s1')]);
+  assert.equal(bare.store.detail('s1').side, null);
+  assert.equal(bare.store.snapshot().agents[0].sideDot, false);
+});
