@@ -540,3 +540,14 @@ test('the collapsed header keeps the sound button beside the expand button', () 
   assert.match(html, /class="snd" data-act="sound" aria-pressed="false"/);
   assert.ok(html.indexOf('class="snd"') < html.indexOf('data-act="collapse"'));
 });
+
+test('renderRow: ? on Claude rows (not tucked, not Codex), escaped label', () => {
+  assert.match(renderRow(agent({ display: XSS })), /class="side-q" data-act="side" data-session="s1" title="Ask on the side" aria-label="Ask &lt;img/);
+  assert.ok(!renderRow(agent({ source: 'codex' })).includes('side-q'));
+  assert.ok(!renderRow(agent(), { tucked: true }).includes('side-q'));
+});
+test('renderRow: the dot only when sideDot, inside the mark', () => {
+  assert.match(renderRow(agent({ sideDot: true })), /<span class="mark"><span class="side-dot"/);
+  assert.ok(!renderRow(agent()).includes('side-dot'));
+  assert.ok(!renderRow(agent({ source: 'codex', sideDot: true })).includes('side-dot'));
+});

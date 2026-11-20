@@ -190,6 +190,11 @@ export function renderRow(agent, { ask, selected = false, tucked = false, highli
   // ✕ takes the chat off the HUD until it asks or starts a new turn; never on a row that is asking.
   const hide = mood === 'needs' || tucked ? ''
     : `<button type="button" class="hide" data-act="hide" data-session="${id}" title="Hide from the HUD" aria-label="Hide ${esc(a.display)} from the HUD">✕</button>`;
+  // Ask on the side (Claude chats only; not in the tucked list), and the dot for an answer not yet seen.
+  const sideQ = source === 'claude' && !tucked
+    ? `<button type="button" class="side-q" data-act="side" data-session="${id}" title="Ask on the side" aria-label="Ask ${esc(a.display)} on the side">?</button>`
+    : '';
+  const sideDot = source === 'claude' && a.sideDot ? '<span class="side-dot" title="A side answer is ready"></span>' : '';
   return `<div class="row ${mood}${mood === 'needs' ? ' glow-ask' : ''}${handed ? ' handed' : ''}${selected ? ' selected' : ''}${highlighted ? ' hl' : ''}${tucked ? ' tucked' : ''}" data-key="row:${id}" style="--d:${bobDelay(a.id)}">` +
     `<div class="sprite-box" data-act="select" data-session="${id}">${sprite(a.cls, source)}${fam}</div>` +
     '<div class="who">' +
@@ -197,7 +202,7 @@ export function renderRow(agent, { ask, selected = false, tucked = false, highli
       `<div class="who-d${handed ? ' handed' : ''}">${line}</div>` +
       (source === 'codex' ? '' : `<button type="button" class="wait" data-act="wait" data-session="${id}" aria-pressed="${a.replyOptIn ? 'true' : 'false'}"><i></i>wait for my reply</button>`) +
     '</div>' +
-    `<span class="mark">${rowChip(a)}</span>` + hide +
+    `<span class="mark">${sideDot}${rowChip(a)}</span>` + sideQ + hide +
   '</div>';
 }
 
@@ -422,6 +427,14 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
         if (row) {
           lastOffset = rowCentre(row); lastOffsetId = String(el.dataset.session);
           call('selectAgent', el.dataset.session, lastOffset);
+        }
+        break;
+      }
+      case 'side': { // ask on the side: main selects the agent and opens its Side questions tab
+        const row = el.closest('.row');
+        if (row) {
+          lastOffset = rowCentre(row); lastOffsetId = String(el.dataset.session);
+          call('askSide', el.dataset.session, lastOffset);
         }
         break;
       }

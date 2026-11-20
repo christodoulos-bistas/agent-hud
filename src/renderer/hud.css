@@ -94,6 +94,11 @@ button.who-n:hover { text-decoration: underline dotted rgba(240, 233, 218, .5); 
 .row .hide { position: absolute; top: 3px; right: 4px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--sage); font-size: .7rem; line-height: 18px; text-align: center; cursor: pointer; opacity: 0; }
 .row:hover .hide, .row:focus-within .hide { opacity: .75; }
 .row .hide:hover, .row .hide:focus-visible { opacity: 1; color: var(--parch); background: rgba(240, 233, 218, .1); }
+/* Ask on the side: the ? left of the ✕ (Claude rows), and the dot for a side answer not yet seen. No animation. */
+.row .side-q { position: absolute; top: 3px; right: 24px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: rgba(79, 103, 135, .35); color: #cfd6e6; font: 700 .72rem/18px 'IM Fell English', Georgia, serif; text-align: center; cursor: pointer; opacity: 0; }
+.row:hover .side-q, .row:focus-within .side-q { opacity: .75; }
+.row .side-q:hover, .row .side-q:focus-visible { opacity: 1; }
+.mark .side-dot { display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 50%; background: #8fa6c6; box-shadow: 0 0 6px rgba(143, 166, 198, .8); }
 .row.tucked { opacity: .55; }
 .row.tucked:hover, .row.tucked.selected { opacity: .85; }
 .tuck-line { display: block; width: 100%; margin: 0; padding: 5px 12px 7px; border: 0; border-top: 1px solid rgba(240, 233, 218, .05); background: none; color: var(--sage); font: italic .72rem/1.2 'Alegreya Sans', system-ui, sans-serif; text-align: center; white-space: nowrap; cursor: pointer; }

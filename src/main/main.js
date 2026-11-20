@@ -1,6 +1,6 @@
 // Agent HUD main process: the hook server, the session poll and the store, wired to an
 // always-on-top window docked bottom-right and a tray menu.
-import { app, BrowserWindow, Tray, Menu, ipcMain, screen, dialog, nativeImage, shell } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, screen, dialog, nativeImage, shell, clipboard } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -18,6 +18,10 @@ import { createHookServer } from './hook-server.js';
 import { readSessionFiles, listSessions } from './sessions.js';
 import { createCodexSessions, readRolloutMeta } from './codex-sessions.js';
 import { createStore } from './store.js';
+import { askSide, findClaudeExe, childEnv, transcriptPathFor, modelFromTranscriptTail } from './side-ask.js';
+import { createSideLog } from './side-log.js';
+import { createSideQuestions } from './side-questions.js';
+import { createVscodeReader, VSCODE_STORAGE } from './vscode-threads.js';
 import { openCommandFor, resolveCodeCmd, canOpen, CODEX_ACTIVATE, chatLinkFor, createChatOpener, VSCODE_TITLES_PS } from './focus.js';
 import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, panelShows, createThrottle, createInteractiveCheck, loadConfig, saveConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, devOverrides, planFileOk } from './wiring.js';
 
@@ -36,6 +40,8 @@ const WIDTH = 272;
 const COLLAPSED_WIDTH = 72;
 const QUIT_GRACE_MS = 3000;
 const RELOAD_MS = 1000;
+const VSCODE_MS = 30000; // VS Code's /btw threads: read every 30 s (mtime-gated, read-only)
+const TRANSCRIPT_TAIL = 256 * 1024; // a side question's model comes from the transcript's last 256 KB
 const SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions');
 // Dev override (R20): AGENT_HUD_SETTINGS_PATH points install/uninstall at a scratch file. A dev build
 // without it never touches the user's settings (I1): no first-run offer, install/remove refuse.
@@ -114,7 +120,19 @@ const CODE_CMD = resolveCodeCmd({
   exists: (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } },
 });
 const OPEN_OPTS = { codeCmd: CODE_CMD, codexActivate: CODEX_ACTIVATE };
-const store = createStore({ engine, queue, onError: (err) => log('step log', err), canOpen: (s) => canOpen(s, OPEN_OPTS) });
+// Side questions: asked of a Claude chat through its own CLI (side-ask.js), one log per chat under
+// userData (the dev override above has already run). push/pushDetail are defined below; onChange only
+// runs later, from an answer, an import or a dot that went.
+const SIDE_DIR = path.join(app.getPath('userData'), 'side-questions');
+const sideLog = createSideLog({ dir: SIDE_DIR });
+const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
+// The CLI is looked up per ask (cheap), so an install made after the HUD started is picked up.
+function ask(opts) {
+  const claudeExe = findClaudeExe({ env: process.env, home: os.homedir(), exists: isFile });
+  return askSide({ ...opts, exe: claudeExe ? { file: claudeExe } : null, env: childEnv(process.env) });
+}
+const side = createSideQuestions({ log: sideLog, ask, onChange: () => { push(); pushDetail(); }, onError: (e) => log('side', e) });
+const store = createStore({ engine, queue, onError: (err) => log('step log', err), canOpen: (s) => canOpen(s, OPEN_OPTS), side });
 
 // ---------------------------------------------------------------- snapshot
 
@@ -154,6 +172,8 @@ queue.onChange(push);
 const pushDetailNow = guarded('detail', () => {
   if (!panelWin || panelWin.isDestroyed()) return;
   const { detailId } = panelNow(store.snapshot());
+  // The chat whose Side questions tab is on screen: its answers arrive seen (no dot).
+  side.setViewing(detailId && side.tab(detailId) === 'side' && panelWin.isVisible() ? detailId : null);
   const d = detailId ? store.detail(detailId) : null; // null empties the details (stack only, or hidden)
   const json = JSON.stringify(d);
   if (json === sentDetail) return;
@@ -214,6 +234,62 @@ async function poll() {
 
 function sessionById(id) {
   return merged().find((s) => s.sessionId === id) ?? readSessionFiles(SESSIONS_DIR).find((s) => s.sessionId === id) ?? null;
+}
+
+// ---------------------------------------------------------------- side questions
+
+// The id of a Claude chat the store knows, else null: Codex chats and unknown ids are never asked.
+function sideSession(id) {
+  const sid = id == null ? '' : String(id);
+  if (!sid) return null;
+  const d = store.detail(sid);
+  if (!d || d.source === 'codex' || sessionById(sid)?.source === 'codex') return null;
+  return sid;
+}
+
+// The last `bytes` of a file as text; null when it can't be read (a missing transcript).
+function readTail(file, bytes) {
+  let fd = null;
+  try {
+    fd = fs.openSync(file, 'r');
+    const size = fs.fstatSync(fd).size;
+    const len = Math.min(size, bytes);
+    const buf = Buffer.alloc(len);
+    const n = fs.readSync(fd, buf, 0, len, size - len);
+    return buf.toString('utf8', 0, n);
+  } catch { return null; } finally {
+    if (fd != null) try { fs.closeSync(fd); } catch { /* closed */ }
+  }
+}
+
+// What a side question needs to know about its chat: where it runs, the model it last used, and the
+// step it is on while it is busy (the busy note).
+function ctxFor(id) {
+  const cwd = sessionById(id)?.cwd;
+  const file = store.transcriptOf(id) ?? (cwd ? transcriptPathFor(os.homedir(), cwd, id) : null);
+  const tail = file ? readTail(file, TRANSCRIPT_TAIL) : null;
+  const model = tail ? modelFromTranscriptTail(tail) : null;
+  const d = store.detail(id);
+  const current = d && (d.stage === 'thinking' || d.stage === 'working') ? (d.current ?? null) : null;
+  return { cwd, model, current };
+}
+
+// VS Code's /btw threads into the logs. Never overlapping; pass() never rejects, the rest is caught.
+const vscodeReader = createVscodeReader({ root: VSCODE_STORAGE(process.env.APPDATA || app.getPath('appData')) });
+let readingVscode = false;
+async function readVscode() {
+  if (readingVscode) return;
+  readingVscode = true;
+  try {
+    const { items, healthy } = await vscodeReader.pass();
+    side.importVscode(items);
+    side.setHealthy(healthy);
+  } catch (err) { log('vscode side questions', err); } finally { readingVscode = false; }
+}
+
+function openSideLogs() {
+  try { fs.mkdirSync(SIDE_DIR, { recursive: true }); } catch (err) { log('side logs', err); }
+  shell.openPath(SIDE_DIR).then((err) => { if (err) log('side logs', err); }, (err) => log('side logs', err));
 }
 
 // ---------------------------------------------------------------- window
@@ -577,6 +653,15 @@ fromHud('hud:selectAgent', (id, rowY) => {
   if (Number.isFinite(y)) anchorRow = { id: sid, rowY: y };
   apply(userSelect(pick, pick.selected?.id === sid ? null : { id: sid, rowY: y }, store.snapshot().cards));
 });
+// The row's ?: select the agent (never toggling it closed) with its Side questions tab and ask box focused.
+fromHud('hud:askSide', (id, rowY) => {
+  const sid = sideSession(id);
+  if (!sid) return;
+  const y = Number(rowY);
+  if (Number.isFinite(y)) anchorRow = { id: sid, rowY: y };
+  side.requestFocus(sid); // no onChange: apply() below pushes the detail
+  apply(userSelect(pick, { id: sid, rowY: y }, store.snapshot().cards));
+});
 // The anchor row (the snapshot's `anchor`) moved inside the HUD (rows above it came or went), the
 // anchor moved to a row main didn't know, or the HUD collapsed (its face, then): the panel and its
 // arrow follow.
@@ -635,6 +720,27 @@ fromPanel('panel:openPlan', (cardId) => {
 });
 // A plan card's "Dismiss": Esc in the chat sends no event, so the user clears the notice here.
 fromPanel('panel:dismissPlan', (cardId) => { if (store.dismissNotice(String(cardId))) push(); });
+// The Side questions tab (Claude chats only): switch tab, ask, copy an answer, ask a failed one again.
+fromPanel('panel:setTab', (id, tab) => {
+  const sid = sideSession(id);
+  if (!sid) return;
+  side.setTab(sid, tab); // no onChange: push the detail (and the viewing) here
+  pushDetail();
+});
+fromPanel('panel:askSide', (id, text) => {
+  const sid = sideSession(id);
+  if (sid) side.start(sid, text, ctxFor(sid));
+});
+fromPanel('panel:copySide', (id, entryId) => {
+  const sid = sideSession(id);
+  if (!sid) return;
+  const entry = side.view(sid).entries.find((e) => e.id === String(entryId));
+  if (entry && typeof entry.response === 'string' && entry.response) clipboard.writeText(entry.response);
+});
+fromPanel('panel:retrySide', (id, entryId) => {
+  const sid = sideSession(id);
+  if (sid) side.retry(sid, String(entryId), ctxFor(sid));
+});
 fromPanel('panel:answer', answerCard);
 fromPanel('panel:release', releaseCard);
 fromPanel('panel:setInteractive', (on) => setInteractiveOf(panelWin, !!on));
@@ -846,6 +952,7 @@ function refreshMenu() {
     { label: 'Remove hooks', click: doUninstall },
     { type: 'separator' },
     soundsMenu(),
+    { label: 'Open side-question logs', click: openSideLogs },
     { label: 'Start with Windows', type: 'checkbox', checked: atLogin, click: (mi) => { app.setLoginItemSettings({ openAtLogin: mi.checked, ...loginOptions() }); refreshMenu(); } },
     { type: 'separator' },
     { label: 'Quit', click: () => quit() },
@@ -922,6 +1029,7 @@ async function firstRun() {
 
 function quit() {
   if (!quitting) {
+    try { side.stopAll(); } catch (err) { log('side', err); } // running side questions end; nothing is logged
     pick = STACK_INIT; // nothing selected or expanded: the panel shows nothing while quitting
     try { if (panelWin && !panelWin.isDestroyed()) panelWin.destroy(); } catch (err) { log('panel', err); }
     panelWin = null;
@@ -949,6 +1057,8 @@ async function start() {
   await poll();
   setInterval(poll, POLL_MS);
   setInterval(stageTick, STAGE_TICK_MS);
+  readVscode();
+  setInterval(readVscode, VSCODE_MS);
   setInterval(refreshMenu, 30000); // hook status lines follow edits made outside the HUD (e.g. approval in Codex Settings → Hooks)
   await startServer();
   await firstRun();
