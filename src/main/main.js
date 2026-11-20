@@ -154,7 +154,7 @@ function anchorFor(snap, shows) {
 // Run from timers and IPC, so guarded (I4): a throw is logged, never an error box.
 const pushNow = guarded('push', () => {
   if (!win || win.isDestroyed()) return;
-  const snap = store.snapshot();
+  let snap = store.snapshot();
   // An expanded card that went folds (an auto selection goes back to what was open); a card the user
   // hasn't seen brings a hidden stack back.
   pick = stackUpdate(pick, snap.cards);
@@ -162,6 +162,9 @@ const pushNow = guarded('push', () => {
   // One an expanded card made stays until the card goes (its agent can be missing from the list for a
   // poll or two; the panel shows no details meanwhile).
   if (pick.selected && !pick.auto && !panelNow(snap).detailId) pick = userSelect(pick, null, snap.cards);
+  // v1.7: the chat whose details are open has been seen: its finished turn doesn't stay lit.
+  const shown = panelNow(snap).detailId;
+  if (shown != null && store.markSeen(String(shown))) snap = store.snapshot();
   // The hovered bubble went: so does its row's highlight.
   if (highlight != null && !snap.cards.some((c) => String(c.sessionId) === highlight)) highlight = null;
   const anchor = anchorFor(snap, panelNow(snap));

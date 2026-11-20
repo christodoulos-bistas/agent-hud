@@ -550,3 +550,29 @@ For each host (CLI `claude` in a terminal, VS Code panel, Claude desktop app):
 | CLI | | | | | |
 | VS Code panel | | | | | |
 | Claude desktop | | | | | |
+
+## Live check - "Your turn" glow (v1.7)
+
+RUN 2026-11-20 with an isolated dev HUD (temp userData, port 47911, `--remote-debugging-port=9333`) and one
+long-lived headless Claude session (haiku, stream-json) in `C:\Consortis_projects\agent-hud-spike`. The
+chat's row/face classes were read over CDP at +400 ms, +1.2 s and +5 s after each turn's result. Clicks went
+through the row's name button.
+
+Why: before v1.7 the finish flash was added after `patch()` and lost whenever the row was redrawn within
+~2.4 s (seen live: a background helper flipped the row to Working 150 ms after the Stop). Faces had no finish
+style at all, and a "Your turn" row had no highlight once the 2.4 s flash ended.
+
+| Case | +400 ms | +1.2 s | +5 s | Result |
+| --- | --- | --- | --- | --- |
+| (a) turn ends, panel closed | `done unseen glow-done` | `done unseen glow-done` | `done unseen` | flash, then stays lit ✓ |
+| (b) click the row (details open) | | | `done selected` | glow goes ✓ |
+| (c) turn ends with its details open | `done selected glow-done` | `done selected glow-done` | `done selected` | flash, not lit ✓ |
+| (d) collapsed, turn ends | `face done unseen glow-done` | `face done unseen glow-done` | `face done unseen` | face flashes, stays lit ✓ |
+| (e) helper turn (row redrawn around the Stop) | `working` | `done unseen glow-done` | `done unseen` | flash plays, nothing stuck ✓ |
+
+Look: the unseen ring was first `.35/.15` alpha, which read as faint next to "Needs you" in a screenshot. It
+was raised to `.5/.22` (faces `.26`). It's still clearly below the gold question glow, which also has the rail
+and the breathe.
+
+Still to try by hand: the installed build in the CLI, VS Code and the desktop app; reduced motion on (the
+flash shows static for 3 s, then the steady glow).
