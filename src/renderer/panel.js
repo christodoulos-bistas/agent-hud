@@ -177,6 +177,9 @@ export function panelAction(act, detail, ds = {}) {
   if (act === 'hide-stack') return { call: 'hideStack' };
   if (act === 'close') return { call: 'close', id };
   if (act === 'open') return { call: 'openWindow', id };
+  if (act === 'tab') return { call: 'setTab', id, tab: ds?.tab != null ? String(ds.tab) : null };
+  if (act === 'side-copy') return { call: 'copySide', id, entry: ds?.entry != null ? String(ds.entry) : null };
+  if (act === 'side-retry') return { call: 'retrySide', id, entry: ds?.entry != null ? String(ds.entry) : null };
   return null;
 }
 
@@ -216,6 +219,10 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   let timer = null;
   let lastExpanded = null;
   let hovered = null;
+  const sideDrafts = new Map(); // session id -> the side-question text typed and not yet asked
+  const focusSeen = new Map(); // session id -> the last side.focusAsk handled
+  let threadSig = null; // what the thread showed at the last render: chat, entry count, asking
+  let askFor = null; // the session whose ask box holds the keyboard (null: not typing there)
   const arm = createStackArming(); // bubbles and the stack's ✕ arm like a card's buttons (I4)
 
   // The panel takes the keyboard focus only while the user types into a card's text box, and gives it
@@ -261,12 +268,56 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
     arm.seen(stackOn() ? stack : null, now);
     cards.refresh();
     cards.tick(now);
+    syncSide();
     const id = open ? String(open.id) : null;
     if (id && id !== lastExpanded) {
       [...root.querySelectorAll('.bub')].find((el) => el.dataset.card === id)?.closest('.bub-wrap')?.scrollIntoView?.({ block: 'nearest' });
     }
     lastExpanded = id;
   };
+  // The Side questions tab's DOM half: the draft back into a replaced input, focus on request, the thread
+  // scrolled to its newest entry. Leaving the tab or the chat while the box has the keyboard gives it back.
+  const askBox = () => root.querySelector('[data-side-ask]');
+  const typingDone = () => { askFor = null; setInteractive(false); };
+  const syncSide = () => {
+    const sd = detail?.side;
+    const id = detail?.id != null ? String(detail.id) : null;
+    const input = sd?.tab === 'side' && id ? askBox() : null;
+    if (askFor && (!input || askFor !== id)) typingDone();
+    if (input && !input.disabled && !input.value && sideDrafts.get(id)) input.value = sideDrafts.get(id);
+    if (input && Number(sd.focusAsk) > (focusSeen.get(id) ?? 0)) {
+      focusSeen.set(id, Number(sd.focusAsk));
+      if (!input.disabled) { input.focus?.(); askFor = id; setInteractive(true); }
+    }
+    const sig = input ? `${id}|${Number(sd.entries?.length) || 0}|${sd.asking ? 1 : 0}` : null;
+    if (sig !== threadSig) {
+      const thread = root.querySelector('.thread');
+      if (thread) thread.scrollTop = thread.scrollHeight;
+    }
+    threadSig = sig;
+  };
+  const sendAsk = () => {
+    const input = askBox();
+    const text = (input?.value ?? '').trim();
+    if (!input || input.disabled || !text || detail?.id == null) return;
+    call('askSide', String(detail.id), text);
+    sideDrafts.delete(String(detail.id));
+    input.value = '';
+    input.blur?.();
+    typingDone();
+  };
+  root.addEventListener('pointerdown', (e) => {
+    if (e.target.closest?.('[data-side-ask]') && detail?.id != null) { askFor = String(detail.id); setInteractive(true); }
+  });
+  root.addEventListener('input', (e) => {
+    if (!e.target.matches?.('[data-side-ask]') || detail?.id == null) return;
+    if (e.target.value) sideDrafts.set(String(detail.id), e.target.value); else sideDrafts.delete(String(detail.id));
+  });
+  root.addEventListener('keydown', (e) => {
+    if (!e.target.matches?.('[data-side-ask]')) return;
+    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault?.(); sendAsk(); }
+    else if (e.key === 'Escape') { e.target.blur?.(); typingDone(); }
+  });
   const swap = (el, html) => { if (el && html && el.outerHTML !== html) el.outerHTML = html; };
   const tick = () => {
     if (!detail && !stackOn()) return;
@@ -302,8 +353,9 @@ export function bootPanel(api = globalThis.panel, doc = globalThis.document) {
   root.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');
     if (!el || !root.contains(el)) return;
+    if (el.dataset.act === 'side-ask') { sendAsk(); return; }
     const a = panelAction(el.dataset.act, detail, el.dataset);
-    if (a && arm.allowed(el.dataset.act, el.dataset, Date.now())) call(a.call, a.id);
+    if (a && arm.allowed(el.dataset.act, el.dataset, Date.now())) call(a.call, a.id, a.tab ?? a.entry);
   });
 
   let lastHeight = -1;

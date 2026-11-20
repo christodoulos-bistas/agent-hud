@@ -38,5 +38,10 @@ contextBridge.exposeInMainWorld('panel', {
   // The bubble stack: expand (or fold) a bubble, the pointer over one (null: off every bubble), hide it.
   expandCard: (id) => ipcRenderer.send('panel:expandCard', String(id)),
   hoverCard: (id) => ipcRenderer.send('panel:hoverCard', id == null ? null : String(id)),
+  // The Side questions tab: switch tab, ask, copy an answer, ask an entry again (all by session id).
+  setTab: (id, tab) => ipcRenderer.send('panel:setTab', String(id), String(tab)),
+  askSide: (id, text) => ipcRenderer.send('panel:askSide', String(id), String(text)),
+  copySide: (id, entryId) => ipcRenderer.send('panel:copySide', String(id), String(entryId)),
+  retrySide: (id, entryId) => ipcRenderer.send('panel:retrySide', String(id), String(entryId)),
   hideStack: () => ipcRenderer.send('panel:hideStack'),
 });

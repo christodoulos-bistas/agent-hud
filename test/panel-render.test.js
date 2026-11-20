@@ -373,3 +373,10 @@ test('side tab keys: tabs, side body, ask box, entries, pending', () => {
   const h = renderPanel(detail({ side: side({ asking: { question: 'q?', at: NOW } }) }), NOW);
   for (const k of ['tabs', 'side', 'side-ask', 'qa:v1', 'qa:h1', 'qa:pending']) assert.ok(h.includes('data-key="' + k + '"'), k);
 });
+
+test('panelAction: tab, copy and retry name the agent on show', () => {
+  const d = { id: 's1' };
+  assert.deepEqual(panelAction('tab', d, { tab: 'side' }), { call: 'setTab', id: 's1', tab: 'side' });
+  assert.deepEqual(panelAction('side-copy', d, { entry: 'h1' }), { call: 'copySide', id: 's1', entry: 'h1' });
+  assert.deepEqual(panelAction('side-retry', d, { entry: 'h1' }), { call: 'retrySide', id: 's1', entry: 'h1' });
+});
