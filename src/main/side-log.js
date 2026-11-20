@@ -70,9 +70,19 @@ export function createSideLog({
     const entries = load(sessionId);
     const idx = entries.findIndex((e) => e.id === entryId);
     if (idx < 0) return false;
-    entries.splice(idx, 1);
+    const next = entries.filter((e) => e.id !== entryId);
+    // Atomic rewrite; throws on I/O failure (cache left untouched in that case).
+    const file = fileOf(sessionId);
+    const tmp = file + '.tmp';
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(fileOf(sessionId), entries.map((e) => JSON.stringify(e) + '\n').join(''));
+    try {
+      fs.writeFileSync(tmp, next.map((e) => JSON.stringify(e) + '\n').join(''));
+      fs.renameSync(tmp, file);
+    } catch (err) {
+      try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+      throw err;
+    }
+    cache.set(sessionId, next);
     return true;
   }
 

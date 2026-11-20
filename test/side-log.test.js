@@ -109,3 +109,24 @@ test('a corrupt line is skipped, the rest still listed', () => {
   const log = createSideLog({ dir });
   assert.deepEqual(log.list(SID).map((e) => e.question), ['one', 'two']);
 });
+
+test('remove throws on I/O failure and the cache keeps the entry', () => {
+  const dir = tmp();
+  const failing = { ...fs, renameSync() { throw new Error('EBUSY'); } };
+  const log = createSideLog({ dir, fs: failing });
+  const a = log.add(SID, { source: 'hud', question: 'a', response: 'ra' });
+  assert.throws(() => log.remove(SID, a.id), /EBUSY/);
+  assert.deepEqual(log.list(SID).map((e) => e.id), [a.id]);
+  assert.deepEqual(createSideLog({ dir }).list(SID).map((e) => e.id), [a.id]);
+  assert.deepEqual(fs.readdirSync(dir), [SID + '.jsonl']);
+});
+
+test('successful remove updates the cache and leaves no .tmp file', () => {
+  const dir = tmp();
+  const log = createSideLog({ dir });
+  const a = log.add(SID, { source: 'hud', question: 'a', response: 'ra' });
+  log.add(SID, { source: 'hud', question: 'b', response: 'rb' });
+  assert.equal(log.remove(SID, a.id), true);
+  assert.deepEqual(log.list(SID).map((e) => e.question), ['b']);
+  assert.deepEqual(fs.readdirSync(dir), [SID + '.jsonl']);
+});
