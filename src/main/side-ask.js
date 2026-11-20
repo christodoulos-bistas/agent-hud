@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { SIDE_ENTRYPOINT } from './sessions.js';
 import { fmtDuration } from '../renderer/format.js';
@@ -77,4 +78,73 @@ export function modelFromTranscriptTail(text) {
     }
   }
   return null;
+}
+
+export function askSide({ exe, sessionId, cwd, question, history = [], model = null, env, spawnFn = spawn,
+  timeoutMs = 300000, initFallbackMs = 2000, exitGraceMs = 5000, signal } = {}) {
+  if (!exe) return Promise.resolve({ error: SIDE_ERRORS.notFound });
+  return new Promise((resolve) => {
+    let settled = false;
+    let asked = false;
+    let exited = false;
+    let child = null;
+    let buf = '';
+    const timers = [];
+    const kill = () => { try { if (child && !exited) child.kill(); } catch { /* already gone */ } };
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      timers.forEach(clearTimeout);
+      if (signal) signal.removeEventListener('abort', onAbort);
+      try { child && child.stdin.end(); } catch { /* closed */ }
+      if (!exited) {
+        const t = setTimeout(kill, exitGraceMs);
+        if (t.unref) t.unref();
+        if (child) child.once('exit', () => clearTimeout(t));
+      }
+      resolve(result);
+    };
+    const onAbort = () => { kill(); settle({ error: 'cancelled' }); };
+
+    if (signal) {
+      if (signal.aborted) return resolve({ error: 'cancelled' });
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    const lines = requestLines({ question, history });
+    try {
+      child = spawnFn(exe.file, [...(exe.args || []), ...sideArgs({ sessionId, model })],
+        { cwd, env, windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+    } catch (err) {
+      return settle({ error: SIDE_ERRORS.notFound, detail: err.message });
+    }
+    const write = (s) => { try { child.stdin.write(s); } catch { /* child gone */ } };
+    const ask = () => { if (asked || settled) return; asked = true; write(lines.ask); };
+
+    child.on('error', (err) => { exited = true; settle({ error: SIDE_ERRORS.notFound, detail: err.message }); });
+    if (child.stdin) child.stdin.on('error', () => {});
+    child.on('exit', (code) => {
+      exited = true;
+      settle({ error: SIDE_ERRORS.refused, detail: `exited ${code}` });
+    });
+    child.stdout.on('data', (chunk) => {
+      buf += chunk.toString('utf8');
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        const reply = parseReply(line);
+        if (reply) return settle(reply);
+        try {
+          const o = JSON.parse(line);
+          if (o && o.type === 'control_response' && o.response && o.response.request_id === 'init') ask();
+        } catch { /* noise */ }
+      }
+    });
+
+    timers.push(setTimeout(ask, initFallbackMs));
+    timers.push(setTimeout(() => { kill(); settle({ error: SIDE_ERRORS.timeout }); }, timeoutMs));
+    write(lines.init);
+  });
 }
