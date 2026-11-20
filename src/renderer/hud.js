@@ -170,6 +170,13 @@ export function newlyFinished(agents, prev = null) {
   return prev == null ? { now: r.now, fresh: new Set() } : r;
 }
 
+// v1.7: the chats still mid-flash: the ones flashing before that are still in "Your turn", plus the ones
+// that just got there. The DOM pass re-adds the flash to their rows after every patch, so a row redrawn
+// mid-flash (its HTML changed) keeps it.
+export function keepFlashing(prev, fresh, now) {
+  return new Set([...[...prev].filter((id) => now.has(id)), ...fresh]);
+}
+
 // `tucked` (v1.3): a row in the unfolded "tucked away" list, dimmed and without the ✕.
 export function renderRow(agent, { ask, selected = false, tucked = false, highlighted = false } = {}) {
   const a = agent || {};
@@ -195,7 +202,9 @@ export function renderRow(agent, { ask, selected = false, tucked = false, highli
     ? `<button type="button" class="side-q" data-act="side" data-session="${id}" title="Ask on the side" aria-label="Ask ${esc(a.display)} on the side">?</button>`
     : '';
   const sideDot = source === 'claude' && a.sideDot ? '<span class="side-dot" title="A side answer is ready"></span>' : '';
-  return `<div class="row ${mood}${mood === 'needs' ? ' glow-ask' : ''}${handed ? ' handed' : ''}${selected ? ' selected' : ''}${highlighted ? ' hl' : ''}${tucked ? ' tucked' : ''}" data-key="row:${id}" style="--d:${bobDelay(a.id)}">` +
+  // v1.7: a finished turn the user hasn't seen stays softly lit (never a tucked row).
+  const unseen = !!a.unseen && !tucked && inTurn(a);
+  return `<div class="row ${mood}${mood === 'needs' ? ' glow-ask' : ''}${handed ? ' handed' : ''}${selected ? ' selected' : ''}${highlighted ? ' hl' : ''}${tucked ? ' tucked' : ''}${unseen ? ' unseen' : ''}" data-key="row:${id}" style="--d:${bobDelay(a.id)}">` +
     `<div class="sprite-box" data-act="select" data-session="${id}">${sprite(a.cls, source)}${fam}</div>` +
     '<div class="who">' +
       `<button type="button" class="who-n" data-act="select" data-session="${id}" aria-pressed="${selected ? 'true' : 'false'}" title="Show details">${esc(a.display)}</button>` +
@@ -212,7 +221,8 @@ function face(a, cards = []) {
   // A needs face whose question is held here reopens the bubble stack; any other face expands the HUD
   // (a question handed back, or a native prompt, has no bubble to show: I3).
   const ask = mood === 'needs' && cards.some((c) => sessionOf(c) === String(a.id));
-  return `<button type="button" class="face ${mood}" data-key="face:${esc(a.id)}" data-act="${ask ? 'ask' : 'expand'}" style="--d:${bobDelay(a.id)}" ` +
+  const unseen = !!a.unseen && inTurn(a) ? ' unseen' : '';
+  return `<button type="button" class="face ${mood}${unseen}" data-key="face:${esc(a.id)}" data-act="${ask ? 'ask' : 'expand'}" style="--d:${bobDelay(a.id)}" ` +
     `title="${esc(a.display)}" aria-label="${esc(a.display)}, ${mood}">` +
     `<span class="sprite-box">${sprite(a.cls, sourceOf(a))}${mood === 'needs' ? SEAL() : ''}</span></button>`;
 }
@@ -319,7 +329,8 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
   const rendered = new WeakMap();
   // The HUD has no text boxes (the answer cards are in the detail panel), so it never takes the focus.
   // `turn` stays null until the first snapshot seeds it (newlyFinished).
-  const st = { snap: null, collapsed: false, needs: new Set(), turn: null, sound: null };
+  // `flash`: the chats mid-flash (keepFlashing), re-applied after every patch.
+  const st = { snap: null, collapsed: false, needs: new Set(), turn: null, flash: new Set(), sound: null };
   let player = null;
   const soundFiles = new Map(); // custom files that arrived before the player exists
 
@@ -369,17 +380,19 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
       if (fresh.has(key.slice(key.indexOf(':') + 1))) el.classList.add('call');
     }
     st.needs = needs;
-    // A row that just got to "Your turn" glows twice, then the class goes (animationend; with reduced
-    // motion nothing animates, so a timer removes it). The render before any snapshot counts nothing.
+    // A row (or face) that just got to "Your turn" glows twice, then the class goes (animationend; with
+    // reduced motion nothing animates, so a timer ends it). The flash is put back on every render until it
+    // ends, so a row redrawn mid-flash keeps it (v1.7). The render before any snapshot counts nothing.
     if (st.snap) {
       const done = newlyFinished(snap.agents, st.turn);
-      for (const id of done.fresh) {
-        const el = rowEl(id);
-        if (!el) continue;
-        el.classList.add('glow-done');
-        if (globalThis.getComputedStyle?.(el).animationName === 'none') setTimeout(() => el.classList.remove('glow-done'), 3000);
-      }
+      st.flash = keepFlashing(st.flash, done.fresh, done.now);
       st.turn = done.now;
+      for (const id of st.flash) {
+        const el = rowEl(id);
+        if (!el || el.classList.contains('glow-done')) continue;
+        el.classList.add('glow-done');
+        if (globalThis.getComputedStyle?.(el).animationName === 'none') setTimeout(() => endFlash(el), 3000);
+      }
     }
     syncRowOffset(snap);
     tick();
@@ -408,8 +421,14 @@ export function boot(api = globalThis.hud, doc = globalThis.document) {
     return p;
   }
 
+  // The flash is over: the class goes and the chat leaves the flashing set.
+  function endFlash(el) {
+    el.classList.remove('glow-done');
+    const key = el.dataset?.key || '';
+    st.flash.delete(key.slice(key.indexOf(':') + 1));
+  }
   root.addEventListener('animationend', (e) => {
-    if (e.animationName === 'done-pulse') e.target.classList.remove('glow-done');
+    if (e.animationName === 'done-pulse') endFlash(e.target);
   });
 
   root.addEventListener('click', (e) => {

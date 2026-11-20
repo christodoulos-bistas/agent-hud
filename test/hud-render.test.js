@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
-import { esc, newlyIn, newlyNeeding, newlyFinished, renderChip, chipOf, chipText, rowCentreY, renderRow, renderCard, renderParty, picksFrom, replyLeftMs, actionsArmed, clickAllowed, createRenderGate } from '../src/renderer/hud.js';
+import { esc, newlyIn, newlyNeeding, newlyFinished, keepFlashing, renderChip, chipOf, chipText, rowCentreY, renderRow, renderCard, renderParty, picksFrom, replyLeftMs, actionsArmed, clickAllowed, createRenderGate } from '../src/renderer/hud.js';
 import { GR, CLASSES, MOODS_BADGE, MOODS_ZEE, spriteSvg } from '../src/renderer/sprites.js';
 import { CLASS_IDS } from '../src/main/classes.js';
 
@@ -550,4 +550,33 @@ test('renderRow: the dot only when sideDot, inside the mark', () => {
   assert.match(renderRow(agent({ sideDot: true })), /<span class="mark"><span class="side-dot"/);
   assert.ok(!renderRow(agent()).includes('side-dot'));
   assert.ok(!renderRow(agent({ source: 'codex', sideDot: true })).includes('side-dot'));
+});
+
+test('v1.7: an unseen "Your turn" row and face carry the unseen class; tucked or not-in-turn rows do not', () => {
+  const cls = (html) => html.match(/class="row[^"]*"/)[0];
+  const lit = agent({ id: 't', mood: 'done', stage: 'turn', unseen: true });
+  assert.match(renderRow(lit), /class="row done[^"]*\bunseen\b/);
+  assert.ok(!renderRow(lit).includes('glow-done'), 'the flash stays a DOM class (I1)');
+  assert.ok(!/\bunseen\b/.test(cls(renderRow(agent({ id: 't', mood: 'done', stage: 'turn', unseen: false })))));
+  assert.ok(!/\bunseen\b/.test(cls(renderRow(lit, { tucked: true }))));
+  assert.ok(!/\bunseen\b/.test(cls(renderRow(agent({ id: 'w', mood: 'working', stage: 'working', unseen: true })))));
+  const col = renderParty({ agents: [lit], cards: [] }, { collapsed: true });
+  assert.match(col, /class="face done unseen"/);
+});
+
+test('v1.7: keepFlashing keeps mid-flash ids still in turn and adds fresh ones', () => {
+  const s = (...a) => new Set(a);
+  assert.deepEqual([...keepFlashing(s('a', 'b'), s('c'), s('a', 'c'))].sort(), ['a', 'c']);
+  assert.equal(keepFlashing(s(), s(), s()).size, 0);
+});
+
+test('v1.7 M4: the unseen glow never animates; collapsed faces get the finite finish flash', async () => {
+  const fs = await import('node:fs');
+  const css = fs.readFileSync(new URL('../src/renderer/hud.css', import.meta.url), 'utf8');
+  assert.match(css, /\.row\.unseen\s*\{[^}]*box-shadow/);
+  assert.match(css, /\.face\.unseen\s*\{/);
+  for (const m of css.matchAll(/([^{}]+)\{([^}]*animation[^}]*)\}/g)) {
+    assert.doesNotMatch(m[1], /\.unseen/, `nothing animates the unseen glow: ${m[1].trim()}`);
+  }
+  assert.match(css, /\.face\.glow-done\s*\{[^}]*animation:\s*done-pulse[^;}]*\b2\b/, 'faces flash twice, like rows');
 });
