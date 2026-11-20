@@ -5,6 +5,7 @@ import { spriteSvg } from './sprites.js';
 import { esc, renderChip, chipOf, className, createRenderGate, patch, sourceOf, srcTag } from './hud.js';
 import { renderBubble, renderCard, cardLeftMs, mountCards, actionsArmed } from './cards.js';
 import { fmtDuration } from './format.js';
+import { renderTabs, renderSideTab } from './side-tab.js';
 
 const MAX_STEPS = 5;
 const finite = (v) => v != null && Number.isFinite(Number(v));
@@ -129,6 +130,11 @@ export function renderPanel(detail, nowMs = Date.now()) {
   const foot = finite(d.startedAt)
     ? timeSpan(d.startedAt, nowMs, { pre: 'started ', post: ` ago · ${count} steps` })
     : `<span>${count} steps</span>`;
+  const footHtml = `<div class="foot">${foot}` +
+    (d.canOpen === false ? '' : '<button type="button" class="open" data-act="open">open window ↗</button>') + '</div>';
+  const sd = d.side && typeof d.side === 'object' ? d.side : null; // undefined or null: no tabs (Codex, or none)
+  const tabs = sd ? renderTabs(sd) : '';
+  const sideOn = sd?.tab === 'side';
   // data-key / data-deep: bootPanel patches this in place (hud.js patch), never replacing the card slot.
   return '<div class="fly" data-key="fly" data-deep>' +
     '<div class="fly-top" data-key="top">' +
@@ -137,16 +143,17 @@ export function renderPanel(detail, nowMs = Date.now()) {
       renderChip(d, nowMs) +
       '<button type="button" class="x" data-act="close" aria-label="Close">✕</button>' +
     '</div>' +
-    '<div class="det" data-key="det">' +
-      stuckLine(d, nowMs) +
-      finishedBlock(d) +
-      (d.stage === 'needs' && needsNote(d) ?`<div class="needs-note">${needsNote(d)}</div>` : '') +
-      '<p class="lbl">Task</p>' + task +
-      nowBlock(d, nowMs) +
-      list + help +
-      `<div class="foot">${foot}` +
-      (d.canOpen === false ? '' : '<button type="button" class="open" data-act="open">open window ↗</button>') + '</div>' +
-    '</div>' +
+    tabs +
+    (sideOn ? renderSideTab(sd, d.display, nowMs, footHtml.replace('<div class="foot">', '<div class="foot" data-key="foot">'))
+      : '<div class="det" data-key="det">' +
+        stuckLine(d, nowMs) +
+        finishedBlock(d) +
+        (d.stage === 'needs' && needsNote(d) ?`<div class="needs-note">${needsNote(d)}</div>` : '') +
+        '<p class="lbl">Task</p>' + task +
+        nowBlock(d, nowMs) +
+        list + help +
+        footHtml +
+      '</div>') +
   '</div>';
 }
 

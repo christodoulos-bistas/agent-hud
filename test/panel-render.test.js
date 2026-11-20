@@ -1,6 +1,7 @@
 import test from 'node:test'; import assert from 'node:assert/strict';
 import { renderPanel, renderStack, timeText, arrowOf, panelAction, createStackArming } from '../src/renderer/panel.js';
 import { ARM_MS } from '../src/renderer/cards.js';
+import { sideWhen } from '../src/renderer/side-tab.js';
 
 const NOW = 1_000_000_000;
 const XSS = '<img src=x onerror=alert(1)>';
@@ -323,4 +324,50 @@ test('a plan notice in the stack: read-only card, no ring, no countdown, no answ
   assert.match(h, /data-act="open-card"/);
   assert.doesNotMatch(h, /data-act="(answer|approve|keep)"|<input/);
   assert.ok(h.includes('Plan &lt;b&gt;') && !h.includes('Plan <b>'), 'escaped');
+});
+
+const side = (o = {}) => ({ tab: 'side', count: 2, dot: false, asking: null, healthy: true, focusAsk: null, entries: [
+  { id: 'v1', at: NOW - 3 * 3600000, source: 'vscode', question: 'what file?', response: '**agent-hud**' },
+  { id: 'h1', at: NOW - 120000, source: 'hud', question: XSS, response: null, error: 'Claude gave no answer' },
+], ...o });
+
+test('no side (Codex or none): no tabs, details as today', () => {
+  assert.ok(!renderPanel(detail(), NOW).includes('class="tabs"'));
+  assert.equal(renderPanel(detail({ side: null }), NOW), renderPanel(detail(), NOW));
+});
+test('Now tab: tabs with the count, details body', () => {
+  const h = renderPanel(detail({ side: side({ tab: 'now' }) }), NOW);
+  assert.match(h, /data-tab="side"[^>]*>Side questions <span class="n">2<\/span>/);
+  assert.match(h, /Recent steps/);
+});
+test('Side tab: thread, tags, markdown, error with retry, escaped question, ask box', () => {
+  const h = renderPanel(detail({ side: side() }), NOW);
+  assert.ok(!h.includes('Recent steps'));
+  assert.match(h, /<span class="tag vsc">VS Code<\/span> 3h ago/);
+  assert.match(h, /<b>agent-hud<\/b>/);
+  assert.match(h, /class="qa-a err">Claude gave no answer/);
+  assert.match(h, /data-act="side-retry" data-entry="h1"/);
+  assert.ok(h.includes('&lt;img') && !h.includes('<img'));
+  assert.match(h, /placeholder="Ask a follow-up…"/);
+  assert.match(h, /data-act="open"/); // footer stays
+});
+test('asking: thinking row, disabled box', () => {
+  const h = renderPanel(detail({ side: side({ asking: { question: 'is it safe?', at: NOW } }) }), NOW);
+  assert.match(h, /is it safe\?[^]*class="qa-a wait">thinking/);
+  assert.match(h, /<input[^>]*data-side-ask[^>]*disabled[^>]*placeholder="Waiting for the answer…"/);
+});
+test('empty and unhealthy lines', () => {
+  const h = renderPanel(detail({ display: 'arsenal', side: side({ count: 0, entries: [], healthy: false }) }), NOW);
+  assert.match(h, /None yet\. Ask one, or use \/btw in VS Code: those show up here too\./);
+  assert.match(h, /Can't read VS Code side questions right now\./);
+  assert.match(h, /placeholder="Ask arsenal on the side…"/);
+});
+test('sideWhen', () => {
+  assert.equal(sideWhen(NOW - 5000, NOW), 'now');
+  assert.equal(sideWhen(NOW - 120000, NOW), '2m ago');
+  assert.equal(sideWhen(Date.UTC(2026, 10, 19, 12), Date.UTC(2026, 10, 21, 12)), '19 Nov');
+});
+test('side tab keys: tabs, side body, ask box, entries, pending', () => {
+  const h = renderPanel(detail({ side: side({ asking: { question: 'q?', at: NOW } }) }), NOW);
+  for (const k of ['tabs', 'side', 'side-ask', 'qa:v1', 'qa:h1', 'qa:pending']) assert.ok(h.includes('data-key="' + k + '"'), k);
 });
