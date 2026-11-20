@@ -51,3 +51,11 @@ test('reader: a db with no matching rows is healthy; listDbs throwing is unhealt
   const r2 = createVscodeReader({ root: 'r', listDbs: () => { throw new Error('x'); } });
   assert.deepEqual(await r2.pass(), { items: [], healthy: false });
 });
+test('reader: a shape-changed db stays unhealthy across skipped passes until it reads well', async () => {
+  let m = 1; let rows = ['{"x":"sideQuestionThreads"}'];
+  const reader = createVscodeReader({ root: 'r', listDbs: () => ['a'], statMtime: () => m, openDb: async () => rows });
+  assert.equal((await reader.pass()).healthy, false);
+  assert.equal((await reader.pass()).healthy, false);
+  m = 2; rows = [editorPart(panelState(THREADS))];
+  assert.equal((await reader.pass()).healthy, true);
+});

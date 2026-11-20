@@ -66,6 +66,7 @@ export function createVscodeReader({
 } = {}) {
   const lastMtime = new Map();
   const failures = new Map();
+  const badShape = new Set();
 
   async function pass() {
     const items = [];
@@ -77,17 +78,20 @@ export function createVscodeReader({
           const mtime = statMtime(p);
           if (lastMtime.get(p) === mtime) continue;
           const rows = await openDb(p);
+          let bad = false;
           for (const row of rows) {
             const r = extractThreads(row);
-            if (r.found === 0) healthy = false;
+            if (r.found === 0) bad = true;
             items.push(...r.items);
           }
+          if (bad) badShape.add(p); else badShape.delete(p);
           lastMtime.set(p, mtime);
           failures.delete(p);
         } catch {
           failures.set(p, (failures.get(p) || 0) + 1);
         }
       }
+      if (badShape.size) healthy = false;
       for (const n of failures.values()) if (n >= failLimit) healthy = false;
     } catch {
       return { items: [], healthy: false };
