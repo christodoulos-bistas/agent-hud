@@ -513,3 +513,40 @@ result; write what you saw in the table at the end. Checks 1, 2 and 5 need your 
 | 7 | Quit mid-ask | no leftover HUD child `claude`; no session file with `agent-hud-side` | | |
 | 8 | ? vs chip | ? left of the ✕, chip not covered | | |
 | 9 | Bulleted answer | rendered as a list in the Side questions tab | | |
+
+## Live check - hooks follow the HUD (v1.6)
+
+The HUD now takes its Claude hooks out of the settings file when it quits (and on Windows logoff) and puts them
+back when it starts, unless you removed them from the tray. Run it with the **dev HUD** so only the spike folder's
+settings file is touched (`npm run dev` points the hooks at
+`C:\Consortis_projects\agent-hud-spike\.claude\settings.local.json`).
+
+Setup (PowerShell, from the repo):
+
+```powershell
+Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+$env:AGENT_HUD_USER_DATA = "$env:TEMP\agent-hud-dev"; $env:AGENT_HUD_PORT = '47911'; $env:AGENT_HUD_DEBUG = '1'
+npm run dev
+```
+
+Quit it from its tray (**Quit**), start it again with `npm run dev`. Use a throwaway chat opened in
+`C:\Consortis_projects\agent-hud-spike` in each host; never a real project chat.
+
+Already verified by the controller (20 Nov 2026): in a long-lived headless session, hooks added mid-session fired on
+the next turn with no prompt, hooks removed mid-session went silent, and the dev HUD added its hooks ~2 s after start
+and removed them ~1 s after `--quit`, with no `.bak` change.
+
+For each host (CLI `claude` in a terminal, VS Code panel, Claude desktop app):
+
+1. Dev HUD running, send a message: the chat's row updates.
+2. Quit the dev HUD, send a message: **no** red `hook failed` line (CLI) / no "hook gave no usable answer" or
+   "stop hook reported a problem" notice (apps).
+3. Start the dev HUD, send a message **in the same chat without restarting it**: the row updates.
+4. Tray **Remove hooks**, quit, start again: `settings.local.json` has no `/agent-hud/` lines and stays that way.
+   Then tray **Install hooks** to put them back.
+
+| Host | 1 row updates | 2 quiet when closed | 3 back without restart | 4 removal sticks | Notes |
+| --- | --- | --- | --- | --- | --- |
+| CLI | | | | | |
+| VS Code panel | | | | | |
+| Claude desktop | | | | | |

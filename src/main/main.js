@@ -23,7 +23,7 @@ import { createSideLog } from './side-log.js';
 import { createSideQuestions } from './side-questions.js';
 import { createVscodeReader, VSCODE_STORAGE } from './vscode-threads.js';
 import { openCommandFor, resolveCodeCmd, canOpen, CODEX_ACTIVATE, chatLinkFor, createChatOpener, VSCODE_TITLES_PS } from './focus.js';
-import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, panelShows, createThrottle, createInteractiveCheck, loadConfig, saveConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, devOverrides, planFileOk } from './wiring.js';
+import { encodeAnswer, placeBounds, anchorFrom, anchorPoint, snapBounds, isAnchor, panelBounds, STACK_INIT, stackUpdate, stackExpand, stackHide, stackShow, userSelect, panelShows, createThrottle, createInteractiveCheck, loadConfig, saveConfig, soundFileOk, readSoundFile, settingsTarget, codexTarget, codexOfferDue, codexTrustDue, codexStatus, codexStatusLabel, removeHooksCli, guarded, releaseFocusOf, closeApplies, devOverrides, planFileOk, hooksWanted, hookSync, forgetHooks } from './wiring.js';
 
 const SRC = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const INDEX = path.join(SRC, 'renderer', 'index.html');
@@ -477,6 +477,8 @@ function createWindow() {
   win.once('ready-to-show', showWindow);
   win.on('moved', rememberPosition);
   win.on('close', (e) => { if (!quitting) { e.preventDefault(); hideWindow(); } });
+  // Windows logoff or shutdown may end the app without quit(): the Claude hooks go now (best effort).
+  win.on('session-end', () => syncHooks('quit'));
   dock();
   win.loadFile(INDEX);
 }
@@ -827,12 +829,40 @@ async function confirmCodexInstall({ firstRun }) {
   return response === 0;
 }
 
+// Whether the user wants the Claude hooks (claudeHooksWanted), saved whenever they choose.
+function setHooksWanted(on) {
+  cfg.claudeHooksWanted = !!on;
+  try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
+}
+
+// The Claude hooks follow the HUD: back in on start, out on quit and Windows logoff, unless the user removed
+// them. Quiet (no balloon, no .bak); a failure is only logged and the tray's status line tells the truth.
+// Synchronous and never throws: it runs while quitting and from session-end.
+let hooksOut = false; // the quit-side removal ran (quit and session-end can both fire)
+function syncHooks(phase) {
+  try {
+    if (!cfg) return;
+    if (phase === 'quit' && hooksOut) return;
+    const { wanted } = hooksWanted(cfg, claudeInstalled());
+    const act = hookSync({ phase, wanted, blocked: TARGET.blocked });
+    if (phase === 'quit') hooksOut = true;
+    if (!act) return;
+    const r = act === 'install'
+      ? installHooks(SETTINGS_PATH, { port: hookPort(), secret: cfg.secret }, { backup: false })
+      : uninstallHooks(SETTINGS_PATH, { backup: false });
+    if (!r.ok) log(`hooks ${act} on ${phase}`, SETTINGS_PATH, r.error);
+    else debug('hooks', act, phase, r.changed ? 'changed' : 'unchanged');
+    if (phase === 'start') refreshMenu();
+  } catch (err) { log('hooks', phase, err); }
+}
+
 function doInstall() {
   if (TARGET.blocked) return;
   const r = installHooks(SETTINGS_PATH, { port: hookPort(), secret: cfg.secret });
+  if (r.ok) setHooksWanted(true);
   if (!r.ok) notify('Could not install the hooks', `${SETTINGS_PATH}: ${r.error}`, true);
   else if (!r.changed) notify('Agent HUD hooks already installed', `${SETTINGS_PATH} was left as it is.`);
-  else notify('Agent HUD hooks installed', `Added to ${SETTINGS_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}\nChats you already have open start reporting after a restart.`);
+  else notify('Agent HUD hooks installed', `Added to ${SETTINGS_PATH}${r.backup ? `\nBackup: ${r.backup}` : ''}`);
 }
 function doCodexInstall() {
   if (CODEX.blocked) return;
@@ -856,6 +886,7 @@ function doUninstall() {
   if (devBlocked()) return;
   if (!TARGET.blocked) {
     const r = uninstallHooks(SETTINGS_PATH);
+    if (r.ok) setHooksWanted(false); // removed on purpose: a restart doesn't bring them back
     if (!r.ok) notify('Could not remove the hooks', `${SETTINGS_PATH}: ${r.error}`, true);
     else if (!r.changed) notify('No Agent HUD hooks to remove', `${SETTINGS_PATH} was left as it is.`);
     else notify('Agent HUD hooks removed', `Removed from ${SETTINGS_PATH}`);
@@ -1022,7 +1053,7 @@ async function firstRun() {
     const yes = await confirmInstall({ firstRun: true });
     cfg.offeredHooks = true;
     try { saveConfig(configFile, cfg); } catch (err) { log('config', err); }
-    if (yes) doInstall();
+    if (yes) doInstall(); else setHooksWanted(false);
     refreshMenu();
   }
   // The Codex-only offer, independent of the Claude one; asked once whether the user accepts or declines.
@@ -1049,6 +1080,7 @@ function quit() {
     quitting = Promise.race([Promise.all([closing, stopping]), new Promise((r) => setTimeout(r, QUIT_GRACE_MS))])
       .catch((err) => log('quit', err))
       .finally(() => {
+        syncHooks('quit'); // the server is closed and holds released: the Claude hooks go until the next start
         try { tray?.destroy(); } catch { /* exiting anyway */ }
         app.exit(0);
       });
@@ -1060,6 +1092,9 @@ async function start() {
   Menu.setApplicationMenu(null);
   configFile = path.join(app.getPath('userData'), 'config.json');
   cfg = loadConfig(configFile);
+  // A config from before claudeHooksWanted: the hooks installed now are the user's choice.
+  const choice = hooksWanted(cfg, claudeInstalled());
+  if (choice.migrate) setHooksWanted(choice.wanted);
   debug('config', configFile, 'settings', SETTINGS_PATH, 'codex', CODEX_PATH);
   createTray();
   createWindow();
@@ -1072,6 +1107,7 @@ async function start() {
   setInterval(refreshMenu, 30000); // hook status lines follow edits made outside the HUD (e.g. approval in Codex Settings → Hooks)
   await startServer();
   await firstRun();
+  syncHooks('start'); // after firstRun, so a first-run "No" is honoured
   if (!upgradeCodexHooks() && codexTrustDue({ cfg, target: CODEX, missing: codexState().missing })) trustCodex({ reason: 'startup' });
 }
 
@@ -1087,6 +1123,11 @@ if (devFailed) {
     codex: { target: CODEX, uninstall: (f) => removeCodexHooksFile(f, CODEX_COMMAND) },
   });
   for (const m of removed.messages) log('--remove-hooks:', m);
+  // A real uninstall (updates skip it): not wanted any more, and a later reinstall asks again.
+  try {
+    const file = path.join(app.getPath('userData'), 'config.json');
+    if (fs.existsSync(file)) saveConfig(file, forgetHooks(loadConfig(file)));
+  } catch (err) { log('--remove-hooks: config', err); }
   app.exit(0);
 } else if (!app.requestSingleInstanceLock({ quit: WANT_QUIT })) {
   log('another Agent HUD holds the single-instance lock: handing over to it');
