@@ -6,6 +6,8 @@ import path from 'node:path';
 export const VSCODE_STORAGE = (appData) => path.join(appData, 'Code', 'User', 'workspaceStorage');
 
 const isObj = (v) => v !== null && typeof v === 'object';
+// `"sideQuestionThreads":` at any escape depth (`\"`, `\\\"`, …): the name used as a JSON key.
+const THREADS_KEY = /sideQuestionThreads\\*"\s*:/;
 
 export function extractThreads(value) {
   const out = { found: 0, items: [] };
@@ -20,7 +22,8 @@ export function extractThreads(value) {
       return;
     }
     if (!isObj(node)) return;
-    if (!Array.isArray(node) && isObj(node.sideQuestionThreads) && !Array.isArray(node.sideQuestionThreads)) {
+    const has = !Array.isArray(node) && isObj(node.sideQuestionThreads) && !Array.isArray(node.sideQuestionThreads);
+    if (has) {
       out.found += 1;
       for (const [key, thread] of Object.entries(node.sideQuestionThreads)) {
         if (!isObj(thread) || !Array.isArray(thread.entries)) continue;
@@ -32,7 +35,8 @@ export function extractThreads(value) {
         }
       }
     }
-    for (const v of Object.values(node)) walk(v, depth + 1);
+    // Never into the threads object itself: an answer quoting JSON must not add threads of its own.
+    for (const [k, v] of Object.entries(node)) if (!(has && k === 'sideQuestionThreads')) walk(v, depth + 1);
   };
   try { walk(value, 0); } catch { return { found: 0, items: [] }; }
   return out;
@@ -73,6 +77,9 @@ export function createVscodeReader({
     let healthy = true;
     try {
       const dbs = await listDbs(root);
+      // A workspace that went (its folder deleted) leaves no state behind: no health line for good.
+      const live = new Set(dbs);
+      for (const m of [lastMtime, failures, badShape]) for (const p of [...m.keys()]) if (!live.has(p)) m.delete(p);
       for (const p of dbs) {
         try {
           const mtime = statMtime(p);
@@ -81,7 +88,9 @@ export function createVscodeReader({
           let bad = false;
           for (const row of rows) {
             const r = extractThreads(row);
-            if (r.found === 0) bad = true;
+            // Only a row holding the name as a JSON key is a thread store; one that merely mentions it
+            // (search or find history) is ignored.
+            if (r.found === 0 && THREADS_KEY.test(row)) bad = true;
             items.push(...r.items);
           }
           if (bad) badShape.add(p); else badShape.delete(p);
